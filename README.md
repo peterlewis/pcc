@@ -1,6 +1,8 @@
 # PCC — Precision Clock Companion
 
-A native macOS menu bar app for the [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_4_user_manual) by mitxela. Communicates over USB serial to control the clock's display, brightness, modes, and more.
+A native macOS menu bar app for the [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_4_user_manual) by [mitxela](https://mitxela.com). Communicates over USB serial to control the clock's display, brightness, modes, and more.
+
+> **Note:** This is an independent, community-built companion app. It is not officially endorsed by or affiliated with mitxela or the Precision Clock Mk IV project.
 
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue) ![Swift 5.9+](https://img.shields.io/badge/Swift-5.9%2B-orange)
 
@@ -49,6 +51,11 @@ All commands are `key = value\r\n`, case insensitive, temporary until power cycl
 ## Dependencies
 
 - [ORSSerialPort](https://github.com/armadsen/ORSSerialPort) — serial communication (SPM)
+
+## Related
+
+- [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_4_user_manual) — official project documentation
+- [GitHub](https://github.com/mitxela/clock4) — hardware design and firmware source
 
 ## License
 
