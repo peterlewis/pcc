@@ -16,20 +16,35 @@ struct DataSource: Codable, Identifiable {
     var endpoint: String          // URL for REST, shell command for bash
     var jsonKeyPath: String       // dot-separated path to extract from JSON response (REST only)
     var displayFormat: String     // e.g. "{v} stars" — {v} is replaced with the value
+    var headers: String           // HTTP headers for REST, one per line as "Key: Value"
     var pollInterval: TimeInterval
     var isEnabled: Bool
 
     init(id: UUID = UUID(), name: String = "", type: DataSourceType = .restAPI,
          endpoint: String = "", jsonKeyPath: String = "", displayFormat: String = "",
-         pollInterval: TimeInterval = 60, isEnabled: Bool = true) {
+         headers: String = "", pollInterval: TimeInterval = 60, isEnabled: Bool = true) {
         self.id = id
         self.name = name
         self.type = type
         self.endpoint = endpoint
         self.jsonKeyPath = jsonKeyPath
         self.displayFormat = displayFormat
+        self.headers = headers
         self.pollInterval = pollInterval
         self.isEnabled = isEnabled
+    }
+
+    /// Parse the headers string into key-value pairs.
+    var parsedHeaders: [(String, String)] {
+        headers.components(separatedBy: .newlines).compactMap { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty,
+                  let colonIndex = trimmed.firstIndex(of: ":") else { return nil }
+            let key = trimmed[trimmed.startIndex..<colonIndex].trimmingCharacters(in: .whitespaces)
+            let value = trimmed[trimmed.index(after: colonIndex)...].trimmingCharacters(in: .whitespaces)
+            guard !key.isEmpty else { return nil }
+            return (key, value)
+        }
     }
 }
 
@@ -217,9 +232,23 @@ class DataSourceManager: NSObject, ObservableObject {
             DispatchQueue.main.async { self.lastErrors[source.id] = "Invalid URL" }
             return
         }
+        var request = URLRequest(url: url)
+        for (key, value) in source.parsedHeaders {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
         Task {
             do {
-                let (data, _) = try await URLSession.shared.data(from: url)
+                let (data, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                    let msg: String
+                    if http.statusCode == 429 || (http.statusCode == 403 && http.value(forHTTPHeaderField: "X-RateLimit-Remaining") == "0") {
+                        msg = "Rate limited (HTTP \(http.statusCode))"
+                    } else {
+                        msg = "HTTP \(http.statusCode)"
+                    }
+                    await MainActor.run { self.lastErrors[source.id] = msg }
+                    return
+                }
                 let result = Self.extractValue(from: data, keyPath: source.jsonKeyPath)
                 await MainActor.run { self.processResult(result, for: source.id) }
             } catch {

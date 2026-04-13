@@ -386,24 +386,31 @@ private struct SignalBars: View {
     }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .bottom, spacing: 3) {
+        GeometryReader { geo in
+            let count = max(sorted.count, 1)
+            let spacing: CGFloat = 2
+            let barWidth = max(6, min(14, (geo.size.width - spacing * CGFloat(count - 1)) / CGFloat(count)))
+            let showLabels = barWidth >= 10
+            HStack(alignment: .bottom, spacing: spacing) {
                 ForEach(sorted) { sat in
                     VStack(spacing: 1) {
-                        if let snr = sat.snr, snr > 0 {
+                        if showLabels, let snr = sat.snr, snr > 0 {
                             Text("\(snr)")
                                 .font(.system(size: 7))
                                 .foregroundStyle(.secondary)
                         }
                         RoundedRectangle(cornerRadius: 1)
                             .fill(barColor(sat))
-                            .frame(width: 14, height: barHeight(sat))
-                        Text(sat.id)
-                            .font(.system(size: 6))
-                            .foregroundStyle(.secondary)
+                            .frame(width: barWidth, height: barHeight(sat))
+                        if showLabels {
+                            Text(sat.id)
+                                .font(.system(size: 6))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
+            .frame(maxWidth: .infinity)
             .padding(.vertical, 4)
         }
     }

@@ -252,6 +252,18 @@ struct DataSourceEditView: View {
                         Text("Dot-separated path to extract from JSON response. Leave blank for plain text APIs.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        Text("Headers")
+                            .foregroundStyle(.secondary)
+                        TextEditor(text: $source.headers)
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(height: 48)
+                            .scrollContentBackground(.hidden)
+                            .padding(4)
+                            .background(.quaternary.opacity(0.5))
+                            .cornerRadius(4)
+                        Text("One per line as Key: Value. e.g. Authorization: Bearer ghp_...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     } else {
                         TextField("Command", text: $source.endpoint,
                                   prompt: Text("uptime | awk '{print $3}'"))
@@ -356,7 +368,24 @@ struct DataSourceEditView: View {
             }
             Task {
                 do {
-                    let (data, _) = try await URLSession.shared.data(from: url)
+                    var request = URLRequest(url: url)
+                    for (key, value) in source.parsedHeaders {
+                        request.setValue(value, forHTTPHeaderField: key)
+                    }
+                    let (data, response) = try await URLSession.shared.data(for: request)
+                    if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                        let msg: String
+                        if http.statusCode == 429 || (http.statusCode == 403 && http.value(forHTTPHeaderField: "X-RateLimit-Remaining") == "0") {
+                            msg = "Rate limited (HTTP \(http.statusCode)). Try increasing the poll interval."
+                        } else {
+                            msg = "HTTP \(http.statusCode)"
+                        }
+                        await MainActor.run {
+                            testError = msg
+                            isTesting = false
+                        }
+                        return
+                    }
                     let value = DataSourceManager.extractValue(from: data, keyPath: source.jsonKeyPath)
                     await MainActor.run {
                         if let value, !value.isEmpty { testResult = value }
