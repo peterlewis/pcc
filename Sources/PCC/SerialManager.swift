@@ -18,6 +18,26 @@ class SerialManager: NSObject, ObservableObject {
     @Published var lastError: String?
     @Published var activeDisplayMode: DisplayMode = .none
 
+    /// Switch display mode, cleaning up the previous mode on the clock first.
+    func activateDisplayMode(_ mode: DisplayMode) {
+        guard mode != activeDisplayMode else { return }
+        // Tear down previous mode
+        switch activeDisplayMode {
+        case .text, .dataSource:
+            sendCommand("mode_text = 0")
+        case .countdown:
+            sendCommand("mode_countdown = 0")
+        case .weather, .none:
+            break
+        }
+        activeDisplayMode = mode
+    }
+
+    // Serial monitor
+    @Published var serialLog: String = ""
+    var serialLogEnabled = false
+    private var serialLineBuffer = Data()
+
     private let portManager = ORSSerialPortManager.shared()
     private var lastConnectedPath: String?
     private var shouldAutoReconnect = false
@@ -217,6 +237,28 @@ extension SerialManager: ORSSerialPortDelegate {
     }
 
     func serialPort(_ serialPort: ORSSerialPort, didReceive data: Data) {
-        // Not processing incoming data for now
+        guard serialLogEnabled else { return }
+        serialLineBuffer.append(data)
+
+        // Process complete lines (delimited by \n)
+        while let newlineIndex = serialLineBuffer.firstIndex(of: 0x0A) {
+            let lineData = serialLineBuffer[serialLineBuffer.startIndex...newlineIndex]
+            if let line = String(data: lineData, encoding: .utf8) {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.serialLog.append(line)
+                    // Cap at ~50 KB to avoid unbounded growth
+                    if self.serialLog.count > 50_000 {
+                        self.serialLog = String(self.serialLog.suffix(40_000))
+                    }
+                }
+            }
+            serialLineBuffer.removeSubrange(serialLineBuffer.startIndex...newlineIndex)
+        }
+    }
+
+    func clearSerialLog() {
+        serialLog = ""
+        serialLineBuffer.removeAll()
     }
 }

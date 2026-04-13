@@ -9,6 +9,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case brightness = "Brightness"
     case modes = "Modes"
     case diagnostics = "Diagnostics"
+    case serialMonitor = "Serial Monitor"
     case advanced = "Advanced"
     case updates = "Updates"
 
@@ -23,11 +24,16 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .countdown:   return "timer"
         case .brightness:  return "sun.max"
         case .modes:       return "list.bullet"
-        case .diagnostics: return "gauge"
-        case .advanced:    return "slider.horizontal.3"
+        case .diagnostics:    return "gauge"
+        case .serialMonitor:  return "terminal"
+        case .advanced:       return "slider.horizontal.3"
         case .updates:     return "arrow.triangle.2.circlepath"
         }
     }
+}
+
+extension Notification.Name {
+    static let navigateToPanel = Notification.Name("navigateToPanel")
 }
 
 struct ContentView: View {
@@ -50,6 +56,7 @@ struct ContentView: View {
                     sidebarRow(.brightness)
                     sidebarRow(.modes)
                     sidebarRow(.diagnostics)
+                    sidebarRow(.serialMonitor)
                     sidebarRow(.advanced)
                     sidebarRow(.updates)
                 }
@@ -82,8 +89,9 @@ struct ContentView: View {
                 case .dataSources:  DataSourcesView()
                 case .brightness:  BrightnessView()
                 case .modes:       ModesView()
-                case .diagnostics: DiagnosticsView()
-                case .advanced:    ClockSettingsView()
+                case .diagnostics:    DiagnosticsView()
+                case .serialMonitor: SerialMonitorView()
+                case .advanced:      ClockSettingsView()
                 case .updates:     UpdatesView()
                 case nil:          Text("Select a panel")
                 }
@@ -91,6 +99,11 @@ struct ContentView: View {
             .frame(minWidth: 300)
         }
         .navigationTitle("Precision Clock Companion")
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToPanel)) { notification in
+            if let item = notification.object as? SidebarItem {
+                selectedItem = item
+            }
+        }
     }
 
     @ViewBuilder

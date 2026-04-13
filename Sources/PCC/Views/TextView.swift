@@ -4,7 +4,20 @@ struct ClockTextView: View {
     @EnvironmentObject var serialManager: SerialManager
     @EnvironmentObject var settings: AppSettings
     @State private var text = ""
-    @State private var textModeEnabled = false
+
+    private var textModeBinding: Binding<Bool> {
+        Binding(
+            get: { serialManager.activeDisplayMode == .text },
+            set: { enabled in
+                if enabled {
+                    serialManager.activateDisplayMode(.text)
+                    serialManager.sendCommand("mode_text = 1")
+                } else {
+                    serialManager.activateDisplayMode(.none)
+                }
+            }
+        )
+    }
 
     var body: some View {
         Form {
@@ -30,11 +43,7 @@ struct ClockTextView: View {
                         .disabled(text.isEmpty || !serialManager.isConnected)
                 }
 
-                Toggle("Text mode enabled", isOn: $textModeEnabled)
-                    .onChange(of: textModeEnabled) { newValue in
-                        serialManager.sendCommand("mode_text = \(newValue ? 1 : 0)")
-                        serialManager.activeDisplayMode = newValue ? .text : .none
-                    }
+                Toggle("Text mode enabled", isOn: textModeBinding)
             }
 
             if !settings.recentTexts.isEmpty {
@@ -71,10 +80,9 @@ struct ClockTextView: View {
 
     private func sendText() {
         guard !text.isEmpty, serialManager.isConnected else { return }
-        if !textModeEnabled {
-            textModeEnabled = true
+        if serialManager.activeDisplayMode != .text {
+            serialManager.activateDisplayMode(.text)
             serialManager.sendCommand("mode_text = 1")
-            serialManager.activeDisplayMode = .text
         }
         serialManager.sendScrollingText(text)
         settings.addRecentText(text)

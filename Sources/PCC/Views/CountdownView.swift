@@ -3,7 +3,10 @@ import SwiftUI
 struct CountdownView: View {
     @EnvironmentObject var serialManager: SerialManager
     @State private var targetDate = Date().addingTimeInterval(3600)
-    @State private var isCountdownActive = false
+
+    private var isCountdownActive: Bool {
+        serialManager.activeDisplayMode == .countdown
+    }
 
     private static let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -30,16 +33,13 @@ struct CountdownView: View {
                     Button("Start Countdown") {
                         let utc = Self.isoFormatter.string(from: targetDate)
                         serialManager.sendCommand("countdown_to = \(utc)")
+                        serialManager.activateDisplayMode(.countdown)
                         serialManager.sendCommand("mode_countdown = 1")
-                        isCountdownActive = true
-                        serialManager.activeDisplayMode = .countdown
                     }
                     .disabled(!serialManager.isConnected)
 
                     Button("Stop", role: .destructive) {
-                        serialManager.sendCommand("mode_countdown = 0")
-                        isCountdownActive = false
-                        serialManager.activeDisplayMode = .none
+                        serialManager.activateDisplayMode(.none)
                     }
                     .disabled(!serialManager.isConnected || !isCountdownActive)
                 }

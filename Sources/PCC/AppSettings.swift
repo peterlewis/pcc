@@ -59,6 +59,9 @@ class AppSettings: ObservableObject {
     @Published var recentTexts: [String] {
         didSet { UserDefaults.standard.set(recentTexts, forKey: "recentTexts") }
     }
+    @Published var configWriteEnabled: Bool {
+        didSet { UserDefaults.standard.set(configWriteEnabled, forKey: "configWriteEnabled") }
+    }
 
     init() {
         let d = UserDefaults.standard
@@ -77,6 +80,7 @@ class AppSettings: ObservableObject {
         }()
         self.weatherDisplayFormat = WeatherDisplayFormat(rawValue: d.string(forKey: "weatherDisplayFormat") ?? "") ?? .temperatureConditions
         self.recentTexts = d.stringArray(forKey: "recentTexts") ?? []
+        self.configWriteEnabled = d.bool(forKey: "configWriteEnabled")
     }
 
     func addRecentText(_ text: String) {

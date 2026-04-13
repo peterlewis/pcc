@@ -76,6 +76,16 @@ class DataSourceManager: NSObject, ObservableObject {
 
     // MARK: Enable / disable
 
+    /// Re-take the display when data sources are running but another mode overrode them.
+    func resumeDisplay() {
+        guard isActive, let sm = serialManager,
+              let source = currentDisplayedSource,
+              let value = lastValues[source.id] else { return }
+        sm.activateDisplayMode(.dataSource)
+        sm.sendCommand("mode_text = 1")
+        sm.sendScrollingText(value)
+    }
+
     func setEnabled(_ enabled: Bool) {
         isActive = enabled
         save()
@@ -83,8 +93,9 @@ class DataSourceManager: NSObject, ObservableObject {
             startAll()
         } else {
             stopAll()
-            serialManager?.sendCommand("mode_text = 0")
-            serialManager?.activeDisplayMode = .none
+            if serialManager?.activeDisplayMode == .dataSource {
+                serialManager?.activateDisplayMode(.none)
+            }
         }
     }
 
@@ -165,8 +176,9 @@ class DataSourceManager: NSObject, ObservableObject {
 
         let sources = enabledSources
         guard !sources.isEmpty else {
-            serialManager?.sendCommand("mode_text = 0")
-            serialManager?.activeDisplayMode = .none
+            if serialManager?.activeDisplayMode == .dataSource {
+                serialManager?.activateDisplayMode(.none)
+            }
             return
         }
 
@@ -295,9 +307,13 @@ class DataSourceManager: NSObject, ObservableObject {
     }
 
     private func sendToDisplay(_ value: String) {
-        serialManager?.sendCommand("mode_text = 1")
-        serialManager?.activeDisplayMode = .dataSource
-        serialManager?.sendScrollingText(value)
+        guard let sm = serialManager else { return }
+        // Don't override if another mode (text, countdown) is explicitly active
+        let current = sm.activeDisplayMode
+        guard current == .dataSource || current == .none else { return }
+        sm.activateDisplayMode(.dataSource)
+        sm.sendCommand("mode_text = 1")
+        sm.sendScrollingText(value)
     }
 
     static func applyFormat(_ value: String, format: String) -> String {

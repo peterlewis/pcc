@@ -1,8 +1,14 @@
 import SwiftUI
 
-struct BrightnessPoint: Equatable {
+struct BrightnessPoint: Equatable, Codable {
     var adc: Int
     var dac: Int
+}
+
+struct CustomBrightnessPreset: Identifiable, Codable {
+    var id = UUID()
+    var name: String
+    var points: [BrightnessPoint]
 }
 
 enum CurvePreset: String, CaseIterable {
@@ -33,13 +39,21 @@ enum CurvePreset: String, CaseIterable {
 
 struct BrightnessView: View {
     @EnvironmentObject var serialManager: SerialManager
+    @EnvironmentObject var configManager: ConfigManager
+    @EnvironmentObject var settings: AppSettings
     @State private var brightness: Double = 0.5
     @State private var isManual = false
     @State private var needsReboot = false
+    @State private var savedToConfig = false
 
     // Brightness curve
     @State private var curvePoints: [BrightnessPoint] = CurvePreset.revD.points
     @State private var draggingIndex: Int?
+
+    // Custom presets
+    @State private var customPresets: [CustomBrightnessPreset] = []
+    @State private var showingSavePreset = false
+    @State private var newPresetName = ""
 
     var body: some View {
         ScrollView {
@@ -47,6 +61,69 @@ struct BrightnessView: View {
                 manualOverrideSection
                 curveSection
             }
+        }
+        .onAppear {
+            loadFromConfig()
+            loadCustomPresets()
+        }
+        .alert("Save Preset", isPresented: $showingSavePreset) {
+            TextField("Preset name", text: $newPresetName)
+            Button("Save") {
+                saveCurrentAsPreset()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Enter a name for this brightness curve preset.")
+        }
+    }
+
+    // MARK: - Custom Presets
+
+    private func loadCustomPresets() {
+        guard let data = UserDefaults.standard.data(forKey: "customBrightnessPresets"),
+              let presets = try? JSONDecoder().decode([CustomBrightnessPreset].self, from: data)
+        else { return }
+        customPresets = presets
+    }
+
+    private func saveCustomPresets() {
+        if let data = try? JSONEncoder().encode(customPresets) {
+            UserDefaults.standard.set(data, forKey: "customBrightnessPresets")
+        }
+    }
+
+    private func saveCurrentAsPreset() {
+        guard !newPresetName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        let preset = CustomBrightnessPreset(name: newPresetName.trimmingCharacters(in: .whitespaces), points: curvePoints)
+        customPresets.append(preset)
+        saveCustomPresets()
+    }
+
+    private func deletePreset(_ preset: CustomBrightnessPreset) {
+        customPresets.removeAll { $0.id == preset.id }
+        saveCustomPresets()
+    }
+
+    // MARK: - Config
+
+    private func loadFromConfig() {
+        guard configManager.isLoaded else { return }
+        var loaded = [BrightnessPoint]()
+        for i in 1...5 {
+            if let pair = configManager.intPair(forKey: "BS\(i)") {
+                loaded.append(BrightnessPoint(adc: pair.0, dac: pair.1))
+            }
+        }
+        if loaded.count == 5 { curvePoints = loaded }
+    }
+
+    private func saveCurveToConfig() {
+        for (i, p) in curvePoints.enumerated() {
+            configManager.setValue("BS\(i+1)", to: "\(p.adc),\(p.dac)")
+        }
+        if configManager.save() {
+            savedToConfig = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { savedToConfig = false }
         }
     }
 
@@ -156,20 +233,64 @@ struct BrightnessView: View {
 
                 HStack {
                     Menu("Presets") {
-                        ForEach(CurvePreset.allCases, id: \.self) { preset in
-                            Button(preset.rawValue) {
-                                curvePoints = preset.points
+                        Section("Factory") {
+                            ForEach(CurvePreset.allCases, id: \.self) { preset in
+                                Button(preset.rawValue) {
+                                    curvePoints = preset.points
+                                }
                             }
+                        }
+                        if !customPresets.isEmpty {
+                            Section("Custom") {
+                                ForEach(customPresets) { preset in
+                                    Menu(preset.name) {
+                                        Button("Load") {
+                                            curvePoints = preset.points
+                                        }
+                                        Divider()
+                                        Button("Delete", role: .destructive) {
+                                            deletePreset(preset)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Divider()
+                        Button("Revert to Saved") {
+                            loadFromConfig()
+                        }
+                        .disabled(!configManager.isLoaded)
+                        Button("Save Current as Preset\u{2026}") {
+                            newPresetName = ""
+                            showingSavePreset = true
                         }
                     }
                     Spacer()
-                    Button("Send All") {
+                    if savedToConfig {
+                        Label("Saved", systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
+                    if configManager.hasPreviousConfig {
+                        Button("Undo Save") {
+                            if configManager.restorePrevious() { loadFromConfig() }
+                        }
+                    }
+                    Button("Save") {
+                        saveCurveToConfig()
+                    }
+                    .disabled(!configManager.clockMounted || !settings.configWriteEnabled)
+                    Button("Apply") {
                         for (i, p) in curvePoints.enumerated() {
                             serialManager.sendCommand("BS\(i+1) = \(p.adc),\(p.dac)")
                         }
                     }
                     .disabled(!serialManager.isConnected)
                 }
+
+                Text("Apply sends the current curve to the clock. Settings reset on power cycle unless saved.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             .padding(4)
         }

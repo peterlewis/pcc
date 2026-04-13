@@ -2,12 +2,15 @@ import SwiftUI
 
 struct ModesView: View {
     @EnvironmentObject var serialManager: SerialManager
+    @EnvironmentObject var configManager: ConfigManager
+    @EnvironmentObject var settings: AppSettings
 
     @State private var enabledModes: Set<String> = [
         "MODE_ISO8601_STD", "MODE_SHOW_OFFSET", "MODE_SHOW_TZ_NAME"
     ]
     @State private var colonMode = "slowfade"
     @State private var standbyEnabled = false
+    @State private var savedToConfig = false
 
     private struct ModeItem: Identifiable {
         let id: String
@@ -97,16 +100,65 @@ struct ModesView: View {
             }
 
             Section {
-                Button("Send All Modes") {
-                    sendAllModes()
+                HStack {
+                    Button("Apply") {
+                        sendAllModes()
+                    }
+                    .disabled(!serialManager.isConnected)
+                    Spacer()
+                    if savedToConfig {
+                        Label("Saved", systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
+                    if configManager.hasPreviousConfig {
+                        Button("Undo Save") {
+                            if configManager.restorePrevious() { loadFromConfig() }
+                        }
+                    }
+                    Button("Revert") {
+                        loadFromConfig()
+                    }
+                    .disabled(!configManager.isLoaded)
+                    Button("Save") {
+                        saveModesToConfig()
+                    }
+                    .disabled(!configManager.clockMounted || !settings.configWriteEnabled)
                 }
-                .disabled(!serialManager.isConnected)
-                Text("Re-sends the entire mode configuration above.")
+                Text("Changes take effect immediately but reset on power cycle unless saved.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+        .onAppear { loadFromConfig() }
+    }
+
+    private func loadFromConfig() {
+        guard configManager.isLoaded else { return }
+        let allModeIds = (timeModes + dateModes + weekdayModes).map(\.id)
+        var loaded = Set<String>()
+        for id in allModeIds {
+            if configManager.bool(forKey: id) == true { loaded.insert(id) }
+        }
+        if !loaded.isEmpty || allModeIds.contains(where: { configManager.value(forKey: $0) != nil }) {
+            enabledModes = loaded
+        }
+        if let cm = configManager.value(forKey: "colon_mode") { colonMode = cm }
+        if let sb = configManager.bool(forKey: "MODE_STANDBY") { standbyEnabled = sb }
+    }
+
+    private func saveModesToConfig() {
+        let allModes = timeModes + dateModes + weekdayModes
+        for mode in allModes {
+            configManager.setValue(mode.id, to: enabledModes.contains(mode.id) ? "enabled" : "disabled")
+        }
+        configManager.setValue("MODE_STANDBY", to: standbyEnabled ? "enabled" : "disabled")
+        configManager.setValue("colon_mode", to: colonMode)
+        if configManager.save() {
+            savedToConfig = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { savedToConfig = false }
+        }
     }
 
     private func modeBinding(for id: String) -> Binding<Bool> {

@@ -34,24 +34,39 @@ struct DataSourcesView: View {
                     }
                 }
 
-                if dataSourceManager.isActive,
-                   let current = dataSourceManager.currentDisplayedSource {
-                    HStack {
-                        Text("Showing")
-                            .foregroundStyle(.secondary)
-                        Text(current.name)
-                        Spacer()
-                        let raw = dataSourceManager.lastValues[current.id] ?? "\u{2014}"
-                        if raw.count > 10 {
-                            Image(systemName: "arrow.left.arrow.right")
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
+                if dataSourceManager.isActive {
+                    if serialManager.activeDisplayMode == .dataSource,
+                       let current = dataSourceManager.currentDisplayedSource {
+                        HStack {
+                            Text("Showing")
+                                .foregroundStyle(.secondary)
+                            Text(current.name)
+                            Spacer()
+                            let raw = dataSourceManager.lastValues[current.id] ?? "\u{2014}"
+                            if raw.count > 10 {
+                                Image(systemName: "arrow.left.arrow.right")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
+                            Text(raw)
+                                .foregroundStyle(raw.count > 10 ? .orange : .secondary)
+                                .lineLimit(1)
                         }
-                        Text(raw)
-                            .foregroundStyle(raw.count > 10 ? .orange : .secondary)
-                            .lineLimit(1)
+                        .font(.caption)
+                    } else if serialManager.activeDisplayMode != .dataSource
+                                && serialManager.activeDisplayMode != .none {
+                        HStack {
+                            Label("\(serialManager.activeDisplayMode.rawValue) is using the display",
+                                  systemImage: "pause.circle")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                            Spacer()
+                            Button("Resume") {
+                                dataSourceManager.resumeDisplay()
+                            }
+                            .disabled(!serialManager.isConnected)
+                        }
                     }
-                    .font(.caption)
                 }
             }
 

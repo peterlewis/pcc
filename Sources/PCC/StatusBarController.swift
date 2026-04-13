@@ -45,29 +45,31 @@ class StatusBarController: NSObject, NSMenuDelegate {
         statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
 
-        menu.addItem(.separator())
-
-        // Data sources toggle
-        let toggleItem = NSMenuItem(title: "Data Sources", action: #selector(toggleDataSources), keyEquivalent: "")
-        toggleItem.target = self
-        toggleItem.state = dataSourceManager.isActive ? .on : .off
-        menu.addItem(toggleItem)
-
-        // Show enabled sources with values
-        for source in dataSourceManager.enabledSources {
-            let value = dataSourceManager.lastValues[source.id] ?? "\u{2014}"
-            let isCurrent = dataSourceManager.currentDisplayedSource?.id == source.id
-            let prefix = isCurrent ? "\u{25B6} " : "   "
-            let title = "\(prefix)\(source.name): \(value)"
-            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
+        // Data source values (if active)
+        if dataSourceManager.isActive && !dataSourceManager.enabledSources.isEmpty {
+            for source in dataSourceManager.enabledSources {
+                let value = dataSourceManager.lastValues[source.id] ?? "\u{2014}"
+                let isCurrent = dataSourceManager.currentDisplayedSource?.id == source.id
+                let prefix = isCurrent ? "\u{25B6} " : "   "
+                let title = "\(prefix)\(source.name): \(value)"
+                let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                menu.addItem(item)
+            }
         }
 
         menu.addItem(.separator())
 
+        // Reboot
+        if serialManager.isConnected {
+            let rebootItem = NSMenuItem(title: "Reboot Clock", action: #selector(rebootClock), keyEquivalent: "")
+            rebootItem.target = self
+            menu.addItem(rebootItem)
+            menu.addItem(.separator())
+        }
+
         // Show window
-        let showItem = NSMenuItem(title: "Show Window", action: #selector(showWindow), keyEquivalent: "0")
+        let showItem = NSMenuItem(title: "Open Precision Clock Companion", action: #selector(showWindow), keyEquivalent: "0")
         showItem.target = self
         menu.addItem(showItem)
 
@@ -135,10 +137,6 @@ class StatusBarController: NSObject, NSMenuDelegate {
         redModeEnabled.toggle()
     }
 
-    @objc private func toggleDataSources() {
-        dataSourceManager.setEnabled(!dataSourceManager.isActive)
-    }
-
     @objc private func showWindow() {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
@@ -148,6 +146,10 @@ class StatusBarController: NSObject, NSMenuDelegate {
             // Window was destroyed by SwiftUI — create a new one
             NSApp.sendAction(Selector(("newWindowForTab:")), to: nil, from: nil)
         }
+    }
+
+    @objc private func rebootClock() {
+        serialManager.rebootClock()
     }
 
     @objc private func quitApp() {

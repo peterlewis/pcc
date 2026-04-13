@@ -7,6 +7,7 @@ struct PCCApp: App {
     @StateObject private var serialManager = SerialManager()
     @StateObject private var settings = AppSettings()
     @StateObject private var dataSourceManager = DataSourceManager()
+    @StateObject private var configManager = ConfigManager()
 
     init() {
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -19,15 +20,17 @@ struct PCCApp: App {
                 .environmentObject(serialManager)
                 .environmentObject(settings)
                 .environmentObject(dataSourceManager)
-                .frame(minWidth: 460, minHeight: 400)
+                .environmentObject(configManager)
+                .frame(minWidth: 460, minHeight: 500)
                 .onAppear {
                     dataSourceManager.serialManager = serialManager
                     appDelegate.setUp(serialManager: serialManager, dataSourceManager: dataSourceManager)
                     dataSourceManager.activate()
+                    configManager.load()
                 }
         }
         .windowResizability(.contentMinSize)
-        .defaultSize(width: 500, height: 520)
+        .defaultSize(width: 580, height: 640)
 
         Settings {
             PreferencesView()
