@@ -13,6 +13,9 @@ let package = Package(
             dependencies: [
                 .product(name: "ORSSerial", package: "ORSSerialPort")
             ],
+            resources: [
+                .process("Resources")
+            ],
             linkerSettings: [
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",
