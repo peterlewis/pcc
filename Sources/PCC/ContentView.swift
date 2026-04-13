@@ -9,6 +9,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case brightness = "Brightness"
     case modes = "Modes"
     case diagnostics = "Diagnostics"
+    case skyView = "Sky View"
     case serialMonitor = "Serial Monitor"
     case advanced = "Advanced"
     case updates = "Updates"
@@ -25,6 +26,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .brightness:  return "sun.max"
         case .modes:       return "list.bullet"
         case .diagnostics:    return "gauge"
+        case .skyView:        return "scope"
         case .serialMonitor:  return "terminal"
         case .advanced:       return "slider.horizontal.3"
         case .updates:     return "arrow.triangle.2.circlepath"
@@ -56,6 +58,7 @@ struct ContentView: View {
                     sidebarRow(.brightness)
                     sidebarRow(.modes)
                     sidebarRow(.diagnostics)
+                    sidebarRow(.skyView)
                     sidebarRow(.serialMonitor)
                     sidebarRow(.advanced)
                     sidebarRow(.updates)
@@ -90,6 +93,7 @@ struct ContentView: View {
                 case .brightness:  BrightnessView()
                 case .modes:       ModesView()
                 case .diagnostics:    DiagnosticsView()
+                case .skyView:       SkyView()
                 case .serialMonitor: SerialMonitorView()
                 case .advanced:      ClockSettingsView()
                 case .updates:     UpdatesView()

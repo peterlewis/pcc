@@ -38,6 +38,12 @@ class SerialManager: NSObject, ObservableObject {
     var serialLogEnabled = false
     private var serialLineBuffer = Data()
 
+    // Satellite tracking
+    @Published var satellites: [SatelliteInfo] = []
+    var satelliteTrackingEnabled = false
+    private var gsvBuffer: [String: [SatelliteInfo]] = [:]
+    private var satelliteUpdateTimer: Timer?
+
     private let portManager = ORSSerialPortManager.shared()
     private var lastConnectedPath: String?
     private var shouldAutoReconnect = false
@@ -237,23 +243,94 @@ extension SerialManager: ORSSerialPortDelegate {
     }
 
     func serialPort(_ serialPort: ORSSerialPort, didReceive data: Data) {
-        guard serialLogEnabled else { return }
+        guard serialLogEnabled || satelliteTrackingEnabled else { return }
         serialLineBuffer.append(data)
 
-        // Process complete lines (delimited by \n)
         while let newlineIndex = serialLineBuffer.firstIndex(of: 0x0A) {
             let lineData = serialLineBuffer[serialLineBuffer.startIndex...newlineIndex]
             if let line = String(data: lineData, encoding: .utf8) {
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.serialLog.append(line)
-                    // Cap at ~50 KB to avoid unbounded growth
-                    if self.serialLog.count > 50_000 {
-                        self.serialLog = String(self.serialLog.suffix(40_000))
+                if serialLogEnabled {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        self.serialLog.append(line)
+                        if self.serialLog.count > 50_000 {
+                            self.serialLog = String(self.serialLog.suffix(40_000))
+                        }
+                    }
+                }
+                if satelliteTrackingEnabled {
+                    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if trimmed.contains("GSV,") {
+                        parseGSV(trimmed)
                     }
                 }
             }
             serialLineBuffer.removeSubrange(serialLineBuffer.startIndex...newlineIndex)
+        }
+    }
+
+    // MARK: - GSV Parser
+
+    private func parseGSV(_ line: String) {
+        let stripped = line.split(separator: "*").first.map(String.init) ?? line
+        let fields = stripped.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+
+        guard fields.count >= 4, fields[0].hasSuffix("GSV") else { return }
+
+        let talkerId = String(fields[0].prefix(3))
+        guard let constellation = SatConstellation(talkerId: talkerId) else { return }
+
+        guard let numMsg = Int(fields[1]),
+              let msgNum = Int(fields[2]) else { return }
+
+        // NMEA 4.10+ appends a signal ID as the last field (e.g. ,1 for L1 C/A)
+        // This means multiple GSV sets per constellation per cycle.
+        // Key the buffer by talker + signal ID to prevent sets overwriting each other.
+        let dataFields = fields.count - 4
+        let signalId = (dataFields > 0 && dataFields % 4 == 1) ? (fields.last ?? "") : ""
+        let bufferKey = "\(talkerId)_\(signalId)"
+
+        if msgNum == 1 {
+            gsvBuffer[bufferKey] = []
+        }
+
+        // Each satellite is 4 fields: PRN, elevation, azimuth, SNR
+        var i = 4
+        while i + 3 < fields.count {
+            if let prn = Int(fields[i]),
+               let elev = Int(fields[i + 1]),
+               let azim = Int(fields[i + 2]) {
+                let snr = fields[i + 3].isEmpty ? nil : Int(fields[i + 3])
+                let sat = SatelliteInfo(prn: prn, constellation: constellation,
+                                        elevation: elev, azimuth: azim, snr: snr)
+                gsvBuffer[bufferKey, default: []].append(sat)
+            }
+            i += 4
+        }
+
+        if msgNum == numMsg {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.satelliteUpdateTimer?.invalidate()
+                self.satelliteUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: false) { [weak self] _ in
+                    guard let self else { return }
+                    // Merge all buffer entries, dedup by satellite ID
+                    // preferring entries with SNR data
+                    var merged: [String: SatelliteInfo] = [:]
+                    for (_, sats) in self.gsvBuffer {
+                        for sat in sats {
+                            if let existing = merged[sat.id] {
+                                if existing.snr == nil && sat.snr != nil {
+                                    merged[sat.id] = sat
+                                }
+                            } else {
+                                merged[sat.id] = sat
+                            }
+                        }
+                    }
+                    self.satellites = Array(merged.values)
+                }
+            }
         }
     }
 
