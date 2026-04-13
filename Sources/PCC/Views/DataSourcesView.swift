@@ -42,8 +42,13 @@ struct DataSourcesView: View {
                         Text(current.name)
                         Spacer()
                         let raw = dataSourceManager.lastValues[current.id] ?? "\u{2014}"
-                        Text(String(raw.prefix(10)))
-                            .foregroundStyle(.secondary)
+                        if raw.count > 10 {
+                            Image(systemName: "arrow.left.arrow.right")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                        Text(raw)
+                            .foregroundStyle(raw.count > 10 ? .orange : .secondary)
                             .lineLimit(1)
                     }
                     .font(.caption)
@@ -163,10 +168,17 @@ struct DataSourceRow: View {
                         .foregroundStyle(.red)
                         .lineLimit(1)
                 } else if let value = lastValue {
-                    Text(String(value.prefix(10)))
-                        .font(.caption)
-                        .foregroundStyle(value.count > 10 ? .red : .secondary)
-                        .lineLimit(1)
+                    HStack(spacing: 3) {
+                        if value.count > 10 {
+                            Image(systemName: "arrow.left.arrow.right")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                        Text(value)
+                            .font(.caption)
+                            .foregroundStyle(value.count > 10 ? .orange : .secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
             Spacer()
@@ -207,7 +219,8 @@ struct DataSourceEditView: View {
         VStack(spacing: 0) {
             Form {
                 Section("General") {
-                    TextField("Name", text: $source.name, prompt: Text("e.g. BTC Price"))
+                    TextField("Name", text: $source.name,
+                              prompt: Text(source.type == .restAPI ? "e.g. GitHub repo stars" : "e.g. System uptime"))
                     Picker("Type", selection: $source.type) {
                         Text("REST API").tag(DataSourceType.restAPI)
                         Text("Bash Command").tag(DataSourceType.bashCommand)
@@ -218,11 +231,24 @@ struct DataSourceEditView: View {
                 Section(source.type == .restAPI ? "API Endpoint" : "Command") {
                     if source.type == .restAPI {
                         TextField("URL", text: $source.endpoint,
-                                  prompt: Text("https://api.example.com/data"))
+                                  prompt: Text("https://api.github.com/repos/peterlewis/pcc"))
+                        TextField("JSON key path", text: $source.jsonKeyPath,
+                                  prompt: Text("e.g. stargazers_count"))
+                        Text("Dot-separated path to extract from JSON response. Leave blank for plain text APIs.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     } else {
                         TextField("Command", text: $source.endpoint,
-                                  prompt: Text("uptime | awk '{print $NF}'"))
+                                  prompt: Text("uptime | awk '{print $3}'"))
                     }
+                }
+
+                Section("Display Format") {
+                    TextField("Format", text: $source.displayFormat,
+                              prompt: Text(source.type == .restAPI ? "{v} stars" : "{v} days"))
+                    Text("Use {v} as a placeholder for the value. Leave blank to show the raw value.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Refresh Interval") {
@@ -244,10 +270,11 @@ struct DataSourceEditView: View {
                     }
 
                     if let result = testResult {
+                        let formatted = DataSourceManager.applyFormat(result, format: source.displayFormat)
                         HStack {
                             Text("Result:")
-                            Text(result)
-                                .foregroundStyle(.green)
+                            Text(formatted)
+                                .foregroundStyle(formatted.count > 10 ? .red : .green)
                                 .lineLimit(3)
                                 .textSelection(.enabled)
                         }
@@ -315,12 +342,13 @@ struct DataSourceEditView: View {
             Task {
                 do {
                     let (data, _) = try await URLSession.shared.data(from: url)
-                    let body = String(data: data, encoding: .utf8) ?? ""
-                    let firstLine = body.trimmingCharacters(in: .whitespacesAndNewlines)
-                        .components(separatedBy: .newlines).first
+                    let value = DataSourceManager.extractValue(from: data, keyPath: source.jsonKeyPath)
                     await MainActor.run {
-                        if let firstLine, !firstLine.isEmpty { testResult = firstLine }
-                        else { testError = "Empty response (\(body.count) bytes)" }
+                        if let value, !value.isEmpty { testResult = value }
+                        else {
+                            let keyInfo = source.jsonKeyPath.isEmpty ? "" : " at key path \"\(source.jsonKeyPath)\""
+                            testError = "No value found\(keyInfo)"
+                        }
                         isTesting = false
                     }
                 } catch {

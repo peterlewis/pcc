@@ -6,6 +6,29 @@ A native macOS menu bar app for the [Precision Clock Mk IV](https://mitxela.com/
 
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue) ![Swift 5.9+](https://img.shields.io/badge/Swift-5.9%2B-orange)
 
+## Screenshots
+
+| Menu bar | Data Sources | Brightness Curve |
+|:---:|:---:|:---:|
+| ![Menu bar](docs/screenshots/menu-bar.png) | ![Data Sources](docs/screenshots/data-sources.png) | ![Brightness](docs/screenshots/brightness.png) |
+
+| REST API config | Bash command config | Modes |
+|:---:|:---:|:---:|
+| ![REST API](docs/screenshots/edit-rest-api.png) | ![Bash](docs/screenshots/edit-bash.png) | ![Modes](docs/screenshots/modes.png) |
+
+<details>
+<summary>More screenshots</summary>
+
+| Connect | Text | Countdown |
+|:---:|:---:|:---:|
+| ![Connect](docs/screenshots/connect.png) | ![Text](docs/screenshots/text.png) | ![Countdown](docs/screenshots/countdown.png) |
+
+| Diagnostics | Advanced |
+|:---:|:---:|
+| ![Diagnostics](docs/screenshots/diagnostics.png) | ![Advanced](docs/screenshots/advanced.png) |
+
+</details>
+
 ## Features
 
 - **Menu bar app** — lives in the menu bar with a 7-segment display icon, runs in the background, window opens on demand

@@ -13,9 +13,16 @@ struct ClockTextView: View {
                     .onSubmit { sendText() }
 
                 HStack {
-                    Text("\(text.count) / 10 characters")
-                        .foregroundStyle(text.count > 10 ? .red : .secondary)
-                        .font(.caption)
+                    HStack(spacing: 3) {
+                        if text.count > 10 {
+                            Image(systemName: "arrow.left.arrow.right")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                        Text("\(text.count) / 10 characters")
+                            .foregroundStyle(text.count > 10 ? .orange : .secondary)
+                    }
+                    .font(.caption)
 
                     Spacer()
 
@@ -64,12 +71,12 @@ struct ClockTextView: View {
 
     private func sendText() {
         guard !text.isEmpty, serialManager.isConnected else { return }
-        serialManager.sendCommand("text = \(text)")
         if !textModeEnabled {
             textModeEnabled = true
             serialManager.sendCommand("mode_text = 1")
             serialManager.activeDisplayMode = .text
         }
+        serialManager.sendScrollingText(text)
         settings.addRecentText(text)
     }
 }

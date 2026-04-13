@@ -122,6 +122,43 @@ class SerialManager: NSObject, ObservableObject {
         port.send(data)
     }
 
+    // MARK: - Scroll
+
+    private var scrollTimer: Timer?
+    private var scrollText: String = ""
+    private var scrollPosition: Int = 0
+
+    /// Send text to the display. If > 10 chars, starts a marquee scroll.
+    func sendScrollingText(_ value: String) {
+        scrollTimer?.invalidate()
+        scrollTimer = nil
+
+        if value.count <= 10 {
+            sendCommand("text = \(value)")
+        } else {
+            scrollText = value + "      "
+            scrollPosition = 0
+            sendScrollFrame()
+            scrollTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                self.scrollPosition = (self.scrollPosition + 1) % self.scrollText.count
+                self.sendScrollFrame()
+            }
+        }
+    }
+
+    func stopScrolling() {
+        scrollTimer?.invalidate()
+        scrollTimer = nil
+    }
+
+    private func sendScrollFrame() {
+        let doubled = scrollText + scrollText
+        let start = doubled.index(doubled.startIndex, offsetBy: scrollPosition)
+        let end = doubled.index(start, offsetBy: 10)
+        sendCommand("text = \(String(doubled[start..<end]))")
+    }
+
     func rebootClock() {
         shouldAutoReconnect = true
         sendCommand("reboot")

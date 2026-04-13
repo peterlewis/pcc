@@ -14,15 +14,20 @@ struct DataSource: Codable, Identifiable {
     var name: String
     var type: DataSourceType
     var endpoint: String          // URL for REST, shell command for bash
+    var jsonKeyPath: String       // dot-separated path to extract from JSON response (REST only)
+    var displayFormat: String     // e.g. "{v} stars" — {v} is replaced with the value
     var pollInterval: TimeInterval
     var isEnabled: Bool
 
     init(id: UUID = UUID(), name: String = "", type: DataSourceType = .restAPI,
-         endpoint: String = "", pollInterval: TimeInterval = 60, isEnabled: Bool = true) {
+         endpoint: String = "", jsonKeyPath: String = "", displayFormat: String = "",
+         pollInterval: TimeInterval = 60, isEnabled: Bool = true) {
         self.id = id
         self.name = name
         self.type = type
         self.endpoint = endpoint
+        self.jsonKeyPath = jsonKeyPath
+        self.displayFormat = displayFormat
         self.pollInterval = pollInterval
         self.isEnabled = isEnabled
     }
@@ -134,6 +139,7 @@ class DataSourceManager: NSObject, ObservableObject {
         pollTimers.removeAll()
         rotationTimer?.invalidate()
         rotationTimer = nil
+        serialManager?.stopScrolling()
     }
 
     private func startPolling(for id: UUID) {
@@ -202,14 +208,53 @@ class DataSourceManager: NSObject, ObservableObject {
         Task {
             do {
                 let (data, _) = try await URLSession.shared.data(from: url)
-                let body = String(data: data, encoding: .utf8) ?? ""
-                let firstLine = body.trimmingCharacters(in: .whitespacesAndNewlines)
-                    .components(separatedBy: .newlines).first
-                await MainActor.run { self.processResult(firstLine, for: source.id) }
+                let result = Self.extractValue(from: data, keyPath: source.jsonKeyPath)
+                await MainActor.run { self.processResult(result, for: source.id) }
             } catch {
                 await MainActor.run { self.lastErrors[source.id] = error.localizedDescription }
             }
         }
+    }
+
+    /// Extract a value from response data. If keyPath is non-empty, parse as JSON
+    /// and traverse the dot-separated path. Otherwise return the first line of text.
+    static func extractValue(from data: Data, keyPath: String) -> String? {
+        let trimmedPath = keyPath.trimmingCharacters(in: .whitespaces)
+
+        if trimmedPath.isEmpty {
+            // Plain text mode: return first line
+            let body = String(data: data, encoding: .utf8) ?? ""
+            return body.trimmingCharacters(in: .whitespacesAndNewlines)
+                .components(separatedBy: .newlines).first
+        }
+
+        // JSON mode: parse and traverse key path
+        guard let json = try? JSONSerialization.jsonObject(with: data) else {
+            return nil
+        }
+
+        let keys = trimmedPath.components(separatedBy: ".")
+        var current: Any = json
+
+        for key in keys {
+            if let dict = current as? [String: Any], let next = dict[key] {
+                current = next
+            } else if let arr = current as? [Any], let idx = Int(key), idx >= 0, idx < arr.count {
+                current = arr[idx]
+            } else {
+                return nil
+            }
+        }
+
+        // Convert the final value to a display string
+        if let num = current as? NSNumber {
+            // Avoid printing ".0" for integers
+            if CFNumberIsFloatType(num) {
+                return "\(num.doubleValue)"
+            }
+            return "\(num.intValue)"
+        }
+        return "\(current)"
     }
 
     private func fetchBash(source: DataSource) {
@@ -236,11 +281,13 @@ class DataSourceManager: NSObject, ObservableObject {
 
     private func processResult(_ value: String?, for id: UUID) {
         if let value = value, !value.isEmpty {
-            lastValues[id] = value
+            let source = dataSources.first { $0.id == id }
+            let formatted = Self.applyFormat(value, format: source?.displayFormat ?? "")
+            lastValues[id] = formatted
             lastErrors.removeValue(forKey: id)
             // Update display immediately if this source is currently shown
             if isActive, let current = currentDisplayedSource, current.id == id {
-                sendToDisplay(value)
+                sendToDisplay(formatted)
             }
         } else {
             lastErrors[id] = "Empty response"
@@ -248,10 +295,15 @@ class DataSourceManager: NSObject, ObservableObject {
     }
 
     private func sendToDisplay(_ value: String) {
-        let truncated = String(value.prefix(10))
-        serialManager?.sendCommand("text = \(truncated)")
         serialManager?.sendCommand("mode_text = 1")
         serialManager?.activeDisplayMode = .dataSource
+        serialManager?.sendScrollingText(value)
+    }
+
+    static func applyFormat(_ value: String, format: String) -> String {
+        let trimmed = format.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return value }
+        return trimmed.replacingOccurrences(of: "{v}", with: value)
     }
 
     // MARK: Persistence

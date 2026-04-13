@@ -146,9 +146,11 @@ class StatusBarController: NSObject, NSMenuDelegate {
     @objc private func showWindow() {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        for window in NSApp.windows where window.canBecomeMain {
+        if let window = NSApp.windows.first(where: { $0.canBecomeMain }) {
             window.makeKeyAndOrderFront(nil)
-            return
+        } else {
+            // Window was destroyed by SwiftUI — create a new one
+            NSApp.sendAction(Selector(("newWindowForTab:")), to: nil, from: nil)
         }
     }
 
