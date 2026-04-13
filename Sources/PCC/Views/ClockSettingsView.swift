@@ -2,9 +2,11 @@ import SwiftUI
 
 struct ClockSettingsView: View {
     @EnvironmentObject var serialManager: SerialManager
+    @StateObject private var timezoneList = TimezoneListLoader()
 
     // Timezone
     @State private var timezoneOverride = ""
+    @State private var timezoneSearch = ""
 
     // NMEA
     @State private var nmeaMode = "off"
@@ -21,21 +23,70 @@ struct ClockSettingsView: View {
     @State private var fakeLatitude = ""
     @State private var fakeLongitude = ""
 
+    private var filteredTimezones: [String] {
+        if timezoneSearch.isEmpty { return timezoneList.timezones }
+        return timezoneList.timezones.filter { $0.localizedCaseInsensitiveContains(timezoneSearch) }
+    }
+
     var body: some View {
         Form {
             Section {
-                HStack {
-                    TextField("IANA timezone", text: $timezoneOverride,
-                              prompt: Text("e.g. America/New_York"))
-                        .onSubmit {
-                            if !timezoneOverride.isEmpty {
-                                serialManager.sendCommand("ZONE_OVERRIDE = \(timezoneOverride)")
+                if timezoneList.timezones.isEmpty {
+                    HStack {
+                        TextField("IANA timezone", text: $timezoneOverride,
+                                  prompt: Text("e.g. America/New_York"))
+                            .onSubmit {
+                                if !timezoneOverride.isEmpty {
+                                    serialManager.sendCommand("ZONE_OVERRIDE = \(timezoneOverride)")
+                                }
+                            }
+                        Button("Send") {
+                            serialManager.sendCommand("ZONE_OVERRIDE = \(timezoneOverride)")
+                        }
+                        .disabled(timezoneOverride.isEmpty || !serialManager.isConnected)
+                    }
+                    if timezoneList.isLoading {
+                        Text("Loading timezone list\u{2026}")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    TextField("Search timezones", text: $timezoneSearch)
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(filteredTimezones.enumerated()), id: \.element) { _, tz in
+                                Button {
+                                    timezoneOverride = tz
+                                    serialManager.sendCommand("ZONE_OVERRIDE = \(tz)")
+                                } label: {
+                                    HStack {
+                                        Text(tz)
+                                            .foregroundStyle(.primary)
+                                        if tz == timezoneOverride {
+                                            Spacer()
+                                            Image(systemName: "checkmark")
+                                                .foregroundStyle(.blue)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.vertical, 3)
+                                    .padding(.horizontal, 4)
+                                    .background(tz == timezoneOverride ? Color.blue.opacity(0.1) : Color.clear)
+                                    .cornerRadius(4)
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
-                    Button("Send") {
-                        serialManager.sendCommand("ZONE_OVERRIDE = \(timezoneOverride)")
                     }
-                    .disabled(timezoneOverride.isEmpty || !serialManager.isConnected)
+                    .frame(height: 200)
+                }
+                HStack {
+                    if !timezoneOverride.isEmpty {
+                        Text("Active: \(timezoneOverride)")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                    }
+                    Spacer()
                     Button("Clear") {
                         timezoneOverride = ""
                         serialManager.sendCommand("ZONE_OVERRIDE = off")

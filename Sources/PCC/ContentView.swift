@@ -10,6 +10,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case modes = "Modes"
     case diagnostics = "Diagnostics"
     case advanced = "Advanced"
+    case updates = "Updates"
 
     var id: String { rawValue }
 
@@ -24,6 +25,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .modes:       return "list.bullet"
         case .diagnostics: return "gauge"
         case .advanced:    return "slider.horizontal.3"
+        case .updates:     return "arrow.triangle.2.circlepath"
         }
     }
 }
@@ -49,6 +51,7 @@ struct ContentView: View {
                     sidebarRow(.modes)
                     sidebarRow(.diagnostics)
                     sidebarRow(.advanced)
+                    sidebarRow(.updates)
                 }
             }
             .listStyle(.sidebar)
@@ -81,6 +84,7 @@ struct ContentView: View {
                 case .modes:       ModesView()
                 case .diagnostics: DiagnosticsView()
                 case .advanced:    ClockSettingsView()
+                case .updates:     UpdatesView()
                 case nil:          Text("Select a panel")
                 }
             }

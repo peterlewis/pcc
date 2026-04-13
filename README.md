@@ -1,6 +1,6 @@
 # PCC — Precision Clock Companion
 
-A native macOS menu bar app for the [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_4_user_manual) by [mitxela](https://mitxela.com). Communicates over USB serial to control the clock's display, brightness, modes, and more.
+A native macOS menu bar app for the [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs) by [mitxela](https://mitxela.com). Communicates over USB serial to control the clock's display, brightness, modes, and more.
 
 > **Note:** This is an independent, community-built companion app. It is not officially endorsed by or affiliated with mitxela or the Precision Clock Mk IV project.
 
@@ -69,7 +69,7 @@ The app runs unsandboxed — no entitlements needed for serial port access.
 
 ## Serial protocol
 
-All commands are `key = value\r\n`, case insensitive, temporary until power cycle. The app sends `nmea = off` on connect and restores `nmea = all` + `mode_text = 0` on disconnect/quit. See the [Mk IV user manual](https://mitxela.com/projects/precision_clock_4_user_manual) for the full command reference.
+All commands are `key = value\r\n`, case insensitive, temporary until power cycle. The app sends `nmea = off` on connect and restores `nmea = all` + `mode_text = 0` on disconnect/quit. See the [Mk IV user manual](https://mitxela.com/projects/precision_clock_mk_iv/docs) for the full command reference.
 
 ## Dependencies
 
@@ -77,7 +77,7 @@ All commands are `key = value\r\n`, case insensitive, temporary until power cycl
 
 ## Related
 
-- [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_4_user_manual) — official project documentation
+- [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs) — official project documentation
 - [GitHub](https://github.com/mitxela/clock4) — hardware design and firmware source
 
 ## License
