@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct UpdatesView: View {
+    @EnvironmentObject var serialManager: SerialManager
     @StateObject private var updateManager = UpdateManager()
 
     var body: some View {
@@ -116,6 +117,17 @@ struct UpdatesView: View {
                 } header: {
                     Text("Install")
                 }
+            }
+            Section {
+                Button("Reboot Clock") {
+                    serialManager.rebootClock()
+                }
+                .disabled(!serialManager.isConnected)
+                Text("Reboot the clock to apply firmware updates. The clock will disconnect briefly and reconnect automatically.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Clock")
             }
         }
         .formStyle(.grouped)
