@@ -74,7 +74,7 @@ struct ContentView: View {
             }
             .frame(minWidth: 300)
         }
-        .navigationTitle("Precision Clock")
+        .navigationTitle("Precision Clock Companion")
         .toolbar {
             ToolbarItem(placement: .status) {
                 HStack(spacing: 4) {

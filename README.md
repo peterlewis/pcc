@@ -26,12 +26,14 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 ```bash
 # Clone and build
 git clone <repo-url>
-cd clock-app
+cd precision-clock-companion
 swift build
 
 # Run
-swift run ClockApp
+swift run PCC
 ```
+
+The built binary is `PCC`. To create `PCC.app`, open `Package.swift` in Xcode, build, then archive.
 
 Or open `Package.swift` in Xcode and hit Run.
 
