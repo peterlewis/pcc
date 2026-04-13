@@ -130,13 +130,21 @@ class SerialManager: NSObject, ObservableObject {
 
     /// Send text to the display. If > 10 chars, starts a marquee scroll.
     func sendScrollingText(_ value: String) {
+        let newScrollText = value + "          "
+
+        // Don't restart scroll if already scrolling the same text
+        if scrollTimer != nil && scrollText == newScrollText {
+            return
+        }
+
         scrollTimer?.invalidate()
         scrollTimer = nil
 
         if value.count <= 10 {
+            scrollText = ""
             sendCommand("text = \(value)")
         } else {
-            scrollText = value + "          "
+            scrollText = newScrollText
             scrollPosition = 0
             sendScrollFrame()
             scrollTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { [weak self] _ in
