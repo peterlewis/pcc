@@ -136,7 +136,7 @@ class SerialManager: NSObject, ObservableObject {
         if value.count <= 10 {
             sendCommand("text = \(value)")
         } else {
-            scrollText = value + "      "
+            scrollText = value + "          "
             scrollPosition = 0
             sendScrollFrame()
             scrollTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { [weak self] _ in
