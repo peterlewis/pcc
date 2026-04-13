@@ -92,15 +92,39 @@ class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     private func makeSevenSegmentIcon() -> NSImage {
-        if let url = Bundle.module.url(forResource: "menubar-icon", withExtension: "svg"),
-           let image = NSImage(contentsOf: url) {
-            image.size = NSSize(width: 10, height: 17)
-            image.isTemplate = !redModeEnabled
-            image.accessibilityDescription = "PCC"
-            return image
+        let useRed = redModeEnabled
+        let size = NSSize(width: 11, height: 17)
+        let image = NSImage(size: size, flipped: true) { _ in
+            (useRed ? NSColor(red: 0.9, green: 0.15, blue: 0.1, alpha: 1.0) : NSColor.black).setFill()
+
+            func hex(_ points: [(CGFloat, CGFloat)]) {
+                let path = NSBezierPath()
+                path.move(to: NSPoint(x: points[0].0, y: points[0].1))
+                for p in points.dropFirst() { path.line(to: NSPoint(x: p.0, y: p.1)) }
+                path.close()
+                path.fill()
+            }
+
+            let s: CGFloat = 0.5
+
+            // a: top horizontal
+            hex([(5,2),(7,0),(15,0),(17,2),(15,4),(7,4)].map { ($0.0*s, $0.1*s) })
+            // f: top-left vertical
+            hex([(2,5),(4,7),(4,13),(2,15),(0,13),(0,7)].map { ($0.0*s, $0.1*s) })
+            // b: top-right vertical
+            hex([(20,5),(22,7),(22,13),(20,15),(18,13),(18,7)].map { ($0.0*s, $0.1*s) })
+            // g: middle horizontal
+            hex([(5,17),(7,15),(15,15),(17,17),(15,19),(7,19)].map { ($0.0*s, $0.1*s) })
+            // e: bottom-left vertical
+            hex([(2,19),(4,21),(4,27),(2,29),(0,27),(0,21)].map { ($0.0*s, $0.1*s) })
+            // c: bottom-right vertical
+            hex([(20,19),(22,21),(22,27),(20,29),(18,27),(18,21)].map { ($0.0*s, $0.1*s) })
+            // d: bottom horizontal
+            hex([(5,32),(7,30),(15,30),(17,32),(15,34),(7,34)].map { ($0.0*s, $0.1*s) })
+
+            return true
         }
-        // Fallback: empty image if resource missing
-        let image = NSImage(size: NSSize(width: 10, height: 17))
+        image.isTemplate = !useRed
         image.accessibilityDescription = "PCC"
         return image
     }
