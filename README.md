@@ -1,102 +1,54 @@
-# Precision Clock Companion
+# PCC — Precision Clock Companion
 
-A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_4_user_manual) by mitxela. Communicates over USB serial to control the clock's display, fetch live weather, run countdowns, and tune the brightness curve.
+A native macOS menu bar app for the [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_4_user_manual) by mitxela. Communicates over USB serial to control the clock's display, brightness, modes, and more.
 
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue) ![Swift 5.9+](https://img.shields.io/badge/Swift-5.9%2B-orange)
 
 ## Features
 
-- **Serial connection** — auto-detects `/dev/cu.usbmodem*` ports, handles device arrival/removal, cleans up on disconnect
-- **Text display** — send arbitrary text to the 20-digit 7-segment display, with character counter and history
-- **Weather** — fetches current weather via WeatherKit REST API, formats it for 7-segment display (temperature, conditions, wind), polls on a configurable interval
-- **Countdown** — set a target date/time, converts to UTC ISO8601, sends `countdown_to` command
-- **Brightness curve editor** — interactive drag-to-edit graph for the 5-point brightness curve (BS1–BS5), with presets for Rev C, Rev D, and GL5549 configurations
-- **Manual brightness** — lock brightness for filming, with one-click reboot to restore auto curve
-- **Port diagnostics** — check which process has the serial port claimed (`lsof`), kill it if needed
-- **Mode safety** — confirmation dialog when switching panels while a display mode is active
+- **Menu bar app** — lives in the menu bar with a 7-segment display icon, runs in the background, window opens on demand
+- **Serial connection** — auto-detects `/dev/cu.usbmodem*` ports, auto-connects on launch, handles device arrival/removal
+- **Data sources** — poll REST APIs or run shell commands on a schedule, rotate multiple sources on the display at a configurable interval
+- **Text display** — send arbitrary text to the 10-digit display with character counter and history
+- **Countdown** — set a target date/time, sends `countdown_to` in UTC ISO 8601
+- **Brightness curve** — interactive drag-to-edit graph for the 5-point brightness curve, with presets for Rev C, Rev D, and GL5549 hardware
+- **Manual brightness** — lock brightness for filming, one-click reboot to restore auto curve
+- **Modes** — toggle which modes appear in the button cycle (time, date, weekday, stopwatch, etc.), colon animation style, standby
+- **Diagnostics** — toggle debug displays (ADC/DAC, RTC calibration, satellite view, battery voltage, firmware CRC, display test, TTFF)
+- **Advanced** — timezone override, NMEA output, matrix frequency, accuracy tolerance, fake GPS position
+- **Port diagnostics** — see which process has the serial port claimed, kill it if needed
+- **Reboot clock** — one-click reboot from the Connect panel
+
+### Coming soon
+
+- **Weather** — backend-driven weather display
+- **Config file** — read and write `config.txt` via USB mass storage
 
 ## Requirements
 
 - macOS 13 (Ventura) or later
 - Precision Clock Mk IV connected via USB
-- For weather: Apple Developer account with WeatherKit access and a `.p8` signing key
 
 ## Building
 
 ```bash
-# Clone and build
-git clone <repo-url>
-cd precision-clock-companion
+git clone https://github.com/peterlew/pcc.git
+cd pcc
 swift build
-
-# Run
 swift run PCC
 ```
 
-The built binary is `PCC`. To create `PCC.app`, open `Package.swift` in Xcode, build, then archive.
-
 Or open `Package.swift` in Xcode and hit Run.
 
-The app runs unsandboxed (no entitlements needed for serial port or network access).
+The app runs unsandboxed — no entitlements needed for serial port access.
 
-## Configuration
+## Serial protocol
 
-### Serial
-
-The clock appears at `/dev/cu.usbmodem*`. Select the port in the Connect panel and click Connect. The app sends `nmea = off` on connect and restores `nmea = all` + `mode_text = 0` on disconnect/quit.
-
-### WeatherKit
-
-Go to **Settings > WeatherKit** and enter:
-
-| Field | Example |
-|---|---|
-| Team ID | `XXXXXXXXXX` (10 chars) |
-| Service ID | `com.example.weatherkit` |
-| Key ID | `XXXXXXXXXX` (10 chars) |
-| .p8 key path | `/path/to/AuthKey.p8` |
-
-The app signs JWTs locally with CryptoKit (ES256) — no server needed.
-
-### Location & Units
-
-Default location is Bath, UK (51.4043, -2.3234). Override in **Settings > Location**.
-
-Temperature (C/F), wind speed (mph/km/h/m/s/knots), and poll interval (30–600s) are in **Settings > Units**.
-
-## Brightness Curve
-
-The curve maps the light sensor ADC reading (0–4095) to DAC brightness output (0–4095) via 5 control points. Drag points on the graph or type exact values. Presets included for different hardware revisions:
-
-| Preset | Sensor | R11 |
-|---|---|---|
-| Rev C | GL5528 | 20K |
-| GL5549 | GL5549 | 470K |
-| Rev D | VTT9812FH | 470K |
-
-Use `mode_debug_brightness` (in the Debug section) to see live ADC/DAC values on the clock while tuning.
-
-## Serial Protocol
-
-All commands are `key = value\r\n`, case insensitive, temporary until power cycle. Key commands:
-
-```
-text = hello world          # set display text
-mode_text = 1               # enable text mode
-brightness = 0.5            # lock brightness (0.0–1.0)
-BS1 = 0,400                 # set curve point 1
-mode_countdown = 1          # enable countdown
-countdown_to = 2026-12-25T00:00:00Z
-mode_debug_brightness = 1   # show ADC/DAC
-nmea = off                  # silence GPS output
-reboot                      # reset clock
-```
+All commands are `key = value\r\n`, case insensitive, temporary until power cycle. The app sends `nmea = off` on connect and restores `nmea = all` + `mode_text = 0` on disconnect/quit. See the [Mk IV user manual](https://mitxela.com/projects/precision_clock_4_user_manual) for the full command reference.
 
 ## Dependencies
 
-- [ORSSerialPort](https://github.com/armadsen/ORSSerialPort) — serial port communication (via SPM)
-- CryptoKit (system) — JWT signing for WeatherKit
-- URLSession (system) — WeatherKit API calls
+- [ORSSerialPort](https://github.com/armadsen/ORSSerialPort) — serial communication (SPM)
 
 ## License
 

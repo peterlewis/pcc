@@ -79,6 +79,10 @@ struct ConnectView: View {
                             .font(.caption)
                             .textSelection(.enabled)
                     }
+
+                    Button("Reboot Clock") {
+                        serialManager.rebootClock()
+                    }
                 }
             }
 

@@ -9,13 +9,12 @@ struct ClockTextView: View {
     var body: some View {
         Form {
             Section("Display Text") {
-                TextField("Display text", text: $text, prompt: Text("Enter text..."))
-                    .labelsHidden()
+                TextField("Text", text: $text, prompt: Text("Enter text..."))
                     .onSubmit { sendText() }
 
                 HStack {
-                    Text("\(text.count) / 20 characters")
-                        .foregroundStyle(text.count > 20 ? .red : .secondary)
+                    Text("\(text.count) / 10 characters")
+                        .foregroundStyle(text.count > 10 ? .red : .secondary)
                         .font(.caption)
 
                     Spacer()
@@ -32,7 +31,7 @@ struct ClockTextView: View {
             }
 
             if !settings.recentTexts.isEmpty {
-                Section("Recent") {
+                Section {
                     ForEach(settings.recentTexts, id: \.self) { recent in
                         HStack {
                             Text(recent)
@@ -46,6 +45,16 @@ struct ClockTextView: View {
                             .buttonStyle(.borderless)
                             .disabled(!serialManager.isConnected)
                         }
+                    }
+                } header: {
+                    HStack {
+                        Text("Recent")
+                        Spacer()
+                        Button("Clear") {
+                            settings.recentTexts.removeAll()
+                        }
+                        .font(.caption)
+                        .buttonStyle(.borderless)
                     }
                 }
             }

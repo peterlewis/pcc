@@ -36,7 +36,6 @@ struct BrightnessView: View {
     @State private var brightness: Double = 0.5
     @State private var isManual = false
     @State private var needsReboot = false
-    @State private var debugMode = false
 
     // Brightness curve
     @State private var curvePoints: [BrightnessPoint] = CurvePreset.revD.points
@@ -47,7 +46,6 @@ struct BrightnessView: View {
             VStack(spacing: 0) {
                 manualOverrideSection
                 curveSection
-                debugSection
             }
         }
     }
@@ -177,27 +175,6 @@ struct BrightnessView: View {
         }
         .padding(.horizontal)
         .padding(.top, 4)
-    }
-
-    // MARK: - Debug
-
-    private var debugSection: some View {
-        GroupBox("Debug") {
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle("Show ADC/DAC values on display", isOn: $debugMode)
-                    .onChange(of: debugMode) { enabled in
-                        serialManager.sendCommand(
-                            "mode_debug_brightness = \(enabled ? 1 : 0)")
-                    }
-                Text("Shows live sensor input and brightness output on the clock.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(4)
-        }
-        .padding(.horizontal)
-        .padding(.top, 4)
-        .padding(.bottom, 8)
     }
 
     // MARK: - Curve Graph

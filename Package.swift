@@ -12,6 +12,14 @@ let package = Package(
             name: "PCC",
             dependencies: [
                 .product(name: "ORSSerial", package: "ORSSerialPort")
+            ],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Info.plist"
+                ])
             ]
         )
     ]

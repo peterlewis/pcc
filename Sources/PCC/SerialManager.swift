@@ -7,6 +7,7 @@ enum DisplayMode: String {
     case text = "Text mode"
     case weather = "Weather mode"
     case countdown = "Countdown"
+    case dataSource = "Data source"
 }
 
 class SerialManager: NSObject, ObservableObject {
@@ -32,6 +33,15 @@ class SerialManager: NSObject, ObservableObject {
                        name: .init("ORSSerialPortsWereDisconnectedNotification"), object: nil)
         nc.addObserver(self, selector: #selector(appWillTerminate),
                        name: NSApplication.willTerminateNotification, object: nil)
+
+        autoConnect()
+    }
+
+    private func autoConnect() {
+        guard let savedPath = UserDefaults.standard.string(forKey: "lastSerialPort"),
+              !savedPath.isEmpty,
+              let port = availablePorts.first(where: { $0.path == savedPath }) else { return }
+        connect(to: port)
     }
 
     func refreshPorts() {
