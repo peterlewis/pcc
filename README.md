@@ -15,6 +15,7 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 - Edit the 5-point brightness curve with a draggable graph, save custom presets
 - Check for firmware and timezone updates, install to the CLOCK USB volume
 - Read and write `config.txt` with local backups kept on the Mac
+- Satellite sky view: polar plot with signal strength bars and long-running trail for antenna analysis
 - Serial monitor for viewing raw NMEA and debug output
 - Lives in the menu bar, window opens on demand
 
