@@ -1,24 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 34" width="11" height="17">
-  <!-- 7-segment "8" with chamfered hexagonal segments matching Precision Clock Mk IV -->
-
-  <!-- a: top horizontal -->
-  <polygon points="5,2 7,0 15,0 17,2 15,4 7,4" fill="black"/>
-
-  <!-- f: top-left vertical -->
-  <polygon points="2,5 4,7 4,13 2,15 0,13 0,7" fill="black"/>
-
-  <!-- b: top-right vertical -->
-  <polygon points="20,5 22,7 22,13 20,15 18,13 18,7" fill="black"/>
-
-  <!-- g: middle horizontal -->
-  <polygon points="5,17 7,15 15,15 17,17 15,19 7,19" fill="black"/>
-
-  <!-- e: bottom-left vertical -->
-  <polygon points="2,19 4,21 4,27 2,29 0,27 0,21" fill="black"/>
-
-  <!-- c: bottom-right vertical -->
-  <polygon points="20,19 22,21 22,27 20,29 18,27 18,21" fill="black"/>
-
-  <!-- d: bottom horizontal -->
-  <polygon points="5,32 7,30 15,30 17,32 15,34 7,34" fill="black"/>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="10px" height="17px" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;">
+    <g>
+        <g transform="matrix(0.0598592,0,0,0.0598592,0,-15.3239)">
+            <path d="M16.828,270L30.828,256L125.172,256L139.172,270L125.172,284L30.828,284L16.828,270Z"/>
+        </g>
+        <g transform="matrix(0.0598592,0,0,0.0598592,0,-7.66197)">
+            <path d="M142,144.828L156,158.828L156,253.172L142,267.172L128,253.172L128,158.828L142,144.828Z"/>
+        </g>
+        <g transform="matrix(0.0598592,0,0,0.0598592,0,7.66195)">
+            <path d="M142,16.828L156,30.828L156,125.172L142,139.172L128,125.172L128,30.828L142,16.828Z"/>
+        </g>
+        <g transform="matrix(0.0598592,0,0,0.0598592,0,15.3239)">
+            <path d="M139.172,14L125.172,28L30.828,28L16.828,14L30.828,0L125.172,0L139.172,14Z"/>
+        </g>
+        <g transform="matrix(0.0598592,0,0,0.0598592,0,7.66195)">
+            <path d="M14,139.172L0,125.172L0,30.828L14,16.828L28,30.828L28,125.172L14,139.172Z"/>
+        </g>
+        <g transform="matrix(0.0598592,0,0,0.0598592,0,-7.66197)">
+            <path d="M14,267.172L0,253.172L0,158.828L14,144.828L28,158.828L28,253.172L14,267.172Z"/>
+        </g>
+        <g transform="matrix(0.0598592,0,0,0.0598592,0,0)">
+            <path d="M16.828,142L30.828,128L125.172,128L139.172,142L125.172,156L30.828,156L16.828,142Z"/>
+        </g>
+    </g>
 </svg>
