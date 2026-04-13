@@ -12,7 +12,10 @@ struct FirmwareInfo {
         guard fileSize >= 64 else { return nil }
         handle.seek(toFileOffset: fileSize - 64)
         let tailData = handle.readData(ofLength: 64)
-        guard let tail = String(data: tailData, encoding: .ascii) else { return nil }
+
+        // Keep only printable ASCII — firmware images have null padding and a binary CRC tail
+        let cleaned = tailData.filter { $0 >= 0x20 && $0 < 0x7F }
+        guard let tail = String(bytes: cleaned, encoding: .ascii), tail.contains("Build") else { return nil }
 
         // Parse "Build YYYY-MM-DDTHH:MM:SS Version X.X.X "
         var buildDate = ""
@@ -189,10 +192,11 @@ class UpdateManager: ObservableObject {
     }
 
     private func extractBacktickValue(_ line: String) -> String {
-        // Extract value between second pair of backticks: `fwt` is `Build ...`
+        // Extract the last backtick-enclosed value: `key` is `value` or `a` and `b` are `value`
         let parts = line.components(separatedBy: "`")
-        if parts.count >= 4 {
-            return parts[3].trimmingCharacters(in: .whitespaces)
+        // Odd-indexed parts are inside backticks; take the last one
+        if parts.count >= 4, let last = parts.dropFirst().enumerated().filter({ $0.offset % 2 == 0 }).last {
+            return last.element.trimmingCharacters(in: .whitespaces)
         }
         return ""
     }
