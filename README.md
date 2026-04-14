@@ -15,14 +15,39 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 
 ## What it does
 
+### Display & Configuration
 - Connects to the clock over serial, auto-detects ports, reconnects after reboot
 - Configure display modes, colon animation, brightness curve, diagnostics, timezone, and more
 - Send text or countdowns to the display
-- Poll REST APIs or shell commands and rotate values on the clock
+- Poll REST APIs or shell commands and rotate values on the clock (with HTTP header support)
 - Edit the 5-point brightness curve with a draggable graph, save custom presets
-- Check for firmware and timezone updates, install to the CLOCK USB volume
 - Read and write `config.txt` with local backups kept on the Mac
-- Satellite sky view: polar plot with signal strength bars and long-running trail for antenna analysis
+- Check for firmware and timezone updates, install to the CLOCK USB volume
+
+### GPS & Satellites
+- Satellite sky view: polar plot with signal strength bars and 24-hour trail history
+- Sun and moon positions rendered on the polar plot in real time
+- Horizon mask analysis: tracks minimum elevation per azimuth sector to map obstructions
+- GPS info panel: coordinates, Maidenhead grid locator, altitude, HDOP quality indicator
+- Sun data: rise/set times, solar noon, golden hour, civil twilight, equation of time
+- Moon data: phase with emoji, illumination percentage, altitude and azimuth
+- Satellite map view: sub-satellite points plotted on a world map
+- Fix statistics: satellites used, fix type, time since first fix
+
+### NTP Time Server
+- Stratum 1 NTP server using GPS-disciplined time from the clock's GNSS module
+- Serves time on localhost UDP port 12321 using POSIX sockets
+- Time extrapolation compensates for serial latency (~200-500ms)
+- Works with chrony for continuous Mac system clock synchronisation
+- Built-in test query button to verify operation
+- Auto-starts on launch if previously enabled
+
+### Weather
+- Weather conditions displayed on the clock via WeatherKit
+- Location picker with interactive map
+- Configurable update interval
+
+### Other
 - Serial monitor for viewing raw NMEA and debug output
 - Lives in the menu bar, window opens on demand
 
@@ -40,7 +65,32 @@ swift build
 swift run PCC
 ```
 
-Or open `Package.swift` in Xcode and hit Run. Runs unsandboxed, no entitlements needed.
+Or open `Package.swift` in Xcode and hit Run.
+
+## NTP Time Server
+
+The app includes a Stratum 1 NTP server that serves GPS-disciplined time from the clock's GNSS receiver. Enable it from the Time Server tab.
+
+To sync your Mac's clock continuously, install [chrony](https://chrony-project.org/):
+
+```bash
+brew install chrony
+```
+
+Add to `/opt/homebrew/etc/chrony.conf`:
+
+```
+server 127.0.0.1 port 12321 iburst prefer
+```
+
+Start chrony:
+
+```bash
+sudo mkdir -p /var/run/chrony
+sudo /opt/homebrew/sbin/chronyd -f /opt/homebrew/etc/chrony.conf
+```
+
+Check status with `chronyc tracking`. You should see Stratum 1 with the reference ID `GPS`.
 
 ## Serial protocol
 
@@ -49,6 +99,7 @@ Commands are `key = value\r\n` over USB serial at 115200 baud. They take effect 
 ## Dependencies
 
 - [ORSSerialPort](https://github.com/armadsen/ORSSerialPort) (SPM)
+- WeatherKit (Apple framework, macOS 13+)
 
 ## Related
 
