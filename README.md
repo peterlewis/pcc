@@ -6,6 +6,13 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue) ![Swift 5.9+](https://img.shields.io/badge/Swift-5.9%2B-orange)
 
+## Screenshots
+
+![Data Sources](docs/screenshots/data-sources.png)
+![Brightness](docs/screenshots/brightness.png)
+![Sky View](docs/screenshots/sky-view.png)
+![Updates](docs/screenshots/updates.png)
+
 ## What it does
 
 - Connects to the clock over serial, auto-detects ports, reconnects after reboot
