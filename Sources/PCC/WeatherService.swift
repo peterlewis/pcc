@@ -1,85 +1,77 @@
 import Foundation
-import CryptoKit
+import WeatherKit
+import CoreLocation
 
-struct CurrentWeather: Sendable {
-    let temperature: Double   // Celsius (from API with en-GB)
-    let conditionCode: String
-    let windSpeed: Double     // km/h (from API with en-GB)
-    let humidity: Double
-}
-
-enum WeatherError: LocalizedError {
-    case missingCredentials
-    case invalidKey(String)
-    case invalidResponse
-    case apiError(statusCode: Int, message: String)
-    case parseError
-
-    var errorDescription: String? {
-        switch self {
-        case .missingCredentials:
-            return "WeatherKit credentials not configured. Set them in Preferences."
-        case .invalidKey(let detail):
-            return "Invalid .p8 private key: \(detail)"
-        case .invalidResponse:
-            return "Invalid response from WeatherKit API"
-        case .apiError(let code, let msg):
-            return "API error \(code): \(msg)"
-        case .parseError:
-            return "Failed to parse weather data"
-        }
-    }
-}
-
-class WeatherService: ObservableObject {
-    @Published var currentWeather: CurrentWeather?
-    @Published var displayString = ""
+class WeatherManager: ObservableObject {
+    @Published var temperature: String = ""
+    @Published var condition: String = ""
+    @Published var windSpeed: String = ""
+    @Published var humidity: String = ""
+    @Published var displayString: String = ""
     @Published var lastFetchTime: Date?
-    @Published var nextFetchTime: Date?
     @Published var lastError: String?
     @Published var isEnabled = false {
         didSet {
+            UserDefaults.standard.set(isEnabled, forKey: "weatherEnabled")
             if isEnabled { startPolling() } else { stopPolling() }
         }
     }
 
     weak var serialManager: SerialManager?
     private var timer: Timer?
+    private let service = WeatherKit.WeatherService.shared
+
+    init() {
+        self.isEnabled = UserDefaults.standard.bool(forKey: "weatherEnabled")
+    }
+
+    func activate() {
+        if isEnabled { startPolling() }
+    }
 
     // MARK: - Polling
 
     func startPolling() {
-        fetchWeatherNow()
+        fetchNow()
         let interval = pollInterval
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            self?.fetchWeatherNow()
+            self?.fetchNow()
         }
-        nextFetchTime = Date().addingTimeInterval(interval)
     }
 
     func stopPolling() {
         timer?.invalidate()
         timer = nil
-        nextFetchTime = nil
+        if serialManager?.activeDisplayMode == .weather {
+            serialManager?.activateDisplayMode(.none)
+        }
     }
 
-    func fetchWeatherNow() {
-        Task { [weak self] in
-            guard let self else { return }
+    func resumeDisplay() {
+        guard isEnabled, !displayString.isEmpty else { return }
+        serialManager?.activateDisplayMode(.weather)
+        serialManager?.sendScrollingText(displayString)
+    }
+
+    func fetchNow() {
+        let lat = UserDefaults.standard.object(forKey: "latitude") as? Double ?? 51.4043
+        let lon = UserDefaults.standard.object(forKey: "longitude") as? Double ?? -2.3234
+        let location = CLLocation(latitude: lat, longitude: lon)
+
+        Task {
             do {
-                let weather = try await self.fetchWeather()
-                let display = self.formatForDisplay(weather)
+                let weather = try await service.weather(for: location, including: .current)
+                let display = formatForClock(weather)
                 await MainActor.run {
-                    self.currentWeather = weather
+                    self.temperature = self.formatTemp(weather.temperature)
+                    self.condition = self.mapCondition(weather.condition)
+                    self.windSpeed = self.formatWind(weather.wind.speed)
+                    self.humidity = "\(Int(weather.humidity * 100))%"
                     self.displayString = display
                     self.lastFetchTime = Date()
                     self.lastError = nil
-                    self.nextFetchTime = Date().addingTimeInterval(self.pollInterval)
 
-                    if self.isEnabled {
-                        self.serialManager?.sendCommand("text = \(display)")
-                        self.serialManager?.sendCommand("mode_text = 1")
-                    }
+                    self.sendToDisplay(display)
                 }
             } catch {
                 await MainActor.run {
@@ -89,167 +81,102 @@ class WeatherService: ObservableObject {
         }
     }
 
+    private func sendToDisplay(_ value: String) {
+        guard let sm = serialManager else { return }
+        let current = sm.activeDisplayMode
+        guard current == .weather || current == DisplayMode.none else { return }
+        sm.activateDisplayMode(.weather)
+        sm.sendScrollingText(value)
+    }
+
     private var pollInterval: TimeInterval {
         let v = UserDefaults.standard.double(forKey: "weatherPollInterval")
         return v >= 30 ? v : 120
     }
 
-    // MARK: - WeatherKit API
+    // MARK: - Clock display formatting (0-9 a-z - only)
 
-    private func fetchWeather() async throws -> CurrentWeather {
-        let jwt = try createJWT()
+    private func formatForClock(_ weather: CurrentWeather) -> String {
+        let tempUnit = TemperatureUnit(rawValue: UserDefaults.standard.string(forKey: "temperatureUnit") ?? "C") ?? .celsius
+        let windUnit = WindSpeedUnit(rawValue: UserDefaults.standard.string(forKey: "windSpeedUnit") ?? "mph") ?? .mph
+        let format = WeatherDisplayFormat(rawValue: UserDefaults.standard.string(forKey: "weatherDisplayFormat") ?? "") ?? .temperatureConditions
 
-        let d = UserDefaults.standard
-        let lat = d.object(forKey: "latitude") as? Double ?? 51.4043
-        let lon = d.object(forKey: "longitude") as? Double ?? -2.3234
-
-        guard let url = URL(string:
-            "https://weatherkit.apple.com/api/v1/weather/en-GB/\(lat)/\(lon)?dataSets=currentWeather"
-        ) else { throw WeatherError.invalidResponse }
-
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let http = response as? HTTPURLResponse else {
-            throw WeatherError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            let body = String(data: data, encoding: .utf8) ?? "Unknown error"
-            throw WeatherError.apiError(statusCode: http.statusCode, message: body)
+        let temp = convertTemp(weather.temperature, to: tempUnit)
+        // No degree symbol - clock can't display it
+        let tempStr: String
+        if temp == temp.rounded() {
+            tempStr = "\(Int(temp))\(tempUnit.rawValue)"
+        } else {
+            tempStr = String(format: "%.1f%@", temp, tempUnit.rawValue)
         }
 
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let cw = json["currentWeather"] as? [String: Any],
-              let temperature = cw["temperature"] as? Double,
-              let conditionCode = cw["conditionCode"] as? String,
-              let windSpeed = cw["windSpeed"] as? Double,
-              let humidity = cw["humidity"] as? Double
-        else { throw WeatherError.parseError }
-
-        return CurrentWeather(
-            temperature: temperature,
-            conditionCode: conditionCode,
-            windSpeed: windSpeed,
-            humidity: humidity
-        )
-    }
-
-    // MARK: - JWT
-
-    private func createJWT() throws -> String {
-        let d = UserDefaults.standard
-        let teamID    = d.string(forKey: "weatherTeamID") ?? ""
-        let serviceID = d.string(forKey: "weatherServiceID") ?? ""
-        let keyID     = d.string(forKey: "weatherKeyID") ?? ""
-        let p8Path    = d.string(forKey: "weatherP8KeyPath") ?? ""
-
-        guard !teamID.isEmpty, !serviceID.isEmpty, !keyID.isEmpty, !p8Path.isEmpty else {
-            throw WeatherError.missingCredentials
-        }
-
-        let keyPEM: String
-        do {
-            keyPEM = try String(contentsOfFile: p8Path, encoding: .utf8)
-        } catch {
-            throw WeatherError.invalidKey("Cannot read file at \(p8Path)")
-        }
-
-        let privateKey: P256.Signing.PrivateKey
-        do {
-            privateKey = try P256.Signing.PrivateKey(pemRepresentation: keyPEM)
-        } catch {
-            throw WeatherError.invalidKey(error.localizedDescription)
-        }
-
-        // Header
-        let header: [String: String] = [
-            "alg": "ES256",
-            "kid": keyID,
-            "id": "\(teamID).\(serviceID)"
-        ]
-        // Payload
-        let now = Int(Date().timeIntervalSince1970)
-        let payload: [String: Any] = [
-            "iss": teamID,
-            "iat": now,
-            "exp": now + 3600,
-            "sub": serviceID
-        ]
-
-        let headerB64  = try JSONSerialization.data(withJSONObject: header).base64URLEncoded
-        let payloadB64 = try JSONSerialization.data(withJSONObject: payload).base64URLEncoded
-
-        let signingInput = "\(headerB64).\(payloadB64)"
-        let signature = try privateKey.signature(for: Data(signingInput.utf8))
-        let signatureB64 = signature.rawRepresentation.base64URLEncoded
-
-        return "\(signingInput).\(signatureB64)"
-    }
-
-    // MARK: - Display formatting
-
-    func formatForDisplay(_ weather: CurrentWeather) -> String {
-        let d = UserDefaults.standard
-        let tempUnit = TemperatureUnit(rawValue: d.string(forKey: "temperatureUnit") ?? "C") ?? .celsius
-        let windUnit = WindSpeedUnit(rawValue: d.string(forKey: "windSpeedUnit") ?? "mph") ?? .mph
-        let format = WeatherDisplayFormat(rawValue: d.string(forKey: "weatherDisplayFormat") ?? "") ?? .temperatureConditions
-
-        // Temperature conversion
-        var temp = weather.temperature
-        if tempUnit == .fahrenheit { temp = temp * 9.0 / 5.0 + 32.0 }
-        let tempStr = String(format: "%.1f%@", temp, tempUnit.rawValue)
-
-        // Wind speed conversion (API returns km/h for en-GB)
-        var wind = weather.windSpeed
-        switch windUnit {
-        case .mph:   wind *= 0.621371
-        case .kmh:   break
-        case .ms:    wind /= 3.6
-        case .knots: wind *= 0.539957
-        }
+        let wind = convertWind(weather.wind.speed, to: windUnit)
         let windStr = "\(Int(round(wind)))\(windUnit.rawValue)"
 
-        let condition = Self.mapConditionCode(weather.conditionCode)
+        let cond = mapCondition(weather.condition)
 
         switch format {
-        case .temperatureOnly:      return tempStr
-        case .temperatureConditions: return "\(tempStr) \(condition)"
-        case .temperatureWind:      return "\(tempStr) \(windStr)"
-        case .full:                 return "\(tempStr) \(condition) \(windStr)"
+        case .temperatureOnly:       return tempStr
+        case .temperatureConditions: return "\(tempStr) \(cond)"
+        case .temperatureWind:       return "\(tempStr) \(windStr)"
+        case .full:                  return "\(tempStr) \(cond) \(windStr)"
         }
     }
 
-    static func mapConditionCode(_ code: String) -> String {
-        switch code {
-        case "Clear":        return "Clear"
-        case "MostlyClear":  return "Fair"
-        case "PartlyCloudy": return "Cloudy"
-        case "MostlyCloudy": return "Cloudy"
-        case "Overcast":     return "Overcast"
-        case "Drizzle":      return "Drizzle"
-        case "Rain":         return "Rain"
-        case "HeavyRain":    return "HvyRain"
-        case "Snow":         return "Snow"
-        case "HeavySnow":    return "HvySnow"
-        case "Foggy":        return "Fog"
-        case "Haze":         return "Haze"
-        case "Thunderstorms": return "Storm"
-        case "Hail":         return "Hail"
-        case "Windy":        return "Windy"
-        default:             return String(code.prefix(8))
+    // MARK: - UI formatting (with symbols)
+
+    private func formatTemp(_ measurement: Measurement<UnitTemperature>) -> String {
+        let tempUnit = TemperatureUnit(rawValue: UserDefaults.standard.string(forKey: "temperatureUnit") ?? "C") ?? .celsius
+        let value = convertTemp(measurement, to: tempUnit)
+        return String(format: "%.1f°%@", value, tempUnit.rawValue)
+    }
+
+    private func convertTemp(_ measurement: Measurement<UnitTemperature>, to unit: TemperatureUnit) -> Double {
+        switch unit {
+        case .celsius:    return measurement.converted(to: .celsius).value
+        case .fahrenheit: return measurement.converted(to: .fahrenheit).value
         }
     }
-}
 
-// MARK: - Base64URL
+    private func formatWind(_ measurement: Measurement<UnitSpeed>) -> String {
+        let windUnit = WindSpeedUnit(rawValue: UserDefaults.standard.string(forKey: "windSpeedUnit") ?? "mph") ?? .mph
+        let value = convertWind(measurement, to: windUnit)
+        return "\(Int(round(value))) \(windUnit.rawValue)"
+    }
 
-extension Data {
-    var base64URLEncoded: String {
-        base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
+    private func convertWind(_ measurement: Measurement<UnitSpeed>, to unit: WindSpeedUnit) -> Double {
+        switch unit {
+        case .mph:   return measurement.converted(to: .milesPerHour).value
+        case .kmh:   return measurement.converted(to: .kilometersPerHour).value
+        case .ms:    return measurement.converted(to: .metersPerSecond).value
+        case .knots: return measurement.converted(to: .knots).value
+        }
+    }
+
+    // Short labels that fit the clock's character set (a-z 0-9 -)
+    private func mapCondition(_ condition: WeatherCondition) -> String {
+        switch condition {
+        case .clear:                            return "clear"
+        case .mostlyClear:                      return "fair"
+        case .partlyCloudy:                     return "cloudy"
+        case .mostlyCloudy:                     return "cloudy"
+        case .cloudy:                           return "overcast"
+        case .drizzle:                          return "drizzle"
+        case .rain:                             return "rain"
+        case .heavyRain:                        return "hvy rain"
+        case .snow, .flurries:                  return "snow"
+        case .heavySnow, .blizzard:             return "hvy snow"
+        case .foggy:                            return "fog"
+        case .haze:                             return "haze"
+        case .thunderstorms, .strongStorms:     return "storm"
+        case .hail:                             return "hail"
+        case .windy, .breezy:                   return "windy"
+        case .frigid:                           return "frigid"
+        case .hot:                              return "hot"
+        case .sleet, .freezingRain:             return "sleet"
+        case .freezingDrizzle:                  return "frz rain"
+        case .tropicalStorm, .hurricane:        return "storm"
+        default:                                return "---"
+        }
     }
 }

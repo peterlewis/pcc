@@ -369,6 +369,7 @@ struct DataSourceEditView: View {
             Task {
                 do {
                     var request = URLRequest(url: url)
+                    request.timeoutInterval = 15
                     for (key, value) in source.parsedHeaders {
                         request.setValue(value, forHTTPHeaderField: key)
                     }

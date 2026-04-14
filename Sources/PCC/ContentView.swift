@@ -10,6 +10,8 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case modes = "Modes"
     case diagnostics = "Diagnostics"
     case skyView = "Sky View"
+    case map = "Map"
+    case timeServer = "Time Server"
     case serialMonitor = "Serial Monitor"
     case advanced = "Advanced"
     case updates = "Updates"
@@ -27,6 +29,8 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .modes:       return "list.bullet"
         case .diagnostics:    return "gauge"
         case .skyView:        return "scope"
+        case .map:            return "map"
+        case .timeServer:     return "clock.badge.checkmark"
         case .serialMonitor:  return "terminal"
         case .advanced:       return "slider.horizontal.3"
         case .updates:     return "arrow.triangle.2.circlepath"
@@ -54,11 +58,16 @@ struct ContentView: View {
                     sidebarRow(.countdown)
                 }
 
+                Section("GPS") {
+                    sidebarRow(.skyView)
+                    sidebarRow(.map)
+                }
+
                 Section("Configuration") {
                     sidebarRow(.brightness)
                     sidebarRow(.modes)
+                    sidebarRow(.timeServer)
                     sidebarRow(.diagnostics)
-                    sidebarRow(.skyView)
                     sidebarRow(.serialMonitor)
                     sidebarRow(.advanced)
                     sidebarRow(.updates)
@@ -94,6 +103,8 @@ struct ContentView: View {
                 case .modes:       ModesView()
                 case .diagnostics:    DiagnosticsView()
                 case .skyView:       SkyView()
+                case .map:           SatelliteMapView()
+                case .timeServer:    TimeServerView()
                 case .serialMonitor: SerialMonitorView()
                 case .advanced:      ClockSettingsView()
                 case .updates:     UpdatesView()

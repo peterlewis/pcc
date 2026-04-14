@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "PrecisionClockCompanion",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v14)],
     dependencies: [
         .package(url: "https://github.com/armadsen/ORSSerialPort.git", from: "2.1.0")
     ],

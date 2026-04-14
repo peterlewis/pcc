@@ -26,18 +26,6 @@ class AppSettings: ObservableObject {
     @Published var lastSerialPort: String {
         didSet { UserDefaults.standard.set(lastSerialPort, forKey: "lastSerialPort") }
     }
-    @Published var weatherTeamID: String {
-        didSet { UserDefaults.standard.set(weatherTeamID, forKey: "weatherTeamID") }
-    }
-    @Published var weatherServiceID: String {
-        didSet { UserDefaults.standard.set(weatherServiceID, forKey: "weatherServiceID") }
-    }
-    @Published var weatherKeyID: String {
-        didSet { UserDefaults.standard.set(weatherKeyID, forKey: "weatherKeyID") }
-    }
-    @Published var weatherP8KeyPath: String {
-        didSet { UserDefaults.standard.set(weatherP8KeyPath, forKey: "weatherP8KeyPath") }
-    }
     @Published var latitude: Double {
         didSet { UserDefaults.standard.set(latitude, forKey: "latitude") }
     }
@@ -66,10 +54,6 @@ class AppSettings: ObservableObject {
     init() {
         let d = UserDefaults.standard
         self.lastSerialPort = d.string(forKey: "lastSerialPort") ?? ""
-        self.weatherTeamID = d.string(forKey: "weatherTeamID") ?? ""
-        self.weatherServiceID = d.string(forKey: "weatherServiceID") ?? ""
-        self.weatherKeyID = d.string(forKey: "weatherKeyID") ?? ""
-        self.weatherP8KeyPath = d.string(forKey: "weatherP8KeyPath") ?? ""
         self.latitude = d.object(forKey: "latitude") as? Double ?? 51.4043
         self.longitude = d.object(forKey: "longitude") as? Double ?? -2.3234
         self.temperatureUnit = TemperatureUnit(rawValue: d.string(forKey: "temperatureUnit") ?? "C") ?? .celsius

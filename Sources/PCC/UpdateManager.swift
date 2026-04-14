@@ -82,7 +82,9 @@ class UpdateManager: ObservableObject {
         error = nil
         Task {
             do {
-                let (data, _) = try await URLSession.shared.data(from: URL(string: Self.apiURL)!)
+                var req = URLRequest(url: URL(string: Self.apiURL)!)
+                req.timeoutInterval = 15
+                let (data, _) = try await URLSession.shared.data(for: req)
                 guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let tag = json["tag_name"] as? String,
                       let body = json["body"] as? String,
@@ -130,7 +132,9 @@ class UpdateManager: ObservableObject {
 
         Task {
             do {
-                let (zipData, _) = try await URLSession.shared.data(from: release.zipURL)
+                var dlReq = URLRequest(url: release.zipURL)
+                dlReq.timeoutInterval = 60
+                let (zipData, _) = try await URLSession.shared.data(for: dlReq)
 
                 let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
                 try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
@@ -157,9 +161,14 @@ class UpdateManager: ObservableObject {
                     for file in ["fwt.bin", "fwd.bin"] {
                         let src = flashDir.appendingPathComponent(file)
                         let dst = clockVol.appendingPathComponent(file)
-                        if FileManager.default.fileExists(atPath: src.path) {
-                            try? FileManager.default.removeItem(at: dst)
+                        guard FileManager.default.fileExists(atPath: src.path) else { continue }
+                        do {
+                            if FileManager.default.fileExists(atPath: dst.path) {
+                                try FileManager.default.removeItem(at: dst)
+                            }
                             try FileManager.default.copyItem(at: src, to: dst)
+                        } catch {
+                            throw error
                         }
                     }
                 }
@@ -169,9 +178,14 @@ class UpdateManager: ObservableObject {
                     for file in ["tzrules.bin", "tzmap.bin"] {
                         let src = flashDir.appendingPathComponent(file)
                         let dst = clockVol.appendingPathComponent(file)
-                        if FileManager.default.fileExists(atPath: src.path) {
-                            try? FileManager.default.removeItem(at: dst)
+                        guard FileManager.default.fileExists(atPath: src.path) else { continue }
+                        do {
+                            if FileManager.default.fileExists(atPath: dst.path) {
+                                try FileManager.default.removeItem(at: dst)
+                            }
                             try FileManager.default.copyItem(at: src, to: dst)
+                        } catch {
+                            throw error
                         }
                     }
                 }
