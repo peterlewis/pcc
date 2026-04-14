@@ -8,10 +8,13 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 
 ## Screenshots
 
-![Data Sources](docs/screenshots/data-sources.png)
-![Brightness](docs/screenshots/brightness.png)
-![Sky View](docs/screenshots/sky-view.png)
-![Updates](docs/screenshots/updates.png)
+| | |
+|---|---|
+| ![Data Sources](docs/screenshots/data-sources-light.png) | ![Brightness](docs/screenshots/brightness-light.png) |
+| ![Sky View](docs/screenshots/sky-view-light.png) | ![Map](docs/screenshots/map-light.png) |
+| ![NTP Server](docs/screenshots/ntp-light.png) | ![Modes](docs/screenshots/modes-light.png) |
+| ![Sky View Dark](docs/screenshots/sky-view-dark.png) | ![Modes Dark](docs/screenshots/modes-dark.png) |
+| ![Updates](docs/screenshots/updates-light.png) | ![Brightness Dark](docs/screenshots/brightness-dark.png) |
 
 ## What it does
 
