@@ -8,13 +8,50 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 
 ## Screenshots
 
-| | |
-|---|---|
-| ![Data Sources](docs/screenshots/data-sources-light.png) | ![Brightness](docs/screenshots/brightness-light.png) |
-| ![Sky View](docs/screenshots/sky-view-light.png) | ![Map](docs/screenshots/map-light.png) |
-| ![NTP Server](docs/screenshots/ntp-light.png) | ![Modes](docs/screenshots/modes-light.png) |
-| ![Sky View Dark](docs/screenshots/sky-view-dark.png) | ![Modes Dark](docs/screenshots/modes-dark.png) |
-| ![Updates](docs/screenshots/updates-light.png) | ![Brightness Dark](docs/screenshots/brightness-dark.png) |
+<details>
+<summary>Data Sources</summary>
+
+![Data Sources](docs/screenshots/data-sources-light.png)
+</details>
+
+<details>
+<summary>Brightness</summary>
+
+![Brightness — Light](docs/screenshots/brightness-light.png)
+![Brightness — Dark](docs/screenshots/brightness-dark.png)
+</details>
+
+<details>
+<summary>Sky View</summary>
+
+![Sky View — Light](docs/screenshots/sky-view-light.png)
+![Sky View — Dark](docs/screenshots/sky-view-dark.png)
+</details>
+
+<details>
+<summary>Map</summary>
+
+![Map](docs/screenshots/map-light.png)
+</details>
+
+<details>
+<summary>NTP Server</summary>
+
+![NTP Server](docs/screenshots/ntp-light.png)
+</details>
+
+<details>
+<summary>Modes</summary>
+
+![Modes — Light](docs/screenshots/modes-light.png)
+![Modes — Dark](docs/screenshots/modes-dark.png)
+</details>
+
+<details>
+<summary>Updates</summary>
+
+![Updates](docs/screenshots/updates-light.png)
+</details>
 
 ## What it does
 
