@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 enum SidebarItem: String, CaseIterable, Identifiable {
     case dataSources = "Data Sources"
@@ -120,6 +121,20 @@ struct ContentView: View {
                 selectedItem = item
             }
         }
+        .onChange(of: selectedItem) { _, newItem in
+            guard let newItem, let window = NSApp.keyWindow else { return }
+            let idealHeight = idealHeight(for: newItem)
+            var frame = window.frame
+            guard abs(frame.height - idealHeight) > 20 else { return }
+            let delta = idealHeight - frame.height
+            frame.origin.y -= delta
+            frame.size.height = idealHeight
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.25
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                window.animator().setFrame(frame, display: true)
+            }
+        }
     }
 
     @ViewBuilder
@@ -132,6 +147,23 @@ struct ContentView: View {
             }
         }
         .tag(item)
+    }
+
+    private func idealHeight(for item: SidebarItem) -> CGFloat {
+        switch item {
+        case .skyView:        return 850
+        case .advanced:       return 900
+        case .timeServer:     return 850
+        case .weather:        return 750
+        case .brightness:     return 750
+        case .dataSources:    return 700
+        case .map:            return 700
+        case .serialMonitor:  return 700
+        case .diagnostics:    return 650
+        case .updates:        return 650
+        case .modes:          return 600
+        case .connect, .text, .countdown: return 550
+        }
     }
 
     private func isActiveMode(_ item: SidebarItem) -> Bool {

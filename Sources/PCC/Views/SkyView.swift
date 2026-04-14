@@ -69,20 +69,22 @@ class SkyTrail: ObservableObject {
     var center: CGPoint { CGPoint(x: plotSize.width / 2, y: plotSize.height / 2) }
 
     func configure(size: CGSize) {
-        guard size.width > 0, size.height > 0 else { return }
+        guard size.width >= 10, size.height >= 10 else { return }
         guard size != plotSize || ctx == nil else { return }
         plotSize = size
         let w = Int(size.width * renderScale)
         let h = Int(size.height * renderScale)
-        ctx = CGContext(
+        guard w > 0, h > 0, w < 8192, h < 8192 else { return }
+        guard let newCtx = CGContext(
             data: nil, width: w, height: h,
             bitsPerComponent: 8, bytesPerRow: 0,
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        )
+        ) else { return }
         // Flip so origin is top-left, matching SwiftUI Canvas
-        ctx?.translateBy(x: 0, y: CGFloat(h))
-        ctx?.scaleBy(x: renderScale, y: -renderScale)
+        newCtx.translateBy(x: 0, y: CGFloat(h))
+        newCtx.scaleBy(x: renderScale, y: -renderScale)
+        ctx = newCtx
         trailImage = nil
     }
 
@@ -202,56 +204,50 @@ struct SkyView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        // Polar plot with trail, sun, moon, horizon mask
-                        GeometryReader { geo in
-                            ZStack {
-                                // Trail bitmap layer
-                                if let cgImage = trail.trailImage {
-                                    Image(decorative: cgImage, scale: trail.renderScale)
-                                }
-                                // Live grid + satellites + celestial bodies
-                                SkyPlotCanvas(
-                                    satellites: serialManager.satellites,
-                                    sunPosition: sunPos,
-                                    moonPosition: moonPos,
-                                    moonPhase: Astronomy.moonPhase(date: now),
-                                    horizonMask: trail.horizonMask
-                                )
-                            }
-                            .onAppear {
-                                plotSize = geo.size
-                                trail.configure(size: geo.size)
-                            }
-                            .onChange(of: geo.size) { _, newSize in
-                                plotSize = newSize
-                                trail.configure(size: newSize)
-                            }
+                // Polar plot outside ScrollView to avoid layout crash during resize
+                GeometryReader { geo in
+                    ZStack {
+                        if let cgImage = trail.trailImage {
+                            Image(decorative: cgImage, scale: trail.renderScale)
                         }
-                        .aspectRatio(1, contentMode: .fit)
+                        SkyPlotCanvas(
+                            satellites: serialManager.satellites,
+                            sunPosition: sunPos,
+                            moonPosition: moonPos,
+                            moonPhase: Astronomy.moonPhase(date: now),
+                            horizonMask: trail.horizonMask
+                        )
+                    }
+                    .onAppear {
+                        plotSize = geo.size
+                        trail.configure(size: geo.size)
+                    }
+                    .onChange(of: geo.size) { _, newSize in
+                        plotSize = newSize
+                        trail.configure(size: newSize)
+                    }
+                }
+                .aspectRatio(1, contentMode: .fit)
+                .padding(.horizontal)
+                .padding(.top, 4)
+                .onChange(of: serialManager.satellites) { _, sats in
+                    if plotSize.width > 0 {
+                        trail.configure(size: plotSize)
+                        trail.sample(sats)
+                    }
+                }
+
+                // Signal strength bars
+                SignalBars(satellites: serialManager.satellites)
+                    .frame(height: 90)
+                    .padding(.horizontal)
+                    .padding(.top, 4)
+
+                // GPS info panel
+                if serialManager.gpsFix > 0 {
+                    GPSInfoPanel(serialManager: serialManager, now: now)
                         .padding(.horizontal)
                         .padding(.top, 4)
-                        .onChange(of: serialManager.satellites) { _, sats in
-                            if plotSize.width > 0 {
-                                trail.configure(size: plotSize)
-                                trail.sample(sats)
-                            }
-                        }
-
-                        // Signal strength bars
-                        SignalBars(satellites: serialManager.satellites)
-                            .frame(height: 90)
-                            .padding(.horizontal)
-                            .padding(.top, 4)
-
-                        // GPS info panel
-                        if serialManager.gpsFix > 0 {
-                            GPSInfoPanel(serialManager: serialManager, now: now)
-                                .padding(.horizontal)
-                                .padding(.top, 8)
-                        }
-                    }
                 }
             }
 
@@ -335,6 +331,7 @@ private struct SkyPlotCanvas: View {
         Canvas { context, size in
             let center = CGPoint(x: size.width / 2, y: size.height / 2)
             let maxR = min(size.width, size.height) / 2 - 24
+            guard maxR > 10 else { return }
 
             drawHorizonMask(context: &context, center: center, maxR: maxR)
             drawGrid(context: &context, center: center, maxR: maxR)
@@ -581,38 +578,38 @@ private struct GPSInfoPanel: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             // Position & fix quality
             GroupBox {
-                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 3) {
+                Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 2) {
                     if let lat = serialManager.gpsLatitude, let lon = serialManager.gpsLongitude {
                         GridRow {
                             infoLabel("Position")
                             Text(formatCoordinate(lat: lat, lon: lon))
-                                .font(.system(.caption, design: .monospaced))
+                                .font(.system(.caption2, design: .monospaced))
                         }
                         GridRow {
                             infoLabel("Grid")
                             Text(Astronomy.maidenhead(latitude: lat, longitude: lon))
-                                .font(.system(.caption, design: .monospaced))
+                                .font(.system(.caption2, design: .monospaced))
                                 .textSelection(.enabled)
                         }
                     }
                     if let alt = serialManager.gpsAltitude {
                         GridRow {
-                            infoLabel("Altitude")
+                            infoLabel("Alt")
                             Text(String(format: "%.1f m", alt))
-                                .font(.system(.caption, design: .monospaced))
+                                .font(.system(.caption2, design: .monospaced))
                         }
                     }
                     GridRow {
                         infoLabel("Fix")
                         HStack(spacing: 4) {
                             Text(fixTypeLabel(serialManager.gpsFix))
-                                .font(.caption)
+                                .font(.caption2)
                             if serialManager.gpsSatellitesUsed > 0 {
-                                Text("(\(serialManager.gpsSatellitesUsed) sats)")
-                                    .font(.caption)
+                                Text("(\(serialManager.gpsSatellitesUsed))")
+                                    .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
                         }
@@ -622,10 +619,10 @@ private struct GPSInfoPanel: View {
                             infoLabel("HDOP")
                             HStack(spacing: 4) {
                                 Text(String(format: "%.1f", hdop))
-                                    .font(.system(.caption, design: .monospaced))
+                                    .font(.system(.caption2, design: .monospaced))
                                 Text(hdopQuality(hdop))
-                                    .font(.caption2)
-                                    .padding(.horizontal, 4)
+                                    .font(.system(size: 9))
+                                    .padding(.horizontal, 3)
                                     .padding(.vertical, 1)
                                     .background(hdopColor(hdop).opacity(0.15))
                                     .foregroundStyle(hdopColor(hdop))
@@ -637,112 +634,110 @@ private struct GPSInfoPanel: View {
                         GridRow {
                             infoLabel("Fix age")
                             Text(fixDuration(since: firstFix))
-                                .font(.system(.caption, design: .monospaced))
+                                .font(.system(.caption2, design: .monospaced))
                         }
                     }
                 }
             } label: {
                 Label("Position", systemImage: "location.fill")
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
 
             // Sun times
             if let times = sunTimes {
                 GroupBox {
-                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 3) {
+                    Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 2) {
                         if let lat = serialManager.gpsLatitude, let lon = serialManager.gpsLongitude {
                             let sunPos = Astronomy.sunPosition(date: now, latitude: lat, longitude: lon)
                             GridRow {
-                                infoLabel("Altitude")
+                                infoLabel("Alt")
                                 Text(String(format: "%.1f\u{00B0}", sunPos.altitude))
-                                    .font(.system(.caption, design: .monospaced))
+                                    .font(.system(.caption2, design: .monospaced))
                             }
                         }
                         GridRow {
-                            infoLabel("Sunrise")
+                            infoLabel("Rise")
                             Text(formatTime(times.sunrise))
-                                .font(.system(.caption, design: .monospaced))
+                                .font(.system(.caption2, design: .monospaced))
                         }
                         GridRow {
-                            infoLabel("Solar noon")
+                            infoLabel("Noon")
                             Text(formatTime(times.solarNoon))
-                                .font(.system(.caption, design: .monospaced))
+                                .font(.system(.caption2, design: .monospaced))
                         }
                         GridRow {
-                            infoLabel("Sunset")
+                            infoLabel("Set")
                             Text(formatTime(times.sunset))
-                                .font(.system(.caption, design: .monospaced))
+                                .font(.system(.caption2, design: .monospaced))
                         }
                         GridRow {
-                            infoLabel("Golden hour")
+                            infoLabel("Golden")
                             Text(formatTime(times.goldenHourStart))
-                                .font(.system(.caption, design: .monospaced))
+                                .font(.system(.caption2, design: .monospaced))
                         }
                         GridRow {
-                            infoLabel("Civil twi.")
-                            Text(formatTime(times.civilTwilight))
-                                .font(.system(.caption, design: .monospaced))
-                        }
-                        GridRow {
-                            infoLabel("Eq. of time")
+                            infoLabel("Eq.T")
                             Text(String(format: "%+.1f min", Astronomy.equationOfTime(date: now)))
-                                .font(.system(.caption, design: .monospaced))
+                                .font(.system(.caption2, design: .monospaced))
                         }
                     }
                 } label: {
                     Label("Sun", systemImage: "sun.max.fill")
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundStyle(.orange)
                 }
             }
 
             // Moon
             GroupBox {
-                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 3) {
+                Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 2) {
                     let phase = Astronomy.moonPhase(date: now)
                     GridRow {
                         infoLabel("Phase")
-                        HStack(spacing: 4) {
+                        HStack(spacing: 3) {
                             Text(moonPhaseEmoji(phase))
+                                .font(.system(size: 9))
+                            Text(String(format: "%.0f%%", moonIllumination(phase) * 100))
                                 .font(.caption2)
-                            Text(moonPhaseName(phase))
-                                .font(.caption)
-                            Text(String(format: "(%.0f%%)", moonIllumination(phase) * 100))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                         }
+                    }
+                    GridRow {
+                        infoLabel("")
+                        Text(moonPhaseName(phase))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                     if let lat = serialManager.gpsLatitude, let lon = serialManager.gpsLongitude {
                         let mPos = Astronomy.moonPosition(date: now, latitude: lat, longitude: lon)
                         GridRow {
-                            infoLabel("Altitude")
+                            infoLabel("Alt")
                             Text(String(format: "%.1f\u{00B0}", mPos.altitude))
-                                .font(.system(.caption, design: .monospaced))
+                                .font(.system(.caption2, design: .monospaced))
                         }
                         GridRow {
-                            infoLabel("Azimuth")
-                            Text(String(format: "%.1f\u{00B0} %@", mPos.azimuth, compassBearing(mPos.azimuth)))
-                                .font(.system(.caption, design: .monospaced))
+                            infoLabel("Az")
+                            Text(String(format: "%.0f\u{00B0} %@", mPos.azimuth, compassBearing(mPos.azimuth)))
+                                .font(.system(.caption2, design: .monospaced))
                         }
                     }
                 }
             } label: {
                 Label("Moon", systemImage: "moon.fill")
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.gray)
             }
         }
-        .padding(.bottom, 8)
+        .padding(.bottom, 4)
     }
 
     // MARK: - Helpers
 
     private func infoLabel(_ text: String) -> some View {
         Text(text)
-            .font(.caption)
+            .font(.caption2)
             .foregroundStyle(.secondary)
-            .frame(width: 80, alignment: .trailing)
+            .frame(width: 48, alignment: .trailing)
     }
 
     private func formatCoordinate(lat: Double, lon: Double) -> String {
