@@ -4,6 +4,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let serialManager: SerialManager
     private let dataSourceManager: DataSourceManager
+    private let ntpServer: NTPServer
     private var appearanceObserver: NSKeyValueObservation?
 
     private var redModeEnabled: Bool {
@@ -14,9 +15,10 @@ class StatusBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    init(serialManager: SerialManager, dataSourceManager: DataSourceManager) {
+    init(serialManager: SerialManager, dataSourceManager: DataSourceManager, ntpServer: NTPServer) {
         self.serialManager = serialManager
         self.dataSourceManager = dataSourceManager
+        self.ntpServer = ntpServer
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
@@ -56,6 +58,35 @@ class StatusBarController: NSObject, NSMenuDelegate {
                 item.isEnabled = false
                 menu.addItem(item)
             }
+        }
+
+        // NTP server status
+        if ntpServer.isRunning {
+            menu.addItem(.separator())
+            var ntpTitle = "NTP: serving on port \(ntpServer.port)"
+            if ntpServer.queriesServed > 0 {
+                ntpTitle += " (\(ntpServer.queriesServed) queries)"
+            }
+            let ntpItem = NSMenuItem(title: ntpTitle, action: nil, keyEquivalent: "")
+            ntpItem.isEnabled = false
+            menu.addItem(ntpItem)
+
+            if let offset = ntpServer.timeOffset {
+                let ms = offset * 1000
+                let offsetStr: String
+                if abs(ms) < 1 {
+                    offsetStr = String(format: "%+.3f ms", ms)
+                } else if abs(ms) < 1000 {
+                    offsetStr = String(format: "%+.1f ms", ms)
+                } else {
+                    offsetStr = String(format: "%+.2f s", offset)
+                }
+                let offsetItem = NSMenuItem(title: "   System clock skew: \(offsetStr)", action: nil, keyEquivalent: "")
+                offsetItem.isEnabled = false
+                menu.addItem(offsetItem)
+            }
+
+
         }
 
         menu.addItem(.separator())
@@ -143,8 +174,9 @@ class StatusBarController: NSObject, NSMenuDelegate {
         if let window = NSApp.windows.first(where: { $0.canBecomeMain }) {
             window.makeKeyAndOrderFront(nil)
         } else {
-            // Window was destroyed by SwiftUI — create a new one
-            NSApp.sendAction(Selector(("newWindowForTab:")), to: nil, from: nil)
+            // Window was destroyed by SwiftUI — create a new one via private API
+            let sel = NSSelectorFromString("newWindowForTab:")
+            NSApp.sendAction(sel, to: nil, from: nil)
         }
     }
 
@@ -155,4 +187,5 @@ class StatusBarController: NSObject, NSMenuDelegate {
     @objc private func quitApp() {
         NSApp.terminate(nil)
     }
+
 }

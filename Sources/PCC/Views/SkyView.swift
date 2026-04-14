@@ -224,7 +224,7 @@ struct SkyView: View {
                                 plotSize = geo.size
                                 trail.configure(size: geo.size)
                             }
-                            .onChange(of: geo.size) { newSize in
+                            .onChange(of: geo.size) { _, newSize in
                                 plotSize = newSize
                                 trail.configure(size: newSize)
                             }
@@ -232,7 +232,7 @@ struct SkyView: View {
                         .aspectRatio(1, contentMode: .fit)
                         .padding(.horizontal)
                         .padding(.top, 4)
-                        .onChange(of: serialManager.satellites) { sats in
+                        .onChange(of: serialManager.satellites) { _, sats in
                             if plotSize.width > 0 {
                                 trail.configure(size: plotSize)
                                 trail.sample(sats)
@@ -298,11 +298,11 @@ struct SkyView: View {
         .onReceive(celestialTimer) { now = $0 }
         .onAppear {
             now = Date()
-            serialManager.satelliteTrackingEnabled = true
+            serialManager.requestSatelliteTracking()
             serialManager.requestNMEA()
         }
         .onDisappear {
-            serialManager.satelliteTrackingEnabled = false
+            serialManager.releaseSatelliteTracking()
             serialManager.releaseNMEA()
         }
     }

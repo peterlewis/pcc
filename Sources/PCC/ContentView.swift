@@ -44,6 +44,7 @@ extension Notification.Name {
 
 struct ContentView: View {
     @EnvironmentObject var serialManager: SerialManager
+    @EnvironmentObject var ntpServer: NTPServer
     @State private var selectedItem: SidebarItem? = .dataSources
 
     var body: some View {
@@ -134,6 +135,7 @@ struct ContentView: View {
     }
 
     private func isActiveMode(_ item: SidebarItem) -> Bool {
+        if item == .timeServer { return ntpServer.isRunning }
         switch (item, serialManager.activeDisplayMode) {
         case (.text, .text), (.weather, .weather), (.countdown, .countdown), (.dataSources, .dataSource):
             return true

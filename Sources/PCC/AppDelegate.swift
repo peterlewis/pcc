@@ -3,11 +3,12 @@ import AppKit
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusBarController: StatusBarController?
 
-    func setUp(serialManager: SerialManager, dataSourceManager: DataSourceManager) {
+    func setUp(serialManager: SerialManager, dataSourceManager: DataSourceManager, ntpServer: NTPServer) {
         guard statusBarController == nil else { return }
         statusBarController = StatusBarController(
             serialManager: serialManager,
-            dataSourceManager: dataSourceManager
+            dataSourceManager: dataSourceManager,
+            ntpServer: ntpServer
         )
     }
 

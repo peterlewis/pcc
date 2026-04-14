@@ -18,37 +18,37 @@ struct DiagnosticsView: View {
         Form {
             Section("Diagnostic Modes") {
                 Toggle("Brightness ADC/DAC", isOn: $debugBrightness)
-                    .onChange(of: debugBrightness) { newValue in
+                    .onChange(of: debugBrightness) { _, newValue in
                         serialManager.sendCommand("MODE_DEBUG_BRIGHTNESS = \(newValue ? 1 : 0)")
                     }
 
                 Toggle("RTC Calibration", isOn: $debugRTC)
-                    .onChange(of: debugRTC) { newValue in
+                    .onChange(of: debugRTC) { _, newValue in
                         serialManager.sendCommand("MODE_DEBUG_RTC = \(newValue ? 1 : 0)")
                     }
 
                 Toggle("Satellite View", isOn: $satview)
-                    .onChange(of: satview) { newValue in
+                    .onChange(of: satview) { _, newValue in
                         serialManager.sendCommand("mode_satview = \(newValue ? 1 : 0)")
                     }
 
                 Toggle("Battery Voltage", isOn: $vbat)
-                    .onChange(of: vbat) { newValue in
+                    .onChange(of: vbat) { _, newValue in
                         serialManager.sendCommand("mode_vbat = \(newValue ? 1 : 0)")
                     }
 
                 Toggle("Firmware CRC", isOn: $firmwareCRC)
-                    .onChange(of: firmwareCRC) { newValue in
+                    .onChange(of: firmwareCRC) { _, newValue in
                         serialManager.sendCommand("MODE_FIRMWARE_CRC = \(newValue ? 1 : 0)")
                     }
 
                 Toggle("Display Test", isOn: $displayTest)
-                    .onChange(of: displayTest) { newValue in
+                    .onChange(of: displayTest) { _, newValue in
                         serialManager.sendCommand("MODE_DISPLAYTEST = \(newValue ? 1 : 0)")
                     }
 
                 Toggle("Time to First Fix", isOn: $ttff)
-                    .onChange(of: ttff) { newValue in
+                    .onChange(of: ttff) { _, newValue in
                         serialManager.sendCommand("MODE_TTFF = \(newValue ? 1 : 0)")
                     }
             }

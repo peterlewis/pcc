@@ -67,7 +67,10 @@ struct SatelliteMapView: View {
     @EnvironmentObject var serialManager: SerialManager
     @EnvironmentObject var settings: AppSettings
 
-    @State private var cameraPosition: MapCameraPosition = .automatic
+    @State private var cameraPosition: MapCameraPosition = .region(
+        MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 30, longitude: 0),
+                           span: MKCoordinateSpan(latitudeDelta: 140, longitudeDelta: 360))
+    )
     @State private var pickedCoordinate: CLLocationCoordinate2D?
     @State private var hoveredTimezone: String?
     @State private var isPickingLocation = false
@@ -238,6 +241,14 @@ struct SatelliteMapView: View {
                 .cornerRadius(6)
                 .padding(8)
             }
+        }
+        .onAppear {
+            serialManager.requestSatelliteTracking()
+            serialManager.requestNMEA()
+        }
+        .onDisappear {
+            serialManager.releaseSatelliteTracking()
+            serialManager.releaseNMEA()
         }
     }
 }

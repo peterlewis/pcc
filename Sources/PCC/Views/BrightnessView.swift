@@ -133,7 +133,7 @@ struct BrightnessView: View {
         GroupBox("Manual Override") {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Lock brightness", isOn: $isManual)
-                    .onChange(of: isManual) { manual in
+                    .onChange(of: isManual) { _, manual in
                         if manual {
                             needsReboot = false
                             serialManager.sendCommand(
@@ -146,7 +146,7 @@ struct BrightnessView: View {
                 if isManual {
                     HStack {
                         Slider(value: $brightness, in: 0...1, step: 0.01)
-                            .onChange(of: brightness) { value in
+                            .onChange(of: brightness) { _, value in
                                 guard isManual else { return }
                                 serialManager.sendCommand(
                                     "brightness = \(String(format: "%.3f", value))")

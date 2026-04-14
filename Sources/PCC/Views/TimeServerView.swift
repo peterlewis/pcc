@@ -50,13 +50,14 @@ struct TimeServerView: View {
 
             // Time offset section
             Section("System Clock") {
-                if let gpsTime = serialManager.gpsUTCTime {
+                if let gpsTime = serialManager.gpsUTCTime,
+                   let receivedAt = serialManager.gpsUTCTimeReceived {
                     HStack {
                         Text("GPS time (UTC)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text(formatUTC(gpsTime))
+                        Text(formatUTC(gpsTime.addingTimeInterval(Date().timeIntervalSince(receivedAt))))
                             .font(.system(.caption, design: .monospaced))
                     }
                 }
@@ -66,7 +67,7 @@ struct TimeServerView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text(formatUTC(now))
+                    Text(formatUTC(Date()))
                         .font(.system(.caption, design: .monospaced))
                 }
 
@@ -189,7 +190,6 @@ struct TimeServerView: View {
             DispatchQueue.main.async {
                 if received >= 48 {
                     let stratum = response[1]
-                    let mode = response[0] & 0x07
                     let refID = String(bytes: response[12..<16], encoding: .ascii)?
                         .trimmingCharacters(in: .controlCharacters) ?? "?"
                     testResult = "OK \u{2014} Stratum \(stratum), ref \(refID)"

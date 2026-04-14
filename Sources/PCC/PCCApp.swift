@@ -29,7 +29,7 @@ struct PCCApp: App {
                 .onAppear {
                     dataSourceManager.serialManager = serialManager
                     weatherManager.serialManager = serialManager
-                    appDelegate.setUp(serialManager: serialManager, dataSourceManager: dataSourceManager)
+                    appDelegate.setUp(serialManager: serialManager, dataSourceManager: dataSourceManager, ntpServer: ntpServer)
                     dataSourceManager.activate()
                     weatherManager.activate()
                     configManager.load()
@@ -37,7 +37,7 @@ struct PCCApp: App {
                 }
         }
         .windowResizability(.contentMinSize)
-        .defaultSize(width: 580, height: 780)
+        .defaultSize(width: 700, height: 780)
 
         Settings {
             PreferencesView()

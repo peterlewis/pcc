@@ -18,7 +18,7 @@ struct SerialMonitorView: View {
                     }
                     .pickerStyle(.segmented)
                     .frame(width: 180)
-                    .onChange(of: nmeaMode) { newValue in
+                    .onChange(of: nmeaMode) { _, newValue in
                         serialManager.sendCommand("NMEA = \(newValue)")
                     }
 
@@ -55,7 +55,7 @@ struct SerialMonitorView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .padding(.horizontal)
                 .padding(.top, 4)
-                .onChange(of: serialManager.serialLog) { _ in
+                .onChange(of: serialManager.serialLog) {
                     if autoScroll {
                         withAnimation(.none) {
                             proxy.scrollTo("logBottom", anchor: .bottom)

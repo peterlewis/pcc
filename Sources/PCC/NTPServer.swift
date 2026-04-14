@@ -119,9 +119,9 @@ class NTPServer: ObservableObject {
         guard bytesRead >= 48 else { return }
 
         let clientData = Data(buffer[0..<48])
-        var response = buildResponse(clientPacket: clientData)
+        let response = buildResponse(clientPacket: clientData)
 
-        response.withUnsafeBytes { responsePtr in
+        _ = response.withUnsafeBytes { responsePtr in
             withUnsafePointer(to: &clientAddr) { addrPtr in
                 addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
                     sendto(serverSocket, responsePtr.baseAddress, response.count, 0,

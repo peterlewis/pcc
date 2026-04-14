@@ -77,7 +77,7 @@ struct ModesView: View {
                         Text(option.label).tag(option.value)
                     }
                 }
-                .onChange(of: colonMode) { newValue in
+                .onChange(of: colonMode) { _, newValue in
                     serialManager.sendCommand("colon_mode = \(newValue)")
                 }
                 Text("Colons stop blinking when GPS fix is lost")
@@ -89,7 +89,7 @@ struct ModesView: View {
 
             Section {
                 Toggle("Standby Mode", isOn: $standbyEnabled)
-                    .onChange(of: standbyEnabled) { newValue in
+                    .onChange(of: standbyEnabled) { _, newValue in
                         serialManager.sendCommand("MODE_STANDBY = \(newValue ? 1 : 0)")
                     }
                 Text("Turns off all LEDs. GPS module stays powered.")

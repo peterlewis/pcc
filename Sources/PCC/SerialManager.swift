@@ -49,7 +49,8 @@ class SerialManager: NSObject, ObservableObject {
     @Published var firstFixTime: Date?
     @Published var gpsUTCTime: Date?  // Parsed from RMC (date + time)
     var gpsUTCTimeReceived: Date?     // System time when RMC was received
-    var satelliteTrackingEnabled = false
+    private(set) var satelliteTrackingEnabled = false
+    private var satelliteTrackingCount = 0
     private var nmeaConsumerCount = 0
     private var gsvBuffer: [String: [SatelliteInfo]] = [:]
     private var satelliteUpdateTimer: Timer?
@@ -224,7 +225,7 @@ class SerialManager: NSObject, ObservableObject {
 extension SerialManager: ORSSerialPortDelegate {
 
     func serialPortWasOpened(_ serialPort: ORSSerialPort) {
-        sendCommand("nmea = off")
+        sendCommand(nmeaConsumerCount > 0 ? "nmea = all" : "nmea = off")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             self?.isConnected = true
             self?.statusMessage = "Connected to \(serialPort.name)"
@@ -269,6 +270,18 @@ extension SerialManager: ORSSerialPortDelegate {
         nmeaConsumerCount = max(0, nmeaConsumerCount - 1)
         if nmeaConsumerCount == 0 {
             sendCommand("NMEA = off")
+        }
+    }
+
+    func requestSatelliteTracking() {
+        satelliteTrackingCount += 1
+        satelliteTrackingEnabled = true
+    }
+
+    func releaseSatelliteTracking() {
+        satelliteTrackingCount = max(0, satelliteTrackingCount - 1)
+        if satelliteTrackingCount == 0 {
+            satelliteTrackingEnabled = false
         }
     }
 

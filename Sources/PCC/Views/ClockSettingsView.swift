@@ -258,7 +258,7 @@ struct ClockSettingsView: View {
                     TextEditor(text: $configEditorText)
                         .font(.system(.caption, design: .monospaced))
                         .frame(height: 300)
-                        .onChange(of: configEditorText) { _ in
+                        .onChange(of: configEditorText) {
                             configEditorDirty = configEditorText != configManager.rawText
                         }
                     HStack {
