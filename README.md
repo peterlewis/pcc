@@ -188,6 +188,7 @@ Commands are `key = value\r\n` over USB serial at 115200 baud. They take effect 
 
 - [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs): official project documentation
 - [clock4](https://github.com/mitxela/clock4): hardware design and firmware source
+- [Forum thread](https://mitxela.com/forum/topic/pcc-precision-clock-companion-macos-menu-bar-app): discussion on the mitxela forum
 
 ## License
 
