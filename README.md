@@ -8,6 +8,12 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 
 ## Screenshots
 
+<details>
+<summary>Connect</summary>
+
+![Connect](docs/screenshots/connect-light.png)
+</details>
+
 ### Display
 
 <details>
