@@ -9,6 +9,12 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 ## Screenshots
 
 <details>
+<summary>Menu Bar</summary>
+
+![Menu Bar](docs/screenshots/menu-bar.png)
+</details>
+
+<details>
 <summary>Connect</summary>
 
 ![Connect](docs/screenshots/connect-light.png)
@@ -94,12 +100,6 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 <summary>Updates</summary>
 
 ![Updates](docs/screenshots/updates-light.png)
-</details>
-
-<details>
-<summary>Menu Bar</summary>
-
-![Menu Bar](docs/screenshots/menu-bar.png)
 </details>
 
 ## What it does
