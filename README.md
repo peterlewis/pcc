@@ -8,18 +8,28 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 
 ## Screenshots
 
+### Display
+
 <details>
 <summary>Data Sources</summary>
 
 ![Data Sources](docs/screenshots/data-sources-light.png)
+![Data Sources — GitHub Stars](docs/screenshots/data-sources-light-github-stars.png)
 </details>
 
 <details>
-<summary>Brightness</summary>
+<summary>Text</summary>
 
-![Brightness — Light](docs/screenshots/brightness-light.png)
-![Brightness — Dark](docs/screenshots/brightness-dark.png)
+![Text](docs/screenshots/text-light.png)
 </details>
+
+<details>
+<summary>Countdown</summary>
+
+![Countdown](docs/screenshots/countdown-light.png)
+</details>
+
+### GPS
 
 <details>
 <summary>Sky View</summary>
@@ -34,10 +44,13 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 ![Map](docs/screenshots/map-light.png)
 </details>
 
-<details>
-<summary>NTP Server</summary>
+### Configuration
 
-![NTP Server](docs/screenshots/ntp-light.png)
+<details>
+<summary>Brightness</summary>
+
+![Brightness — Light](docs/screenshots/brightness-light.png)
+![Brightness — Dark](docs/screenshots/brightness-dark.png)
 </details>
 
 <details>
@@ -45,6 +58,30 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 
 ![Modes — Light](docs/screenshots/modes-light.png)
 ![Modes — Dark](docs/screenshots/modes-dark.png)
+</details>
+
+<details>
+<summary>Time Server</summary>
+
+![Time Server](docs/screenshots/ntp-light.png)
+</details>
+
+<details>
+<summary>Diagnostics</summary>
+
+![Diagnostics](docs/screenshots/diagnostics-light.png)
+</details>
+
+<details>
+<summary>Serial Monitor</summary>
+
+![Serial Monitor](docs/screenshots/serial-monitor-light.png)
+</details>
+
+<details>
+<summary>Advanced</summary>
+
+![Advanced](docs/screenshots/advanced-light.png)
 </details>
 
 <details>
