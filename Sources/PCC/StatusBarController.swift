@@ -174,9 +174,22 @@ class StatusBarController: NSObject, NSMenuDelegate {
         if let window = NSApp.windows.first(where: { $0.canBecomeMain }) {
             window.makeKeyAndOrderFront(nil)
         } else {
-            // Window was destroyed by SwiftUI — create a new one via private API
-            let sel = NSSelectorFromString("newWindowForTab:")
-            NSApp.sendAction(sel, to: nil, from: nil)
+            // Window was destroyed by SwiftUI — recreate it.
+            // Dispatch async so the menu bar is set up after the policy change,
+            // then invoke the same "New Window" action that Cmd+N uses.
+            DispatchQueue.main.async {
+                if let window = NSApp.windows.first(where: { $0.canBecomeMain }) {
+                    window.makeKeyAndOrderFront(nil)
+                    return
+                }
+                if let menuItem = NSApp.mainMenu?.items.lazy
+                    .compactMap({ $0.submenu })
+                    .flatMap({ $0.items })
+                    .first(where: { $0.keyEquivalent == "n" && $0.keyEquivalentModifierMask == .command }),
+                   let action = menuItem.action {
+                    NSApp.sendAction(action, to: menuItem.target, from: nil)
+                }
+            }
         }
     }
 

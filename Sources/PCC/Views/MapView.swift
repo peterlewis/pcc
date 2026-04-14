@@ -81,6 +81,11 @@ struct SatelliteMapView: View {
         return CLLocationCoordinate2D(latitude: lat, longitude: lon)
     }
 
+    private var constellationsPresent: [SatConstellation] {
+        let unique = Set(serialManager.satellites.map(\.constellation))
+        return SatConstellation.allCases.filter { unique.contains($0) }
+    }
+
     private var satelliteAnnotations: [SatelliteAnnotation] {
         guard let gps = gpsCoordinate else { return [] }
         return serialManager.satellites.compactMap { sat in
@@ -229,7 +234,7 @@ struct SatelliteMapView: View {
             .overlay(alignment: .bottomTrailing) {
                 // Legend
                 VStack(alignment: .leading, spacing: 3) {
-                    ForEach(SatConstellation.allCases, id: \.self) { c in
+                    ForEach(constellationsPresent, id: \.self) { c in
                         HStack(spacing: 4) {
                             Circle().fill(c.color).frame(width: 6, height: 6)
                             Text(c.rawValue).font(.system(size: 9))

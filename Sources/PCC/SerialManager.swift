@@ -172,8 +172,10 @@ class SerialManager: NSObject, ObservableObject {
     private var scrollWrapPosition: Int = 0
 
     /// Send text to the display. If > 10 chars, starts a marquee scroll.
+    /// Uses underscore as separator — visible on 7-segment at any position,
+    /// unlike spaces which are invisible at the leading digit.
     func sendScrollingText(_ value: String) {
-        let newScrollText = value + "  "
+        let newScrollText = value + "_"
 
         // Don't restart scroll if already scrolling the same text
         if scrollTimer != nil && scrollText == newScrollText {
@@ -188,14 +190,12 @@ class SerialManager: NSObject, ObservableObject {
             sendCommand("text = \(value)")
         } else {
             scrollText = newScrollText
-            scrollWrapPosition = value.count
+            scrollWrapPosition = newScrollText.count
             scrollPosition = 0
             sendScrollFrame()
             scrollTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { [weak self] _ in
                 guard let self else { return }
                 self.scrollPosition += 1
-                // When the gap reaches the left edge of the display, leading blank
-                // digits are invisible on 7-segment — skip those frames and restart.
                 if self.scrollPosition >= self.scrollWrapPosition {
                     self.scrollPosition = 0
                 }
