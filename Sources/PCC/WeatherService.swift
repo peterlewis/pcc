@@ -43,6 +43,7 @@ class WeatherManager: ObservableObject {
         timer?.invalidate()
         timer = nil
         if serialManager?.activeDisplayMode == .weather {
+            serialManager?.stopScrolling()
             serialManager?.activateDisplayMode(.none)
         }
     }
@@ -50,6 +51,7 @@ class WeatherManager: ObservableObject {
     func resumeDisplay() {
         guard isEnabled, !displayString.isEmpty else { return }
         serialManager?.activateDisplayMode(.weather)
+        serialManager?.sendCommand("mode_text = 1")
         serialManager?.sendScrollingText(displayString)
     }
 
@@ -86,6 +88,7 @@ class WeatherManager: ObservableObject {
         let current = sm.activeDisplayMode
         guard current == .weather || current == DisplayMode.none else { return }
         sm.activateDisplayMode(.weather)
+        sm.sendCommand("mode_text = 1")
         sm.sendScrollingText(value)
     }
 

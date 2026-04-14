@@ -23,11 +23,12 @@ class SerialManager: NSObject, ObservableObject {
         guard mode != activeDisplayMode else { return }
         // Tear down previous mode
         switch activeDisplayMode {
-        case .text, .dataSource:
+        case .text, .dataSource, .weather:
+            stopScrolling()
             sendCommand("mode_text = 0")
         case .countdown:
             sendCommand("mode_countdown = 0")
-        case .weather, .none:
+        case .none:
             break
         }
         activeDisplayMode = mode
@@ -168,10 +169,11 @@ class SerialManager: NSObject, ObservableObject {
     private var scrollTimer: Timer?
     private var scrollText: String = ""
     private var scrollPosition: Int = 0
+    private var scrollWrapPosition: Int = 0
 
     /// Send text to the display. If > 10 chars, starts a marquee scroll.
     func sendScrollingText(_ value: String) {
-        let newScrollText = value + "          "
+        let newScrollText = value + "  "
 
         // Don't restart scroll if already scrolling the same text
         if scrollTimer != nil && scrollText == newScrollText {
@@ -186,11 +188,17 @@ class SerialManager: NSObject, ObservableObject {
             sendCommand("text = \(value)")
         } else {
             scrollText = newScrollText
+            scrollWrapPosition = value.count
             scrollPosition = 0
             sendScrollFrame()
             scrollTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { [weak self] _ in
                 guard let self else { return }
-                self.scrollPosition = (self.scrollPosition + 1) % self.scrollText.count
+                self.scrollPosition += 1
+                // When the gap reaches the left edge of the display, leading blank
+                // digits are invisible on 7-segment — skip those frames and restart.
+                if self.scrollPosition >= self.scrollWrapPosition {
+                    self.scrollPosition = 0
+                }
                 self.sendScrollFrame()
             }
         }

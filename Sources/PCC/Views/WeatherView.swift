@@ -133,5 +133,8 @@ struct WeatherView: View {
             }
         }
         .formStyle(.grouped)
+        .onChange(of: settings.weatherDisplayFormat) { _, _ in weatherManager.fetchNow() }
+        .onChange(of: settings.temperatureUnit) { _, _ in weatherManager.fetchNow() }
+        .onChange(of: settings.windSpeedUnit) { _, _ in weatherManager.fetchNow() }
     }
 }

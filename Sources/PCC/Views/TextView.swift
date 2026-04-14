@@ -44,6 +44,14 @@ struct ClockTextView: View {
                 }
 
                 Toggle("Text mode enabled", isOn: textModeBinding)
+
+                if serialManager.activeDisplayMode != .text
+                    && serialManager.activeDisplayMode != .none {
+                    Label("\(serialManager.activeDisplayMode.rawValue) is currently using the display",
+                          systemImage: "pause.circle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
 
             if !settings.recentTexts.isEmpty {

@@ -52,6 +52,11 @@ struct CountdownView: View {
                         Text("Countdown active")
                             .foregroundStyle(.secondary)
                     }
+                } else if serialManager.activeDisplayMode != .none {
+                    Label("\(serialManager.activeDisplayMode.rawValue) is currently using the display",
+                          systemImage: "pause.circle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
                 }
             }
         }
