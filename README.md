@@ -96,6 +96,12 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 ![Updates](docs/screenshots/updates-light.png)
 </details>
 
+<details>
+<summary>Menu Bar</summary>
+
+![Menu Bar](docs/screenshots/menu-bar.png)
+</details>
+
 ## What it does
 
 ### Display & Configuration
