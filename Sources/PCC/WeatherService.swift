@@ -32,6 +32,8 @@ class WeatherManager: ObservableObject {
     // MARK: - Polling
 
     func startPolling() {
+        timer?.invalidate()
+        serialManager?.activateDisplayMode(.weather)
         fetchNow()
         let interval = pollInterval
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
@@ -85,9 +87,7 @@ class WeatherManager: ObservableObject {
 
     private func sendToDisplay(_ value: String) {
         guard let sm = serialManager else { return }
-        let current = sm.activeDisplayMode
-        guard current == .weather || current == DisplayMode.none else { return }
-        sm.activateDisplayMode(.weather)
+        guard sm.activeDisplayMode == .weather else { return }
         sm.sendCommand("mode_text = 1")
         sm.sendScrollingText(value)
     }

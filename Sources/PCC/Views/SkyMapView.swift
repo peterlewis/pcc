@@ -50,25 +50,32 @@ struct SkyMapView: View {
         let avgSNR: Double
     }
 
+    private static let maxTrailPoints = 600
+
     private var trailAnnotations: [TrailAnnotation] {
         guard showTrails,
               let grid = heatmapGrid,
               let lat = userLatitude,
               let lon = userLongitude else { return [] }
-        return grid.cells.compactMap { key, cell in
-            guard !cell.isEmpty else { return nil }
-            let az = key / TrailGrid.elBins
-            let el = key % TrailGrid.elBins
+
+        // Keep top N by observation count, use absolute density for consistent dot visibility
+        let sorted = grid.cells
+            .filter { !$0.value.isEmpty }
+            .sorted { $0.value.count > $1.value.count }
+
+        return sorted.prefix(Self.maxTrailPoints).compactMap { entry in
+            let az = entry.key / TrailGrid.elBins
+            let el = entry.key % TrailGrid.elBins
             guard let coord = SatelliteInfo(
                 prn: 0, constellation: .gps,
-                elevation: el, azimuth: az, snr: Int(cell.avgSNR)
+                elevation: el, azimuth: az, snr: Int(entry.value.avgSNR)
             ).subSatellitePoint(observerLat: lat, observerLon: lon) else { return nil }
-            let density = min(Double(cell.count) / 80.0, 1.0)
+            let density = min(Double(entry.value.count) / 80.0, 1.0)
             return TrailAnnotation(
-                id: key,
+                id: entry.key,
                 coordinate: coord,
                 density: density,
-                avgSNR: cell.avgSNR
+                avgSNR: entry.value.avgSNR
             )
         }
     }
@@ -95,7 +102,7 @@ struct SkyMapView: View {
             ForEach(trailAnnotations) { trail in
                 Annotation("", coordinate: trail.coordinate, anchor: .center) {
                     Circle()
-                        .fill(Color.blue.opacity(0.15 + trail.density * 0.35))
+                        .fill(Color.blue.opacity(0.4))
                         .frame(
                             width: 3 + trail.density * 4,
                             height: 3 + trail.density * 4

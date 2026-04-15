@@ -59,6 +59,26 @@ struct TrailGrid: Codable {
         cells.values.reduce(0) { $0 + $1.count }
     }
 
+    /// Return a coarsened version of the grid for map/globe rendering.
+    /// Groups cells into `step`-degree bins, merging counts and SNR values.
+    /// With step=5 the maximum output is 72×19 = 1,368 cells (vs 32,760 at 1°).
+    func downsampled(step: Int = 5) -> [(key: Int, cell: TrailCell, azimuth: Int, elevation: Int)] {
+        var coarse: [Int: TrailCell] = [:]
+        for (key, cell) in cells where !cell.isEmpty {
+            let az = (key / Self.elBins / step) * step
+            let el = (key % Self.elBins / step) * step
+            let coarseKey = az * 100 + el   // unique key for coarse grid
+            var merged = coarse[coarseKey] ?? TrailCell()
+            merged.count += cell.count
+            merged.totalSNR += cell.totalSNR
+            if cell.maxSNR > merged.maxSNR { merged.maxSNR = cell.maxSNR }
+            coarse[coarseKey] = merged
+        }
+        return coarse.map { key, cell in
+            (key: key, cell: cell, azimuth: key / 100, elevation: key % 100)
+        }
+    }
+
     /// Convert occupied cells to 3D hemisphere coordinates for Chart3D heatmap rendering.
     func heatmapPoints3D() -> [HeatmapPoint3D] {
         cells.compactMap { key, cell in
@@ -99,9 +119,7 @@ struct HeatmapPoint3D: Identifiable {
 /// so total storage stays well under 1 MB regardless of how long you record.
 class SkyTrailStore: ObservableObject {
     @Published private(set) var grid = TrailGrid()
-    @Published var isLogging: Bool {
-        didSet { UserDefaults.standard.set(isLogging, forKey: "skyTrailLogging") }
-    }
+    @Published var isLogging = false
 
     private let fileURL: URL
     private var lastSampleTime: Date = .distantPast
@@ -140,7 +158,7 @@ class SkyTrailStore: ObservableObject {
         let dir = appSupport.appendingPathComponent("Precision Clock Companion", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("sky_trail.json")
-        isLogging = UserDefaults.standard.bool(forKey: "skyTrailLogging")
+        isLogging = false   // Never auto-resume — NMEA output must be explicitly requested
         load()
 
         // Save on app quit

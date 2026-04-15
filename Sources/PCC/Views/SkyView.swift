@@ -210,12 +210,32 @@ struct SkyView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Trail data summary (recording toggle is in the sidebar)
-            if !trailStore.grid.cells.isEmpty || trail.trailImage != nil {
-                HStack {
-                    if trailStore.isLogging {
-                        Circle().fill(.red).frame(width: 6, height: 6)
+            // Trail recording controls
+            HStack(spacing: 8) {
+                Button {
+                    trailStore.isLogging.toggle()
+                } label: {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(trailStore.isLogging ? .red : .red.opacity(0.4))
+                            .frame(width: 8, height: 8)
+                        Text(trailStore.isLogging ? "Stop Recording" : "Record")
+                            .font(.caption)
+                            .fontWeight(trailStore.isLogging ? .semibold : .regular)
                     }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(trailStore.isLogging ? .red.opacity(0.1) : .secondary.opacity(0.08))
+                    )
+                }
+                .buttonStyle(.borderless)
+                .help(trailStore.isLogging
+                      ? "Stop recording satellite positions"
+                      : "Record satellite positions for heatmaps")
+
+                if !trailStore.grid.cells.isEmpty || trail.trailImage != nil {
                     if let dur = trailStore.durationSummary {
                         Text(dur)
                             .font(.caption)
@@ -233,10 +253,12 @@ struct SkyView: View {
                     }
                     .font(.caption)
                     .buttonStyle(.borderless)
+                } else {
+                    Spacer()
                 }
-                .padding(.horizontal)
-                .padding(.top, 8)
             }
+            .padding(.horizontal)
+            .padding(.top, 8)
 
             Picker("View", selection: $viewMode) {
                 ForEach(SkyViewMode.allCases, id: \.self) { mode in

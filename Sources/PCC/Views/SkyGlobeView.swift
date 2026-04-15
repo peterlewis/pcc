@@ -131,19 +131,23 @@ private struct GlobeWebView: NSViewRepresentable {
             ])
         }
 
-        // Trail points from recorded data
+        // Trail points from recorded data (capped at 300, absolute density for consistent dots)
+        let maxTrailPoints = 600
         var trailData: [[String: Any]] = []
         if let grid = heatmapGrid, let lat = userLatitude, let lon = userLongitude {
-            for (key, cell) in grid.cells {
-                guard !cell.isEmpty else { continue }
-                let az = key / TrailGrid.elBins
-                let el = key % TrailGrid.elBins
+            let sorted = grid.cells
+                .filter { !$0.value.isEmpty }
+                .sorted { $0.value.count > $1.value.count }
+
+            for entry in sorted.prefix(maxTrailPoints) {
+                let az = entry.key / TrailGrid.elBins
+                let el = entry.key % TrailGrid.elBins
                 guard let coord = SatelliteInfo(
                     prn: 0, constellation: .gps,
-                    elevation: el, azimuth: az, snr: Int(cell.avgSNR)
+                    elevation: el, azimuth: az, snr: Int(entry.value.avgSNR)
                 ).subSatellitePoint(observerLat: lat, observerLon: lon) else { continue }
-                let density = min(Double(cell.count) / 80.0, 1.0)
-                let alpha = 0.4 + density * 0.6
+                let density = min(Double(entry.value.count) / 80.0, 1.0)
+                let alpha = 0.5
                 trailData.append([
                     "lat": coord.latitude,
                     "lng": coord.longitude,

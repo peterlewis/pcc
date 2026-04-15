@@ -98,12 +98,6 @@ struct ContentView: View {
             }
         }
         // Background satellite trail recording — runs regardless of active pane
-        .onAppear {
-            if trailStore.isLogging {
-                serialManager.requestSatelliteTracking()
-                serialManager.requestNMEA(consumer: "Trail Logger")
-            }
-        }
         .onChange(of: trailStore.isLogging) { _, logging in
             if logging {
                 serialManager.requestSatelliteTracking()
@@ -152,30 +146,6 @@ struct ContentView: View {
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
             VStack(alignment: .leading, spacing: 6) {
-                // Satellite trail recording
-                Button {
-                    trailStore.isLogging.toggle()
-                } label: {
-                    HStack(spacing: 5) {
-                        Circle()
-                            .fill(trailStore.isLogging ? .red : .gray.opacity(0.3))
-                            .frame(width: 8, height: 8)
-                        Text(trailStore.isLogging ? "Recording GPS" : "Record GPS")
-                            .font(.caption)
-                            .foregroundStyle(trailStore.isLogging ? .primary : .secondary)
-                        if trailStore.isLogging, let dur = trailStore.durationSummary {
-                            Spacer()
-                            Text(dur)
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                }
-                .buttonStyle(.borderless)
-                .help(trailStore.isLogging
-                      ? "Stop recording satellite positions"
-                      : "Record satellite positions for sky heatmaps")
-
                 // Connection status
                 HStack(spacing: 5) {
                     Circle()
@@ -196,13 +166,13 @@ struct ContentView: View {
     @ViewBuilder
     private func sidebarRow(_ item: SidebarItem) -> some View {
         let active = isActiveMode(item)
-        let dotColor: Color = (item == .sky && trailStore.isLogging) ? .red : .green
+        let recording = (item == .sky && trailStore.isLogging)
         HStack {
             Label(item.rawValue, systemImage: item.icon)
-            if active {
+            if active || recording {
                 Spacer()
                 Circle()
-                    .fill(dotColor)
+                    .fill(recording ? .red : .green)
                     .frame(width: 6, height: 6)
             }
         }
@@ -231,7 +201,6 @@ struct ContentView: View {
 
     private func isActiveMode(_ item: SidebarItem) -> Bool {
         if item == .timeServer { return ntpServer.isRunning }
-        if item == .sky && trailStore.isLogging { return true }
         switch (item, serialManager.activeDisplayMode) {
         case (.text, .text), (.weather, .weather), (.countdown, .countdown), (.dataSources, .dataSource):
             return true
