@@ -8,126 +8,66 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 
 ## Screenshots
 
-<details>
-<summary>Menu Bar</summary>
+![Satellites — Globe](docs/screenshots/satellites-globe-trails.png)
 
-![Menu Bar](docs/screenshots/menu-bar.png)
-</details>
-
-<details>
-<summary>Connect</summary>
-
-![Connect](docs/screenshots/connect.png)
-</details>
-
-### Display
-
-<details>
-<summary>Data Sources</summary>
-
-![Data Sources](docs/screenshots/data-sources.png)
-![Data Sources — REST](docs/screenshots/data-sources-rest.png)
-![Data Sources — Bash](docs/screenshots/data-sources-bash.png)
-</details>
+<table>
+<tr>
+<td><a href="docs/screenshots/data-sources.png"><img src="docs/screenshots/data-sources.png" width="280"></a><br><sub>Data Sources</sub></td>
+<td><a href="docs/screenshots/satellites-polar-trails.png"><img src="docs/screenshots/satellites-polar-trails.png" width="280"></a><br><sub>Satellites — Polar</sub></td>
+<td><a href="docs/screenshots/satellites-map-trails.png"><img src="docs/screenshots/satellites-map-trails.png" width="280"></a><br><sub>Satellites — Map</sub></td>
+</tr>
+<tr>
+<td><a href="docs/screenshots/brightness.png"><img src="docs/screenshots/brightness.png" width="280"></a><br><sub>Brightness</sub></td>
+<td><a href="docs/screenshots/weather.png"><img src="docs/screenshots/weather.png" width="280"></a><br><sub>Weather</sub></td>
+<td><a href="docs/screenshots/time-server.png"><img src="docs/screenshots/time-server.png" width="280"></a><br><sub>Time Server</sub></td>
+</tr>
+</table>
 
 <details>
-<summary>Text</summary>
-
-![Text](docs/screenshots/text.png)
-</details>
-
-<details>
-<summary>Weather</summary>
-
-![Weather](docs/screenshots/weather.png)
-</details>
-
-<details>
-<summary>Countdown</summary>
-
-![Countdown](docs/screenshots/countdown.png)
-</details>
-
-### GPS
-
-<details>
-<summary>Satellites — Polar</summary>
-
-![Satellites — Polar](docs/screenshots/satellites-polar.png)
-![Satellites — Polar with Trails](docs/screenshots/satellites-polar-trails.png)
-![Satellites — Polar Dark](docs/screenshots/satellites-polar-dark.png)
-</details>
-
-<details>
-<summary>Satellites — Map</summary>
-
-![Satellites — Map](docs/screenshots/satellites-map.png)
-![Satellites — Map with Trails](docs/screenshots/satellites-map-trails.png)
-</details>
-
-<details>
-<summary>Satellites — Globe</summary>
-
-![Satellites — Globe](docs/screenshots/satellites-globe.png)
-![Satellites — Globe with Trails](docs/screenshots/satellites-globe-trails.png)
-</details>
-
-<details>
-<summary>Signal Analysis</summary>
-
-![Signal Analysis](docs/screenshots/signal-analysis.png)
-</details>
-
-### Configuration
-
-<details>
-<summary>Brightness</summary>
-
-![Brightness](docs/screenshots/brightness.png)
-</details>
-
-<details>
-<summary>Modes</summary>
-
-![Modes](docs/screenshots/modes.png)
-</details>
-
-<details>
-<summary>Time Server</summary>
-
-![Time Server](docs/screenshots/time-server.png)
-</details>
-
-<details>
-<summary>Diagnostics</summary>
-
-![Diagnostics](docs/screenshots/diagnostics.png)
-</details>
-
-<details>
-<summary>Serial Monitor</summary>
-
-![Serial Monitor](docs/screenshots/serial-monitor.png)
-</details>
-
-<details>
-<summary>Advanced</summary>
-
-![Advanced](docs/screenshots/advanced.png)
-</details>
-
-<details>
-<summary>Updates</summary>
-
-![Updates](docs/screenshots/updates.png)
-</details>
-
-### Reference
-
-<details>
-<summary>Mk IV User Manual</summary>
-
-![Manual](docs/screenshots/manual.png)
+<summary>All screenshots</summary>
+<br>
+<table>
+<tr>
+<td><a href="docs/screenshots/menu-bar.png"><img src="docs/screenshots/menu-bar.png" width="280"></a><br><sub>Menu Bar</sub></td>
+<td><a href="docs/screenshots/connect.png"><img src="docs/screenshots/connect.png" width="280"></a><br><sub>Connect</sub></td>
+<td><a href="docs/screenshots/data-sources.png"><img src="docs/screenshots/data-sources.png" width="280"></a><br><sub>Data Sources</sub></td>
+</tr>
+<tr>
+<td><a href="docs/screenshots/data-sources-rest.png"><img src="docs/screenshots/data-sources-rest.png" width="280"></a><br><sub>Data Sources — REST</sub></td>
+<td><a href="docs/screenshots/data-sources-bash.png"><img src="docs/screenshots/data-sources-bash.png" width="280"></a><br><sub>Data Sources — Bash</sub></td>
+<td><a href="docs/screenshots/text.png"><img src="docs/screenshots/text.png" width="280"></a><br><sub>Text</sub></td>
+</tr>
+<tr>
+<td><a href="docs/screenshots/weather.png"><img src="docs/screenshots/weather.png" width="280"></a><br><sub>Weather</sub></td>
+<td><a href="docs/screenshots/countdown.png"><img src="docs/screenshots/countdown.png" width="280"></a><br><sub>Countdown</sub></td>
+<td><a href="docs/screenshots/satellites-polar.png"><img src="docs/screenshots/satellites-polar.png" width="280"></a><br><sub>Satellites — Polar</sub></td>
+</tr>
+<tr>
+<td><a href="docs/screenshots/satellites-polar-trails.png"><img src="docs/screenshots/satellites-polar-trails.png" width="280"></a><br><sub>Polar with Trails</sub></td>
+<td><a href="docs/screenshots/satellites-polar-dark.png"><img src="docs/screenshots/satellites-polar-dark.png" width="280"></a><br><sub>Polar — Dark</sub></td>
+<td><a href="docs/screenshots/satellites-map.png"><img src="docs/screenshots/satellites-map.png" width="280"></a><br><sub>Satellites — Map</sub></td>
+</tr>
+<tr>
+<td><a href="docs/screenshots/satellites-map-trails.png"><img src="docs/screenshots/satellites-map-trails.png" width="280"></a><br><sub>Map with Trails</sub></td>
+<td><a href="docs/screenshots/satellites-globe.png"><img src="docs/screenshots/satellites-globe.png" width="280"></a><br><sub>Satellites — Globe</sub></td>
+<td><a href="docs/screenshots/satellites-globe-trails.png"><img src="docs/screenshots/satellites-globe-trails.png" width="280"></a><br><sub>Globe with Trails</sub></td>
+</tr>
+<tr>
+<td><a href="docs/screenshots/signal-analysis.png"><img src="docs/screenshots/signal-analysis.png" width="280"></a><br><sub>Signal Analysis</sub></td>
+<td><a href="docs/screenshots/brightness.png"><img src="docs/screenshots/brightness.png" width="280"></a><br><sub>Brightness</sub></td>
+<td><a href="docs/screenshots/modes.png"><img src="docs/screenshots/modes.png" width="280"></a><br><sub>Modes</sub></td>
+</tr>
+<tr>
+<td><a href="docs/screenshots/time-server.png"><img src="docs/screenshots/time-server.png" width="280"></a><br><sub>Time Server</sub></td>
+<td><a href="docs/screenshots/diagnostics.png"><img src="docs/screenshots/diagnostics.png" width="280"></a><br><sub>Diagnostics</sub></td>
+<td><a href="docs/screenshots/serial-monitor.png"><img src="docs/screenshots/serial-monitor.png" width="280"></a><br><sub>Serial Monitor</sub></td>
+</tr>
+<tr>
+<td><a href="docs/screenshots/advanced.png"><img src="docs/screenshots/advanced.png" width="280"></a><br><sub>Advanced</sub></td>
+<td><a href="docs/screenshots/updates.png"><img src="docs/screenshots/updates.png" width="280"></a><br><sub>Updates</sub></td>
+<td><a href="docs/screenshots/manual.png"><img src="docs/screenshots/manual.png" width="280"></a><br><sub>Mk IV User Manual</sub></td>
+</tr>
+</table>
 </details>
 
 ## What it does
