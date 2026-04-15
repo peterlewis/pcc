@@ -4,7 +4,7 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 
 > This is an independent, community-built companion app. Not affiliated with mitxela.
 
-![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue) ![Swift 5.9+](https://img.shields.io/badge/Swift-5.9%2B-orange)
+![macOS 26+](https://img.shields.io/badge/macOS-26%2B-blue) ![Swift 6.2](https://img.shields.io/badge/Swift-6.2-orange)
 
 ## Screenshots
 
@@ -17,7 +17,7 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 <details>
 <summary>Connect</summary>
 
-![Connect](docs/screenshots/connect-light.png)
+![Connect](docs/screenshots/connect.png)
 </details>
 
 ### Display
@@ -25,35 +25,57 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 <details>
 <summary>Data Sources</summary>
 
-![Data Sources](docs/screenshots/data-sources-light.png)
-![Data Sources — GitHub Stars](docs/screenshots/data-sources-light-github-stars.png)
+![Data Sources](docs/screenshots/data-sources.png)
+![Data Sources — REST](docs/screenshots/data-sources-rest.png)
+![Data Sources — Bash](docs/screenshots/data-sources-bash.png)
 </details>
 
 <details>
 <summary>Text</summary>
 
-![Text](docs/screenshots/text-light.png)
+![Text](docs/screenshots/text.png)
+</details>
+
+<details>
+<summary>Weather</summary>
+
+![Weather](docs/screenshots/weather.png)
 </details>
 
 <details>
 <summary>Countdown</summary>
 
-![Countdown](docs/screenshots/countdown-light.png)
+![Countdown](docs/screenshots/countdown.png)
 </details>
 
 ### GPS
 
 <details>
-<summary>Sky View</summary>
+<summary>Satellites — Polar</summary>
 
-![Sky View — Light](docs/screenshots/sky-view-light.png)
-![Sky View — Dark](docs/screenshots/sky-view-dark.png)
+![Satellites — Polar](docs/screenshots/satellites-polar.png)
+![Satellites — Polar with Trails](docs/screenshots/satellites-polar-trails.png)
+![Satellites — Polar Dark](docs/screenshots/satellites-polar-dark.png)
 </details>
 
 <details>
-<summary>Map</summary>
+<summary>Satellites — Map</summary>
 
-![Map](docs/screenshots/map-light.png)
+![Satellites — Map](docs/screenshots/satellites-map.png)
+![Satellites — Map with Trails](docs/screenshots/satellites-map-trails.png)
+</details>
+
+<details>
+<summary>Satellites — Globe</summary>
+
+![Satellites — Globe](docs/screenshots/satellites-globe.png)
+![Satellites — Globe with Trails](docs/screenshots/satellites-globe-trails.png)
+</details>
+
+<details>
+<summary>Signal Analysis</summary>
+
+![Signal Analysis](docs/screenshots/signal-analysis.png)
 </details>
 
 ### Configuration
@@ -61,45 +83,51 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 <details>
 <summary>Brightness</summary>
 
-![Brightness — Light](docs/screenshots/brightness-light.png)
-![Brightness — Dark](docs/screenshots/brightness-dark.png)
+![Brightness](docs/screenshots/brightness.png)
 </details>
 
 <details>
 <summary>Modes</summary>
 
-![Modes — Light](docs/screenshots/modes-light.png)
-![Modes — Dark](docs/screenshots/modes-dark.png)
+![Modes](docs/screenshots/modes.png)
 </details>
 
 <details>
 <summary>Time Server</summary>
 
-![Time Server](docs/screenshots/ntp-light.png)
+![Time Server](docs/screenshots/time-server.png)
 </details>
 
 <details>
 <summary>Diagnostics</summary>
 
-![Diagnostics](docs/screenshots/diagnostics-light.png)
+![Diagnostics](docs/screenshots/diagnostics.png)
 </details>
 
 <details>
 <summary>Serial Monitor</summary>
 
-![Serial Monitor](docs/screenshots/serial-monitor-light.png)
+![Serial Monitor](docs/screenshots/serial-monitor.png)
 </details>
 
 <details>
 <summary>Advanced</summary>
 
-![Advanced](docs/screenshots/advanced-light.png)
+![Advanced](docs/screenshots/advanced.png)
 </details>
 
 <details>
 <summary>Updates</summary>
 
-![Updates](docs/screenshots/updates-light.png)
+![Updates](docs/screenshots/updates.png)
+</details>
+
+### Reference
+
+<details>
+<summary>Mk IV User Manual</summary>
+
+![Manual](docs/screenshots/manual.png)
 </details>
 
 ## What it does
@@ -114,13 +142,15 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 - Check for firmware and timezone updates, install to the CLOCK USB volume
 
 ### GPS & Satellites
-- Satellite sky view: polar plot with signal strength bars and 24-hour trail history
-- Sun and moon positions rendered on the polar plot in real time
-- Horizon mask analysis: tracks minimum elevation per azimuth sector to map obstructions
+- Three satellite views — Polar, Map, and Globe — with consistent toggle controls for satellites, labels, and trails
+- Polar plot with signal strength bars, sun/moon positions, and horizon mask
+- World map with sub-satellite points and trail overlay
+- Interactive 3D globe (globe.gl) with satellite ground tracks, sun/moon celestial projections, and space background
+- Persistent trail recording: logs satellite observations to disk as an aggregated 1° grid, runs in the background, persists across launches
+- Signal analysis with GPS diagnostics
 - GPS info panel: coordinates, Maidenhead grid locator, altitude, HDOP quality indicator
 - Sun data: rise/set times, solar noon, golden hour, civil twilight, equation of time
 - Moon data: phase with emoji, illumination percentage, altitude and azimuth
-- Satellite map view: sub-satellite points plotted on a world map
 - Fix statistics: satellites used, fix type, time since first fix
 
 ### NTP Time Server
@@ -142,13 +172,13 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 
 ## Requirements
 
-- macOS 13 (Ventura) or later
+- macOS 26 or later
 - Precision Clock Mk IV connected via USB
 
 ## Building
 
 ```bash
-git clone https://github.com/peterlew/pcc.git
+git clone https://github.com/peterlewis/pcc.git
 cd pcc
 swift build
 swift run PCC
@@ -188,7 +218,8 @@ Commands are `key = value\r\n` over USB serial at 115200 baud. They take effect 
 ## Dependencies
 
 - [ORSSerialPort](https://github.com/armadsen/ORSSerialPort) (SPM)
-- WeatherKit (Apple framework, macOS 13+)
+- [globe.gl](https://globe.gl) (loaded at runtime for 3D globe view)
+- WeatherKit (Apple framework)
 
 ## Related
 
