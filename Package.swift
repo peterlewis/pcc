@@ -1,9 +1,9 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
     name: "PrecisionClockCompanion",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v26)],
     dependencies: [
         .package(url: "https://github.com/armadsen/ORSSerialPort.git", from: "2.1.0")
     ],
@@ -12,6 +12,9 @@ let package = Package(
             name: "PCC",
             dependencies: [
                 .product(name: "ORSSerial", package: "ORSSerialPort")
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
             ],
             linkerSettings: [
                 .unsafeFlags([

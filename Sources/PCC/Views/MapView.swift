@@ -224,9 +224,12 @@ struct SatelliteMapView: View {
                     if let coord = proxy.convert(position, from: .local) {
                         pickedCoordinate = coord
                         // Reverse geocode for timezone
-                        let location = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-                        CLGeocoder().reverseGeocodeLocation(location) { placemarks, _ in
-                            hoveredTimezone = placemarks?.first?.timeZone?.identifier
+                        Task {
+                            let location = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+                            guard let request = MKReverseGeocodingRequest(location: location) else { return }
+                            if let items = try? await request.mapItems {
+                                hoveredTimezone = items.first?.timeZone?.identifier
+                            }
                         }
                     }
                 }
@@ -249,11 +252,11 @@ struct SatelliteMapView: View {
         }
         .onAppear {
             serialManager.requestSatelliteTracking()
-            serialManager.requestNMEA()
+            serialManager.requestNMEA(consumer: "Map")
         }
         .onDisappear {
             serialManager.releaseSatelliteTracking()
-            serialManager.releaseNMEA()
+            serialManager.releaseNMEA(consumer: "Map")
         }
     }
 }

@@ -85,17 +85,29 @@ class StatusBarController: NSObject, NSMenuDelegate {
                 offsetItem.isEnabled = false
                 menu.addItem(offsetItem)
             }
-
-
         }
 
         menu.addItem(.separator())
 
-        // Reboot
+        // Clock actions
+        var hasClockAction = false
+
+        if NSEvent.modifierFlags.contains(.option) {
+            let redItem = NSMenuItem(title: "Red Mode", action: #selector(toggleRedMode), keyEquivalent: "")
+            redItem.target = self
+            redItem.state = redModeEnabled ? .on : .off
+            menu.addItem(redItem)
+            hasClockAction = true
+        }
+
         if serialManager.isConnected {
             let rebootItem = NSMenuItem(title: "Reboot Clock", action: #selector(rebootClock), keyEquivalent: "")
             rebootItem.target = self
             menu.addItem(rebootItem)
+            hasClockAction = true
+        }
+
+        if hasClockAction {
             menu.addItem(.separator())
         }
 
@@ -103,14 +115,6 @@ class StatusBarController: NSObject, NSMenuDelegate {
         let showItem = NSMenuItem(title: "Open Precision Clock Companion", action: #selector(showWindow), keyEquivalent: "0")
         showItem.target = self
         menu.addItem(showItem)
-
-        // Option held — reveal easter egg toggle
-        if NSEvent.modifierFlags.contains(.option) {
-            let redItem = NSMenuItem(title: "Red Mode", action: #selector(toggleRedMode), keyEquivalent: "")
-            redItem.target = self
-            redItem.state = redModeEnabled ? .on : .off
-            menu.addItem(redItem)
-        }
 
         // Quit
         let quitItem = NSMenuItem(title: "Quit Precision Clock Companion", action: #selector(quitApp), keyEquivalent: "q")

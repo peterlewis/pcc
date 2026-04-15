@@ -69,7 +69,7 @@ class NTPServer: ObservableObject {
         readSource = source
 
         // Request NMEA data for RMC time sentences
-        serialManager?.requestNMEA()
+        serialManager?.requestNMEA(consumer: "NTP Server")
 
         // Track time offset every second
         offsetTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -85,7 +85,7 @@ class NTPServer: ObservableObject {
         readSource = nil
         offsetTimer?.invalidate()
         offsetTimer = nil
-        serialManager?.releaseNMEA()
+        serialManager?.releaseNMEA(consumer: "NTP Server")
         UserDefaults.standard.set(false, forKey: "ntpServerEnabled")
         DispatchQueue.main.async { self.isRunning = false }
     }

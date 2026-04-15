@@ -54,6 +54,7 @@ struct BrightnessView: View {
     @State private var customPresets: [CustomBrightnessPreset] = []
     @State private var showingSavePreset = false
     @State private var newPresetName = ""
+    @State private var showing3DSurface = false
 
     var body: some View {
         ScrollView {
@@ -286,6 +287,13 @@ struct BrightnessView: View {
                         }
                     }
                     .disabled(!serialManager.isConnected)
+
+                    Button {
+                        showing3DSurface = true
+                    } label: {
+                        Image(systemName: "cube")
+                    }
+                    .help("3D Surface Comparison")
                 }
 
                 Text("Apply sends the current curve to the clock. Settings reset on power cycle unless saved.")
@@ -296,6 +304,10 @@ struct BrightnessView: View {
         }
         .padding(.horizontal)
         .padding(.top, 4)
+        .sheet(isPresented: $showing3DSurface) {
+            BrightnessSurfaceView(currentPoints: curvePoints)
+                .frame(minWidth: 500, minHeight: 450)
+        }
     }
 
     // MARK: - Curve Graph

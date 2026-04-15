@@ -10,6 +10,7 @@ struct PCCApp: App {
     @StateObject private var weatherManager = WeatherManager()
     @StateObject private var configManager = ConfigManager()
     @StateObject private var ntpServer = NTPServer()
+    @StateObject private var trailStore = SkyTrailStore()
 
     init() {
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -25,6 +26,7 @@ struct PCCApp: App {
                 .environmentObject(weatherManager)
                 .environmentObject(configManager)
                 .environmentObject(ntpServer)
+                .environmentObject(trailStore)
                 .frame(minWidth: 460, minHeight: 500)
                 .onAppear {
                     dataSourceManager.serialManager = serialManager
@@ -37,7 +39,7 @@ struct PCCApp: App {
                 }
         }
         .windowResizability(.contentMinSize)
-        .defaultSize(width: 700, height: 780)
+        .defaultSize(width: 700, height: 800)
 
         Settings {
             PreferencesView()

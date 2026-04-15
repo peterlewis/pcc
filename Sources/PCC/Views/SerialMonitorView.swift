@@ -18,6 +18,7 @@ struct SerialMonitorView: View {
                     }
                     .pickerStyle(.segmented)
                     .frame(width: 180)
+                    .disabled(!serialManager.nmeaConsumers.isEmpty)
                     .onChange(of: nmeaMode) { _, newValue in
                         serialManager.sendCommand("NMEA = \(newValue)")
                     }
@@ -67,7 +68,9 @@ struct SerialMonitorView: View {
             // Info
             GroupBox {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("PCC disables NMEA output on connect so serial commands work reliably. Enable it here to watch the raw GPS feed. Output is restored when PCC disconnects.")
+                    Text(serialManager.nmeaConsumers.isEmpty
+                         ? "PCC disables NMEA output on connect so serial commands work reliably. Enable it here to watch the raw GPS feed. Output is restored when PCC disconnects."
+                         : "NMEA output is managed by \(serialManager.nmeaConsumers.joined(separator: ", ")). The picker is disabled while these features are active.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text("This setting is session-only \u{2014} it doesn\u{2019}t need saving to config.")

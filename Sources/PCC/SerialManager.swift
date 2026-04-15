@@ -52,6 +52,8 @@ class SerialManager: NSObject, ObservableObject {
     var gpsUTCTimeReceived: Date?     // System time when RMC was received
     private(set) var satelliteTrackingEnabled = false
     private var satelliteTrackingCount = 0
+    @Published private(set) var nmeaActive = false
+    @Published private(set) var nmeaConsumers: [String] = []
     private var nmeaConsumerCount = 0
     private var gsvBuffer: [String: [SatelliteInfo]] = [:]
     private var satelliteUpdateTimer: Timer?
@@ -233,9 +235,11 @@ class SerialManager: NSObject, ObservableObject {
 extension SerialManager: ORSSerialPortDelegate {
 
     func serialPortWasOpened(_ serialPort: ORSSerialPort) {
-        sendCommand(nmeaConsumerCount > 0 ? "nmea = all" : "nmea = off")
+        let nmeaOn = nmeaConsumerCount > 0
+        sendCommand(nmeaOn ? "nmea = all" : "nmea = off")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             self?.isConnected = true
+            self?.nmeaActive = nmeaOn
             self?.statusMessage = "Connected to \(serialPort.name)"
             self?.lastError = nil
         }
@@ -267,17 +271,25 @@ extension SerialManager: ORSSerialPortDelegate {
 
     /// Request NMEA data output from the clock. Reference counted so multiple
     /// consumers (Sky View, NTP server) can independently request/release.
-    func requestNMEA() {
+    func requestNMEA(consumer: String = "Unknown") {
         nmeaConsumerCount += 1
+        DispatchQueue.main.async { self.nmeaConsumers.append(consumer) }
         if nmeaConsumerCount == 1 {
             sendCommand("NMEA = all")
+            DispatchQueue.main.async { self.nmeaActive = true }
         }
     }
 
-    func releaseNMEA() {
+    func releaseNMEA(consumer: String = "Unknown") {
         nmeaConsumerCount = max(0, nmeaConsumerCount - 1)
+        DispatchQueue.main.async {
+            if let idx = self.nmeaConsumers.firstIndex(of: consumer) {
+                self.nmeaConsumers.remove(at: idx)
+            }
+        }
         if nmeaConsumerCount == 0 {
             sendCommand("NMEA = off")
+            DispatchQueue.main.async { self.nmeaActive = false }
         }
     }
 

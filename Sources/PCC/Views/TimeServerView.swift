@@ -202,13 +202,24 @@ struct TimeServerView: View {
     }
 
     private func codeBlock(_ text: String) -> some View {
-        Text(text)
-            .font(.system(.caption, design: .monospaced))
-            .textSelection(.enabled)
-            .padding(6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.5))
-            .cornerRadius(4)
+        HStack(spacing: 4) {
+            Text(text)
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(6)
+        .background(.quaternary.opacity(0.5))
+        .cornerRadius(4)
     }
 
     private func step(_ number: String, _ label: String) -> some View {

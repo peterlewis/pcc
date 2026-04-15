@@ -99,9 +99,9 @@ class SkyTrail: ObservableObject {
             guard let snr = sat.snr, snr > 0 else { continue }
             let pos = polarPoint(elevation: sat.elevation, azimuth: sat.azimuth)
             let (r, g, b) = Self.snrRGB(snr)
-            let alpha = 0.25 + min(Double(snr) / 50.0, 1.0) * 0.25
+            let alpha = 0.4 + min(Double(snr) / 50.0, 1.0) * 0.4
             ctx.setFillColor(red: r, green: g, blue: b, alpha: CGFloat(alpha))
-            ctx.fillEllipse(in: CGRect(x: pos.x - 1.5, y: pos.y - 1.5, width: 3, height: 3))
+            ctx.fillEllipse(in: CGRect(x: pos.x - 2, y: pos.y - 2, width: 4, height: 4))
 
             // Update horizon mask — track minimum elevation with signal per sector
             guard sat.elevation > 0 else { continue }
@@ -124,6 +124,31 @@ class SkyTrail: ObservableObject {
         let size = plotSize
         plotSize = .zero
         configure(size: size)
+    }
+
+    /// Rebuild the bitmap from a persistent trail grid.
+    /// Plots each occupied grid cell as a dot with SNR-based colour and density-based alpha.
+    func renderFromGrid(_ grid: TrailGrid) {
+        guard let ctx else { return }
+        for (key, cell) in grid.cells {
+            guard !cell.isEmpty else { continue }
+            let az = key / TrailGrid.elBins
+            let el = key % TrailGrid.elBins
+            let pos = polarPoint(elevation: el, azimuth: az)
+            let snr = Int(cell.avgSNR)
+            let (r, g, b) = Self.snrRGB(snr)
+            let density = min(Double(cell.count) / 50.0, 1.0)
+            let alpha = 0.35 + density * 0.45
+            ctx.setFillColor(red: r, green: g, blue: b, alpha: CGFloat(alpha))
+            let dotSize = 3.0 + density * 3.0
+            ctx.fillEllipse(in: CGRect(
+                x: pos.x - dotSize / 2, y: pos.y - dotSize / 2,
+                width: dotSize, height: dotSize
+            ))
+        }
+        if startTime == nil { startTime = grid.startTime }
+        horizonMask = grid.horizonMask
+        trailImage = ctx.makeImage()
     }
 
     private func polarPoint(elevation: Int, azimuth: Int) -> CGPoint {
@@ -150,13 +175,26 @@ class SkyTrail: ObservableObject {
     }
 }
 
+// MARK: - View Mode
+
+enum SkyViewMode: String, CaseIterable {
+    case polar = "Polar"
+    case map = "Map"
+    case globe = "Globe"
+}
+
 // MARK: - Sky View
 
 struct SkyView: View {
     @EnvironmentObject var serialManager: SerialManager
+    @EnvironmentObject var trailStore: SkyTrailStore
     @StateObject private var trail = SkyTrail()
     @State private var plotSize: CGSize = .zero
     @State private var now = Date()
+    @State private var viewMode: SkyViewMode = .polar
+    @State private var showSatellites = true
+    @State private var showLabels = true
+    @State private var showTrails = true
 
     private let celestialTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
@@ -172,83 +210,143 @@ struct SkyView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            HStack {
-                if let start = trail.startTime {
-                    Image(systemName: "record.circle")
-                        .foregroundStyle(.red)
+            // Trail data summary (recording toggle is in the sidebar)
+            if !trailStore.grid.cells.isEmpty || trail.trailImage != nil {
+                HStack {
+                    if trailStore.isLogging {
+                        Circle().fill(.red).frame(width: 6, height: 6)
+                    }
+                    if let dur = trailStore.durationSummary {
+                        Text(dur)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(trailStore.dataSummary)
                         .font(.caption2)
-                    Text(durationLabel(since: start))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.tertiary)
+
+                    Spacer()
+
+                    Button("Clear") {
+                        trailStore.clear()
+                        trail.clear()
+                    }
+                    .font(.caption)
+                    .buttonStyle(.borderless)
                 }
-                Spacer()
-                if trail.trailImage != nil {
-                    Button("Clear Trail") { trail.clear() }
-                        .font(.caption)
-                        .buttonStyle(.borderless)
+                .padding(.horizontal)
+                .padding(.top, 8)
+            }
+
+            Picker("View", selection: $viewMode) {
+                ForEach(SkyViewMode.allCases, id: \.self) { mode in
+                    Text(mode.rawValue).tag(mode)
                 }
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
             .padding(.horizontal)
-            .padding(.top, 8)
+            .padding(.top, 4)
 
-            if serialManager.satellites.isEmpty && trail.trailImage == nil {
-                VStack(spacing: 12) {
-                    Image(systemName: "scope")
-                        .font(.system(size: 36))
-                        .foregroundStyle(.secondary)
-                    Text(serialManager.isConnected
-                         ? "Waiting for satellite data\u{2026}"
-                         : "Connect to clock to view satellites")
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                // Polar plot outside ScrollView to avoid layout crash during resize
-                GeometryReader { geo in
-                    ZStack {
-                        if let cgImage = trail.trailImage {
-                            Image(decorative: cgImage, scale: trail.renderScale)
+            if viewMode == .polar {
+                if serialManager.satellites.isEmpty && trail.trailImage == nil {
+                    emptyStateView
+                } else {
+                    // Polar plot outside ScrollView to avoid layout crash during resize
+                    GeometryReader { geo in
+                        ZStack {
+                            if showTrails, let cgImage = trail.trailImage {
+                                Image(decorative: cgImage, scale: trail.renderScale)
+                            }
+                            SkyPlotCanvas(
+                                satellites: showSatellites ? serialManager.satellites : [],
+                                sunPosition: sunPos,
+                                moonPosition: moonPos,
+                                moonPhase: Astronomy.moonPhase(date: now),
+                                horizonMask: showTrails ? trail.horizonMask : [],
+                                showLabels: showLabels
+                            )
                         }
-                        SkyPlotCanvas(
-                            satellites: serialManager.satellites,
-                            sunPosition: sunPos,
-                            moonPosition: moonPos,
-                            moonPhase: Astronomy.moonPhase(date: now),
-                            horizonMask: trail.horizonMask
-                        )
+                        .onAppear {
+                            plotSize = geo.size
+                            trail.configure(size: geo.size)
+                            if !trailStore.grid.cells.isEmpty {
+                                trail.renderFromGrid(trailStore.grid)
+                            }
+                        }
+                        .onChange(of: geo.size) { _, newSize in
+                            plotSize = newSize
+                            trail.configure(size: newSize)
+                        }
                     }
-                    .onAppear {
-                        plotSize = geo.size
-                        trail.configure(size: geo.size)
-                    }
-                    .onChange(of: geo.size) { _, newSize in
-                        plotSize = newSize
-                        trail.configure(size: newSize)
-                    }
-                }
-                .aspectRatio(1, contentMode: .fit)
-                .padding(.horizontal)
-                .padding(.top, 4)
-                .onChange(of: serialManager.satellites) { _, sats in
-                    if plotSize.width > 0 {
-                        trail.configure(size: plotSize)
-                        trail.sample(sats)
-                    }
-                }
-
-                // Signal strength bars
-                SignalBars(satellites: serialManager.satellites)
-                    .frame(height: 90)
+                    .aspectRatio(1, contentMode: .fit)
                     .padding(.horizontal)
                     .padding(.top, 4)
-
-                // GPS info panel
-                if serialManager.gpsFix > 0 {
-                    GPSInfoPanel(serialManager: serialManager, now: now)
-                        .padding(.horizontal)
-                        .padding(.top, 4)
+                    .overlay(alignment: .topTrailing) {
+                        HStack(spacing: 2) {
+                            polarToggle("scope", isOn: $showSatellites, tip: "Satellites")
+                            polarToggle("tag", isOn: $showLabels, tip: "Labels")
+                            polarToggle("point.3.filled.connected.trianglepath.dotted", isOn: $showTrails, tip: "Trails")
+                        }
+                        .padding(4)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                        .padding(8)
+                    }
+                    .onChange(of: serialManager.satellites) { _, sats in
+                        if plotSize.width > 0 {
+                            trail.configure(size: plotSize)
+                            trail.sample(sats)
+                        }
+                    }
                 }
+            } else if viewMode == .map {
+                SkyMapView(
+                    satellites: showSatellites ? serialManager.satellites : [],
+                    sunPosition: sunPos,
+                    moonPosition: moonPos,
+                    userLatitude: serialManager.gpsLatitude,
+                    userLongitude: serialManager.gpsLongitude,
+                    showLabels: showLabels,
+                    showTrails: showTrails,
+                    heatmapGrid: trailStore.grid,
+                    toggles: AnyView(
+                        HStack(spacing: 2) {
+                            polarToggle("scope", isOn: $showSatellites, tip: "Satellites")
+                            polarToggle("tag", isOn: $showLabels, tip: "Labels")
+                            polarToggle("point.3.filled.connected.trianglepath.dotted", isOn: $showTrails, tip: "Trails")
+                        }
+                        .padding(4)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                    )
+                )
+                .frame(minHeight: 300)
+                .padding(.horizontal)
+                .padding(.top, 4)
+            } else {
+                SkyGlobeView(
+                    satellites: serialManager.satellites,
+                    sunPosition: sunPos,
+                    moonPosition: moonPos,
+                    userLatitude: serialManager.gpsLatitude,
+                    userLongitude: serialManager.gpsLongitude,
+                    heatmapGrid: trailStore.grid
+                )
+                .frame(minHeight: 350)
+                .padding(.horizontal)
+                .padding(.top, 4)
+            }
+
+            // Signal strength bars
+            SignalBars(satellites: serialManager.satellites)
+                .frame(height: 90)
+                .padding(.horizontal)
+                .padding(.top, 4)
+
+            // GPS info panel
+            if serialManager.gpsFix > 0 {
+                GPSInfoPanel(serialManager: serialManager, now: now)
+                    .padding(.horizontal)
+                    .padding(.top, 4)
             }
 
             Spacer(minLength: 0)
@@ -295,12 +393,38 @@ struct SkyView: View {
         .onAppear {
             now = Date()
             serialManager.requestSatelliteTracking()
-            serialManager.requestNMEA()
+            serialManager.requestNMEA(consumer: "Sky View")
         }
         .onDisappear {
             serialManager.releaseSatelliteTracking()
-            serialManager.releaseNMEA()
+            serialManager.releaseNMEA(consumer: "Sky View")
         }
+    }
+
+    private func polarToggle(_ icon: String, isOn: Binding<Bool>, tip: String) -> some View {
+        Button {
+            isOn.wrappedValue.toggle()
+        } label: {
+            Image(systemName: icon)
+                .font(.caption)
+                .frame(width: 24, height: 24)
+                .foregroundStyle(isOn.wrappedValue ? .primary : .tertiary)
+        }
+        .buttonStyle(.borderless)
+        .help(tip)
+    }
+
+    private var emptyStateView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "scope")
+                .font(.system(size: 36))
+                .foregroundStyle(.secondary)
+            Text(serialManager.isConnected
+                 ? "Waiting for satellite data\u{2026}"
+                 : "Connect to clock to view satellites")
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var constellationsPresent: [SatConstellation] {
@@ -326,6 +450,7 @@ private struct SkyPlotCanvas: View {
     let moonPosition: CelestialPosition?
     let moonPhase: Double
     let horizonMask: [Double?]
+    var showLabels: Bool = true
 
     var body: some View {
         Canvas { context, size in
@@ -473,10 +598,12 @@ private struct SkyPlotCanvas: View {
             }
 
             // Label
-            context.draw(
-                Text(sat.id).font(.system(size: 7, weight: .medium)).foregroundColor(.primary),
-                at: CGPoint(x: pos.x, y: pos.y - 9)
-            )
+            if showLabels {
+                context.draw(
+                    Text(sat.id).font(.system(size: 7, weight: .medium)).foregroundColor(.primary),
+                    at: CGPoint(x: pos.x, y: pos.y - 9)
+                )
+            }
         }
     }
 

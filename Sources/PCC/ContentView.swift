@@ -10,11 +10,12 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case brightness = "Brightness"
     case modes = "Modes"
     case diagnostics = "Diagnostics"
-    case skyView = "Sky View"
-    case map = "Map"
+    case sky = "Satellites"
     case timeServer = "Time Server"
     case serialMonitor = "Serial Monitor"
     case advanced = "Advanced"
+    case documentation = "Mk IV User Manual"
+    case gpsDiagnostics = "Signal Analysis"
     case updates = "Updates"
 
     var id: String { rawValue }
@@ -29,11 +30,12 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .brightness:  return "sun.max"
         case .modes:       return "list.bullet"
         case .diagnostics:    return "gauge"
-        case .skyView:        return "scope"
-        case .map:            return "map"
+        case .sky:            return "scope"
         case .timeServer:     return "clock.badge.checkmark"
         case .serialMonitor:  return "terminal"
         case .advanced:       return "slider.horizontal.3"
+        case .documentation:  return "book"
+        case .gpsDiagnostics: return "sparkles"
         case .updates:     return "arrow.triangle.2.circlepath"
         }
     }
@@ -46,53 +48,12 @@ extension Notification.Name {
 struct ContentView: View {
     @EnvironmentObject var serialManager: SerialManager
     @EnvironmentObject var ntpServer: NTPServer
+    @EnvironmentObject var trailStore: SkyTrailStore
     @State private var selectedItem: SidebarItem? = .dataSources
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selectedItem) {
-                sidebarRow(.connect)
-
-                Section("Display") {
-                    sidebarRow(.dataSources)
-                    sidebarRow(.text)
-                    sidebarRow(.weather)
-                    sidebarRow(.countdown)
-                }
-
-                Section("GPS") {
-                    sidebarRow(.skyView)
-                    sidebarRow(.map)
-                }
-
-                Section("Configuration") {
-                    sidebarRow(.brightness)
-                    sidebarRow(.modes)
-                    sidebarRow(.timeServer)
-                    sidebarRow(.diagnostics)
-                    sidebarRow(.serialMonitor)
-                    sidebarRow(.advanced)
-                    sidebarRow(.updates)
-                }
-            }
-            .listStyle(.sidebar)
-            .safeAreaInset(edge: .bottom) {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(serialManager.isConnected ? .green : .red)
-                        .frame(width: 8, height: 8)
-                    Text(serialManager.isConnected
-                         ? (serialManager.connectedPort?.name ?? "Connected")
-                         : "Not connected")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-            }
-            .navigationSplitViewColumnWidth(min: 140, ideal: 160, max: 200)
+            sidebarList
         } detail: {
             Group {
                 switch selectedItem {
@@ -104,12 +65,13 @@ struct ContentView: View {
                 case .brightness:  BrightnessView()
                 case .modes:       ModesView()
                 case .diagnostics:    DiagnosticsView()
-                case .skyView:       SkyView()
-                case .map:           SatelliteMapView()
+                case .sky:           SkyView()
                 case .timeServer:    TimeServerView()
                 case .serialMonitor: SerialMonitorView()
                 case .advanced:      ClockSettingsView()
                 case .updates:     UpdatesView()
+                case .documentation: DocumentationView()
+                case .gpsDiagnostics: GPSDiagnosticsView()
                 case nil:          Text("Select a panel")
                 }
             }
@@ -135,15 +97,113 @@ struct ContentView: View {
                 window.animator().setFrame(frame, display: true)
             }
         }
+        // Background satellite trail recording — runs regardless of active pane
+        .onAppear {
+            if trailStore.isLogging {
+                serialManager.requestSatelliteTracking()
+                serialManager.requestNMEA(consumer: "Trail Logger")
+            }
+        }
+        .onChange(of: trailStore.isLogging) { _, logging in
+            if logging {
+                serialManager.requestSatelliteTracking()
+                serialManager.requestNMEA(consumer: "Trail Logger")
+            } else {
+                serialManager.releaseSatelliteTracking()
+                serialManager.releaseNMEA(consumer: "Trail Logger")
+                trailStore.save()
+            }
+        }
+        .onChange(of: serialManager.satellites) { _, sats in
+            trailStore.record(sats)
+        }
+    }
+
+    private var sidebarList: some View {
+        List(selection: $selectedItem) {
+            sidebarRow(.connect)
+
+            Section("Display") {
+                sidebarRow(.dataSources)
+                sidebarRow(.text)
+                sidebarRow(.weather)
+                sidebarRow(.countdown)
+            }
+
+            Section("GPS") {
+                sidebarRow(.sky)
+                sidebarRow(.gpsDiagnostics)
+            }
+
+            Section("Configuration") {
+                sidebarRow(.brightness)
+                sidebarRow(.modes)
+                sidebarRow(.timeServer)
+                sidebarRow(.diagnostics)
+                sidebarRow(.serialMonitor)
+                sidebarRow(.advanced)
+                sidebarRow(.updates)
+            }
+
+            Section("Reference") {
+                sidebarRow(.documentation)
+            }
+        }
+        .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom) {
+            VStack(alignment: .leading, spacing: 6) {
+                // Satellite trail recording
+                Button {
+                    trailStore.isLogging.toggle()
+                } label: {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(trailStore.isLogging ? .red : .gray.opacity(0.3))
+                            .frame(width: 8, height: 8)
+                        Text(trailStore.isLogging ? "Recording GPS" : "Record GPS")
+                            .font(.caption)
+                            .foregroundStyle(trailStore.isLogging ? .primary : .secondary)
+                        if trailStore.isLogging, let dur = trailStore.durationSummary {
+                            Spacer()
+                            Text(dur)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+                .buttonStyle(.borderless)
+                .help(trailStore.isLogging
+                      ? "Stop recording satellite positions"
+                      : "Record satellite positions for sky heatmaps")
+
+                // Connection status
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(serialManager.isConnected ? .green : .red)
+                        .frame(width: 8, height: 8)
+                    Text(serialManager.isConnected ? "Connected" : "Not connected")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        }
+        .navigationSplitViewColumnWidth(min: 140, ideal: 160, max: 200)
     }
 
     @ViewBuilder
     private func sidebarRow(_ item: SidebarItem) -> some View {
+        let active = isActiveMode(item)
+        let dotColor: Color = (item == .sky && trailStore.isLogging) ? .red : .green
         HStack {
             Label(item.rawValue, systemImage: item.icon)
-            if isActiveMode(item) {
+            if active {
                 Spacer()
-                Circle().fill(.green).frame(width: 6, height: 6)
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: 6, height: 6)
             }
         }
         .tag(item)
@@ -151,23 +211,27 @@ struct ContentView: View {
 
     private func idealHeight(for item: SidebarItem) -> CGFloat {
         switch item {
-        case .skyView:        return 850
-        case .advanced:       return 900
-        case .timeServer:     return 850
-        case .weather:        return 750
-        case .brightness:     return 750
-        case .dataSources:    return 700
-        case .map:            return 700
-        case .serialMonitor:  return 700
-        case .diagnostics:    return 650
-        case .updates:        return 650
-        case .modes:          return 600
-        case .connect, .text, .countdown: return 550
+        // Compact — simple forms
+        case .connect, .countdown:
+            return 550
+        // Medium — lists and status panels
+        case .text, .diagnostics, .gpsDiagnostics:
+            return 650
+        // Standard — tables and scrollable content
+        case .serialMonitor:
+            return 700
+        // Tall — charts, rich visuals
+        case .dataSources, .weather, .brightness, .sky, .modes, .updates, .documentation:
+            return 800
+        // Full — dense settings
+        case .advanced, .timeServer:
+            return 900
         }
     }
 
     private func isActiveMode(_ item: SidebarItem) -> Bool {
         if item == .timeServer { return ntpServer.isRunning }
+        if item == .sky && trailStore.isLogging { return true }
         switch (item, serialManager.activeDisplayMode) {
         case (.text, .text), (.weather, .weather), (.countdown, .countdown), (.dataSources, .dataSource):
             return true
