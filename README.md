@@ -188,15 +188,6 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 </td>
 </tr>
 
-<tr>
-<td>
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/manual-dark.png">
-  <img src="docs/screenshots/manual-light.png" width="280">
-</picture>
-<br><sub>Mk IV User Manual</sub>
-</td>
-</tr>
 
 </table>
 </details>
