@@ -315,10 +315,4 @@ Commands are `key = value\r\n` over USB serial at 115200 baud. They take effect 
 - [clock4](https://github.com/mitxela/clock4): hardware design and firmware source
 - [Forum thread](https://mitxela.com/forum/topic/pcc-precision-clock-companion-macos-menu-bar-app): discussion on the mitxela forum
 
-## License
-
-MIT
-
----
-
 [^1]: HDOP (Horizontal Dilution of Precision) indicates the geometric quality of the satellite constellation. Lower is better; < 1.0 is excellent, > 5.0 is poor.
