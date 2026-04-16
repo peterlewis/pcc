@@ -225,12 +225,14 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 - Fix statistics: satellites used, fix type, time since first fix
 
 ### NTP Time Server
-- Turns your Mac into a Stratum 1 NTP time server — near-millisecond accuracy from GPS, no internet required
-- GPS-disciplined time from the clock's GNSS module, served on localhost UDP port `12321`
-- Pair with chrony to keep your Mac's system clock continuously disciplined to GPS time
+- Basic Stratum 1 NTP server — serves GPS-disciplined time from the clock's GNSS module on `localhost` UDP port `12321`
+- Pair with chrony for sub-millisecond sync while GPS fix is held
 - Time extrapolation compensates for serial latency (~200–500ms)
 - Built-in test query and live offset display to verify operation
 - Auto-starts on launch if previously enabled
+
+> [!NOTE]
+> This is a convenience tool, not a production time source. There is no holdover oscillator — if GPS fix is lost, it falls back to system time without adjusting stratum. Designed as a localhost utility for chrony, not a network-facing server.
 
 ```mermaid
 graph LR
@@ -267,7 +269,7 @@ Or open `Package.swift` in Xcode and hit <kbd>⌘</kbd><kbd>R</kbd>.
 
 ## NTP Time Server
 
-The app includes a Stratum 1 NTP server that serves GPS-disciplined time from the clock's GNSS receiver. With chrony, this gives your Mac near-millisecond clock accuracy from GPS — no internet dependency. Enable it from the Time Server tab.
+The app includes a basic Stratum 1 NTP server that serves GPS-disciplined time from the clock's GNSS receiver. Pair it with chrony for sub-millisecond system clock sync while GPS fix is maintained. Enable it from the Time Server tab.
 
 > [!TIP]
 > To sync your Mac's clock continuously, install [chrony](https://chrony-project.org/):
