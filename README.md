@@ -261,8 +261,8 @@ Or open `Package.swift` in Xcode and hit Run.
 
 The app includes a Stratum 1 NTP server that serves GPS-disciplined time from the clock's GNSS receiver. With chrony, this gives your Mac near-millisecond clock accuracy from GPS — no internet dependency. Enable it from the Time Server tab.
 
-[!TIP]
-To sync your Mac's clock continuously, install [chrony](https://chrony-project.org/):
+> [!TIP]
+> To sync your Mac's clock continuously, install [chrony](https://chrony-project.org/):
 
 ```bash
 brew install chrony
