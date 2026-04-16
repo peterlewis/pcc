@@ -219,7 +219,7 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 - Interactive 3D globe (globe.gl) with satellite ground tracks, sun/moon celestial projections, and space background
 - Persistent trail recording: logs satellite observations to disk as an aggregated 1° grid, runs in the background, persists across launches
 - Signal analysis with GPS diagnostics
-- GPS info panel: coordinates, Maidenhead grid locator, altitude, HDOP quality indicator
+- GPS info panel: coordinates, Maidenhead grid locator, altitude, HDOP quality indicator[^1]
 - Sun data: rise/set times, solar noon, golden hour, civil twilight, equation of time
 - Moon data: phase with emoji, illumination percentage, altitude and azimuth
 - Fix statistics: satellites used, fix type, time since first fix
@@ -231,6 +231,14 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 - Time extrapolation compensates for serial latency (~200–500ms)
 - Built-in test query and live offset display to verify operation
 - Auto-starts on launch if previously enabled
+
+```mermaid
+graph LR
+    A["GPS Satellites"] --> B["Mk IV GNSS"]
+    B -->|USB Serial| C["PCC NTP Server"]
+    C -->|UDP 12321| D["chrony"]
+    D --> E["System Clock"]
+```
 
 ### Weather
 - Weather conditions displayed on the clock via WeatherKit
@@ -255,7 +263,7 @@ swift build
 swift run PCC
 ```
 
-Or open `Package.swift` in Xcode and hit Run.
+Or open `Package.swift` in Xcode and hit <kbd>⌘</kbd><kbd>R</kbd>.
 
 ## NTP Time Server
 
@@ -295,9 +303,11 @@ Commands are `key = value\r\n` over USB serial at 115200 baud. They take effect 
 
 ## Dependencies
 
-- [ORSSerialPort](https://github.com/armadsen/ORSSerialPort) (SPM)
-- [globe.gl](https://globe.gl) (loaded at runtime for 3D globe view)
-- WeatherKit (Apple framework)
+| Dependency | Type | Purpose |
+|---|---|---|
+| [ORSSerialPort](https://github.com/armadsen/ORSSerialPort) | SPM | USB serial communication |
+| [globe.gl](https://globe.gl) | Runtime | Interactive 3D globe view |
+| WeatherKit | Apple framework | Weather data |
 
 ## Related
 
@@ -308,3 +318,7 @@ Commands are `key = value\r\n` over USB serial at 115200 baud. They take effect 
 ## License
 
 MIT
+
+---
+
+[^1]: HDOP (Horizontal Dilution of Precision) indicates the geometric quality of the satellite constellation. Lower is better; < 1.0 is excellent, > 5.0 is poor.
