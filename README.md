@@ -204,59 +204,34 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 ## What it does
 
 ### Display & Configuration
-- Connects to the clock over serial, auto-detects ports, reconnects after reboot
+- Connects over serial, auto-detects ports, reconnects after reboot
 - Configure display modes, colon animation, brightness curve, diagnostics, timezone, and more
 - Send text or countdowns to the display
 - Poll REST APIs or shell commands and rotate values on the clock (with HTTP header support)
-- Edit the 5-point brightness curve with a draggable graph, save custom presets
+- Edit the 5-point brightness curve with a draggable graph; save custom presets
 - Read and write `config.txt` with local backups kept on the Mac
-- Check for firmware and timezone updates, install to the <kbd>CLOCK</kbd> USB volume
+- Check for firmware and timezone updates; install to the <kbd>CLOCK</kbd> USB volume
 
 ### GPS & Satellites
-- Three satellite views — Polar, Map, and Globe — with consistent toggle controls for satellites, labels, and trails
-- Polar plot with signal strength bars, sun/moon positions, and horizon mask
-- World map with sub-satellite points and trail overlay
-- Interactive 3D globe (globe.gl) with satellite ground tracks, sun/moon celestial projections, and space background
-- Persistent trail recording: logs satellite observations to disk as an aggregated 1° grid, runs in the background, persists across launches
-- Signal analysis with GPS diagnostics
-- GPS info panel: coordinates, Maidenhead grid locator, altitude, HDOP quality indicator[^1]
-- Sun data: rise/set times, solar noon, golden hour, civil twilight, equation of time
-- Moon data: phase with emoji, illumination percentage, altitude and azimuth
-- Fix statistics: satellites used, fix type, time since first fix
+- Three satellite views — Polar plot, world Map, and interactive 3D Globe — with consistent toggles for satellites, labels, and trails
+- Sky trail recording: satellite observations accumulated to an aggregated 1° grid, persists across launches
+- GPS info: coordinates, Maidenhead grid locator, altitude, HDOP[^1], fix type, satellites used
+- Celestial data: sun rise/set, solar noon, golden hour, civil twilight; moon phase, illumination, altitude, azimuth
+- Signal analysis with diagnostics panel
 
 ### NTP Time Server
-- Basic Stratum 1 NTP server — serves GPS-disciplined time from the clock's GNSS module on `localhost` UDP port `12321`
-- Pair with chrony for sub-millisecond sync while GPS fix is held
-- Time extrapolation compensates for serial latency (~200–500ms)
-- Built-in test query and live offset display to verify operation
-- Auto-starts on launch if previously enabled
-
-> [!NOTE]
-> This is a convenience tool, not a production time source. There is no holdover oscillator — if GPS fix is lost, it falls back to system time without adjusting stratum. Designed as a localhost utility for chrony, not a network-facing server.
-
-```mermaid
-graph LR
-    A["GPS Satellites"] --> B["Mk IV GNSS"]
-    B -->|USB Serial| C["PCC NTP Server"]
-    C -->|UDP 12321| D["chrony"]
-    D --> E["System Clock"]
-```
+- Basic Stratum 1 server on `localhost:12321`, disciplined by the clock’s GNSS module — see [setup below](#ntp-time-server)
 
 ### Weather
-- Weather conditions displayed on the clock via WeatherKit
-- Location picker with interactive map
-- Configurable update interval
+- Conditions scrolled on the clock via WeatherKit; configurable location and update interval
 
 ### Other
-- Serial monitor for viewing raw NMEA and debug output
-- Lives in the menu bar, window opens on demand
-
-## Requirements
-
-- macOS 26 or later
-- Precision Clock Mk IV connected via USB
+- Serial monitor for raw NMEA and debug output
+- Lives in the menu bar; window opens on demand
 
 ## Building
+
+Requires macOS 26+ and a Precision Clock Mk IV connected via USB.
 
 ```bash
 git clone https://github.com/peterlewis/pcc.git
@@ -269,10 +244,24 @@ Or open `Package.swift` in Xcode and hit <kbd>⌘</kbd><kbd>R</kbd>.
 
 ## NTP Time Server
 
-The app includes a basic Stratum 1 NTP server that serves GPS-disciplined time from the clock's GNSS receiver. Pair it with chrony for sub-millisecond system clock sync while GPS fix is maintained. Enable it from the Time Server tab.
+Enable from the Time Server tab. The NTP server is a localhost convenience tool — there is no holdover oscillator, so if GPS fix is lost it falls back to system time without adjusting stratum.
 
-> [!TIP]
-> To sync your Mac's clock continuously, install [chrony](https://chrony-project.org/):
+> [!NOTE]
+> Not a production time source, and not intended as a network-facing server. Designed as a localhost source for chrony while GPS fix is held.
+
+```mermaid
+graph LR
+    A["GPS Satellites"] --> B["Mk IV GNSS"]
+    B -->|USB Serial| C["PCC NTP Server"]
+    C -->|UDP 12321| D["chrony"]
+    D --> E["System Clock"]
+```
+
+<details>
+<summary>Pairing with chrony</summary>
+<br>
+
+Install [chrony](https://chrony-project.org/):
 
 ```bash
 brew install chrony
@@ -291,17 +280,25 @@ sudo mkdir -p /var/run/chrony
 sudo /opt/homebrew/sbin/chronyd -f /opt/homebrew/etc/chrony.conf
 ```
 
-Check status with `chronyc tracking`. You should see Stratum 1 with the reference ID `GPS`.
+Check status with `chronyc tracking`. You should see Stratum 1 with reference ID `GPS`.
 
 > [!IMPORTANT]
-> chrony requires elevated privileges to discipline the system clock. The PCC NTP server itself runs unprivileged on a non-standard port.
+> chrony requires elevated privileges to discipline the system clock. PCC’s NTP server runs unprivileged on a non-standard port.
+
+</details>
 
 ## Serial protocol
+
+<details>
+<summary>Protocol details</summary>
+<br>
 
 Commands are `key = value\r\n` over USB serial at 115200 baud. They take effect immediately but reset on power cycle unless saved to `config.txt`. The app disables NMEA output on connect so commands work reliably, and restores it on disconnect. See the [Mk IV documentation](https://mitxela.com/projects/precision_clock_mk_iv/docs) for the full command reference.
 
 > [!CAUTION]
 > Writing to config.txt overwrites the clock’s saved settings. PCC keeps a local backup on each write, but take care with manual serial commands.
+
+</details>
 
 ## Dependencies
 
