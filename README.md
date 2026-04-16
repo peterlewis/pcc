@@ -1,4 +1,4 @@
-# PCC: Precision Clock Companion
+# PCC (Precision Clock Companion)
 
 A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs) by [mitxela](https://mitxela.com). Connects over USB serial to configure the clock's display, brightness, modes, and settings.
 
