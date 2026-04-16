@@ -283,15 +283,15 @@ sudo /opt/homebrew/sbin/chronyd -f /opt/homebrew/etc/chrony.conf
 
 Check status with `chronyc tracking`. You should see Stratum 1 with the reference ID `GPS`.
 
-[!IMPORTANT]
-chrony requires elevated privileges to discipline the system clock. The PCC NTP server itself runs unprivileged on a non-standard port.
+> [!IMPORTANT]
+> chrony requires elevated privileges to discipline the system clock. The PCC NTP server itself runs unprivileged on a non-standard port.
 
 ## Serial protocol
 
 Commands are `key = value\r\n` over USB serial at 115200 baud. They take effect immediately but reset on power cycle unless saved to `config.txt`. The app disables NMEA output on connect so commands work reliably, and restores it on disconnect. See the [Mk IV documentation](https://mitxela.com/projects/precision_clock_mk_iv/docs) for the full command reference.
 
-[!CAUTION]
-Writing to config.txt overwrites the clock’s saved settings. PCC keeps a local backup on each write, but take care with manual serial commands.
+> [!CAUTION]
+> Writing to config.txt overwrites the clock’s saved settings. PCC keeps a local backup on each write, but take care with manual serial commands.
 
 ## Dependencies
 
