@@ -2,71 +2,202 @@
 
 A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs) by [mitxela](https://mitxela.com). Connects over USB serial to configure the clock's display, brightness, modes, and settings.
 
+> [!NOTE]
 > This is an independent, community-built companion app. Not affiliated with mitxela.
 
-![macOS 26+](https://img.shields.io/badge/macOS-26%2B-blue) ![Swift 6.2](https://img.shields.io/badge/Swift-6.2-orange)
+![macOS 26+](https://img.shields.io/badge/macOS-26%2B-blue) ![Swift 6.2](https://img.shields.io/badge/Swift-6.2-orange) ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
 ## Screenshots
 
-![Satellites — Globe](docs/screenshots/satellites-globe-trails.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/satellites-globe-dark.png">
+  <img src="docs/screenshots/satellites-globe-light.png" alt="Satellites — Globe">
+</picture>
 
 <table>
 <tr>
-<td><a href="docs/screenshots/data-sources.png"><img src="docs/screenshots/data-sources.png" width="280"></a><br><sub>Data Sources</sub></td>
-<td><a href="docs/screenshots/satellites-polar-trails.png"><img src="docs/screenshots/satellites-polar-trails.png" width="280"></a><br><sub>Satellites — Polar</sub></td>
-<td><a href="docs/screenshots/satellites-map-trails.png"><img src="docs/screenshots/satellites-map-trails.png" width="280"></a><br><sub>Satellites — Map</sub></td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/data-sources-dark.png">
+  <img src="docs/screenshots/data-sources-light.png" width="280">
+</picture>
+<br><sub>Data Sources</sub>
+</td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/satellites-polar-dark.png">
+  <img src="docs/screenshots/satellites-polar-light.png" width="280">
+</picture>
+<br><sub>Satellites — Polar</sub>
+</td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/satellites-map-dark.png">
+  <img src="docs/screenshots/satellites-map-light.png" width="280">
+</picture>
+<br><sub>Satellites — Map</sub>
+</td>
 </tr>
 <tr>
-<td><a href="docs/screenshots/brightness.png"><img src="docs/screenshots/brightness.png" width="280"></a><br><sub>Brightness</sub></td>
-<td><a href="docs/screenshots/weather.png"><img src="docs/screenshots/weather.png" width="280"></a><br><sub>Weather</sub></td>
-<td><a href="docs/screenshots/time-server.png"><img src="docs/screenshots/time-server.png" width="280"></a><br><sub>Time Server</sub></td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/brightness-dark.png">
+  <img src="docs/screenshots/brightness-light.png" width="280">
+</picture>
+<br><sub>Brightness</sub>
+</td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/weather-dark.png">
+  <img src="docs/screenshots/weather-light.png" width="280">
+</picture>
+<br><sub>Weather</sub>
+</td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/time-server-dark.png">
+  <img src="docs/screenshots/time-server-light.png" width="280">
+</picture>
+<br><sub>Time Server</sub>
+</td>
 </tr>
 </table>
 
 <details>
 <summary>All screenshots</summary>
 <br>
+
 <table>
 <tr>
-<td><a href="docs/screenshots/menu-bar.png"><img src="docs/screenshots/menu-bar.png" width="280"></a><br><sub>Menu Bar</sub></td>
-<td><a href="docs/screenshots/connect.png"><img src="docs/screenshots/connect.png" width="280"></a><br><sub>Connect</sub></td>
-<td><a href="docs/screenshots/data-sources.png"><img src="docs/screenshots/data-sources.png" width="280"></a><br><sub>Data Sources</sub></td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/connect-dark.png">
+  <img src="docs/screenshots/connect-light.png" width="280">
+</picture>
+<br><sub>Connect</sub>
+</td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/data-sources-dark.png">
+  <img src="docs/screenshots/data-sources-light.png" width="280">
+</picture>
+<br><sub>Data Sources</sub>
+</td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/text-dark.png">
+  <img src="docs/screenshots/text-light.png" width="280">
+</picture>
+<br><sub>Text</sub>
+</td>
 </tr>
+
 <tr>
-<td><a href="docs/screenshots/data-sources-rest.png"><img src="docs/screenshots/data-sources-rest.png" width="280"></a><br><sub>Data Sources — REST</sub></td>
-<td><a href="docs/screenshots/data-sources-bash.png"><img src="docs/screenshots/data-sources-bash.png" width="280"></a><br><sub>Data Sources — Bash</sub></td>
-<td><a href="docs/screenshots/text.png"><img src="docs/screenshots/text.png" width="280"></a><br><sub>Text</sub></td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/data-sources-rest-dark.png">
+  <img src="docs/screenshots/data-sources-rest-light.png" width="280">
+</picture>
+<br><sub>Data Sources — REST</sub>
+</td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/data-sources-bash-dark.png">
+  <img src="docs/screenshots/data-sources-bash-light.png" width="280">
+</picture>
+<br><sub>Data Sources — Bash</sub>
+</td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/countdown-dark.png">
+  <img src="docs/screenshots/countdown-light.png" width="280">
+</picture>
+<br><sub>Countdown</sub>
+</td>
 </tr>
+
 <tr>
-<td><a href="docs/screenshots/weather.png"><img src="docs/screenshots/weather.png" width="280"></a><br><sub>Weather</sub></td>
-<td><a href="docs/screenshots/countdown.png"><img src="docs/screenshots/countdown.png" width="280"></a><br><sub>Countdown</sub></td>
-<td><a href="docs/screenshots/satellites-polar.png"><img src="docs/screenshots/satellites-polar.png" width="280"></a><br><sub>Satellites — Polar</sub></td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/satellites-polar-dark.png">
+  <img src="docs/screenshots/satellites-polar-light.png" width="280">
+</picture>
+<br><sub>Satellites — Polar</sub>
+</td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/satellites-map-dark.png">
+  <img src="docs/screenshots/satellites-map-light.png" width="280">
+</picture>
+<br><sub>Satellites — Map</sub>
+</td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/satellites-globe-dark.png">
+  <img src="docs/screenshots/satellites-globe-light.png" width="280">
+</picture>
+<br><sub>Satellites — Globe</sub>
+</td>
 </tr>
+
 <tr>
-<td><a href="docs/screenshots/satellites-polar-trails.png"><img src="docs/screenshots/satellites-polar-trails.png" width="280"></a><br><sub>Polar with Trails</sub></td>
-<td><a href="docs/screenshots/satellites-polar-dark.png"><img src="docs/screenshots/satellites-polar-dark.png" width="280"></a><br><sub>Polar — Dark</sub></td>
-<td><a href="docs/screenshots/satellites-map.png"><img src="docs/screenshots/satellites-map.png" width="280"></a><br><sub>Satellites — Map</sub></td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/signal-analysis-dark.png">
+  <img src="docs/screenshots/signal-analysis-light.png" width="280">
+</picture>
+<br><sub>Signal Analysis</sub>
+</td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/modes-dark.png">
+  <img src="docs/screenshots/modes-light.png" width="280">
+</picture>
+<br><sub>Modes</sub>
+</td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/diagnostics-dark.png">
+  <img src="docs/screenshots/diagnostics-light.png" width="280">
+</picture>
+<br><sub>Diagnostics</sub>
+</td>
 </tr>
+
 <tr>
-<td><a href="docs/screenshots/satellites-map-trails.png"><img src="docs/screenshots/satellites-map-trails.png" width="280"></a><br><sub>Map with Trails</sub></td>
-<td><a href="docs/screenshots/satellites-globe.png"><img src="docs/screenshots/satellites-globe.png" width="280"></a><br><sub>Satellites — Globe</sub></td>
-<td><a href="docs/screenshots/satellites-globe-trails.png"><img src="docs/screenshots/satellites-globe-trails.png" width="280"></a><br><sub>Globe with Trails</sub></td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/serial-monitor-dark.png">
+  <img src="docs/screenshots/serial-monitor-light.png" width="280">
+</picture>
+<br><sub>Serial Monitor</sub>
+</td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/advanced-dark.png">
+  <img src="docs/screenshots/advanced-light.png" width="280">
+</picture>
+<br><sub>Advanced</sub>
+</td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/updates-dark.png">
+  <img src="docs/screenshots/updates-light.png" width="280">
+</picture>
+<br><sub>Updates</sub>
+</td>
 </tr>
+
 <tr>
-<td><a href="docs/screenshots/signal-analysis.png"><img src="docs/screenshots/signal-analysis.png" width="280"></a><br><sub>Signal Analysis</sub></td>
-<td><a href="docs/screenshots/brightness.png"><img src="docs/screenshots/brightness.png" width="280"></a><br><sub>Brightness</sub></td>
-<td><a href="docs/screenshots/modes.png"><img src="docs/screenshots/modes.png" width="280"></a><br><sub>Modes</sub></td>
+<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/manual-dark.png">
+  <img src="docs/screenshots/manual-light.png" width="280">
+</picture>
+<br><sub>Mk IV User Manual</sub>
+</td>
 </tr>
-<tr>
-<td><a href="docs/screenshots/time-server.png"><img src="docs/screenshots/time-server.png" width="280"></a><br><sub>Time Server</sub></td>
-<td><a href="docs/screenshots/diagnostics.png"><img src="docs/screenshots/diagnostics.png" width="280"></a><br><sub>Diagnostics</sub></td>
-<td><a href="docs/screenshots/serial-monitor.png"><img src="docs/screenshots/serial-monitor.png" width="280"></a><br><sub>Serial Monitor</sub></td>
-</tr>
-<tr>
-<td><a href="docs/screenshots/advanced.png"><img src="docs/screenshots/advanced.png" width="280"></a><br><sub>Advanced</sub></td>
-<td><a href="docs/screenshots/updates.png"><img src="docs/screenshots/updates.png" width="280"></a><br><sub>Updates</sub></td>
-<td><a href="docs/screenshots/manual.png"><img src="docs/screenshots/manual.png" width="280"></a><br><sub>Mk IV User Manual</sub></td>
-</tr>
+
 </table>
 </details>
 
@@ -79,7 +210,7 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 - Poll REST APIs or shell commands and rotate values on the clock (with HTTP header support)
 - Edit the 5-point brightness curve with a draggable graph, save custom presets
 - Read and write `config.txt` with local backups kept on the Mac
-- Check for firmware and timezone updates, install to the CLOCK USB volume
+- Check for firmware and timezone updates, install to the <kbd>CLOCK</kbd> USB volume
 
 ### GPS & Satellites
 - Three satellite views — Polar, Map, and Globe — with consistent toggle controls for satellites, labels, and trails
@@ -95,7 +226,7 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 
 ### NTP Time Server
 - Turns your Mac into a Stratum 1 NTP time server — near-millisecond accuracy from GPS, no internet required
-- GPS-disciplined time from the clock's GNSS module, served on localhost UDP port 12321
+- GPS-disciplined time from the clock's GNSS module, served on localhost UDP port `12321`
 - Pair with chrony to keep your Mac's system clock continuously disciplined to GPS time
 - Time extrapolation compensates for serial latency (~200–500ms)
 - Built-in test query and live offset display to verify operation
@@ -130,6 +261,7 @@ Or open `Package.swift` in Xcode and hit Run.
 
 The app includes a Stratum 1 NTP server that serves GPS-disciplined time from the clock's GNSS receiver. With chrony, this gives your Mac near-millisecond clock accuracy from GPS — no internet dependency. Enable it from the Time Server tab.
 
+[!TIP]
 To sync your Mac's clock continuously, install [chrony](https://chrony-project.org/):
 
 ```bash
@@ -151,9 +283,15 @@ sudo /opt/homebrew/sbin/chronyd -f /opt/homebrew/etc/chrony.conf
 
 Check status with `chronyc tracking`. You should see Stratum 1 with the reference ID `GPS`.
 
+[!IMPORTANT]
+chrony requires elevated privileges to discipline the system clock. The PCC NTP server itself runs unprivileged on a non-standard port.
+
 ## Serial protocol
 
 Commands are `key = value\r\n` over USB serial at 115200 baud. They take effect immediately but reset on power cycle unless saved to `config.txt`. The app disables NMEA output on connect so commands work reliably, and restores it on disconnect. See the [Mk IV documentation](https://mitxela.com/projects/precision_clock_mk_iv/docs) for the full command reference.
+
+[!CAUTION]
+Writing to config.txt overwrites the clock’s saved settings. PCC keeps a local backup on each write, but take care with manual serial commands.
 
 ## Dependencies
 
