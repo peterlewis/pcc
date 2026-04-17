@@ -1,6 +1,6 @@
 # PCC (Precision Clock Companion)
 
-A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs) by [mitxela](https://mitxela.com). Connects over USB serial to configure the clock's display, brightness, modes, and settings.
+A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs) by [mitxela](https://mitxela.com). Lives in the menu bar — connects over USB serial to drive the clock's display, track satellites, serve GPS-disciplined NTP time, and scroll WeatherKit conditions.
 
 > [!NOTE]
 > This is an independent, community-built companion app. Not affiliated with mitxela.
@@ -192,7 +192,7 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 </table>
 </details>
 
-## What it does
+## Features
 
 ### Display & Configuration
 - Connects over serial, auto-detects ports, reconnects after reboot
@@ -218,7 +218,6 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 
 ### Other
 - Serial monitor for raw NMEA and debug output
-- Lives in the menu bar; window opens on demand
 
 ## Building
 
