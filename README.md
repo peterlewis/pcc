@@ -5,7 +5,10 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 > [!NOTE]
 > This is an independent, community-built companion app. Not affiliated with mitxela.
 
-![macOS 26+](https://img.shields.io/badge/macOS-26%2B-blue) ![Swift 6.2](https://img.shields.io/badge/Swift-6.2-orange) ![License: MIT](https://img.shields.io/badge/License-MIT-green)
+> [!TIP]
+> Also available as **[PCC Web](https://peterlewis.github.io/pcc/web/)** — a browser-based subset for Chromium browsers (Web Serial required). WIP / proof-of-concept, reduced feature set. See [PCC Web](#pcc-web-wip--proof-of-concept) below.
+
+![macOS 26+](https://img.shields.io/badge/macOS-26%2B-blue) ![Swift 6.2](https://img.shields.io/badge/Swift-6.2-orange) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Web: WIP / POC](https://img.shields.io/badge/Web-WIP%20%2F%20POC-orange)
 
 ## Screenshots
 
@@ -223,6 +226,36 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 
 ### Other
 - Serial monitor for raw NMEA and debug output
+
+## PCC Web (WIP / proof-of-concept)
+
+A browser-based subset of PCC, deployable as a static site. No backend, no account, no tracking — just HTML, CSS, and ES modules talking to the clock over [Web Serial](https://developer.mozilla.org/docs/Web/API/Web_Serial_API).
+
+> [!IMPORTANT]
+> **WIP / proof-of-concept — not even beta.** The Mac app is the primary companion; the web port exists to cover non-Mac users with a rough subset and to explore how much of the app maps cleanly to browser APIs. **Not all features function yet** — expect half-wired controls, rough edges, and breaking changes without notice.
+
+**[Open PCC Web](https://peterlewis.github.io/pcc/web/)** (Chromium browsers only — Safari and Firefox don't implement Web Serial). Full rundown in [web/README.md](web/README.md).
+
+**Roughly working** (not all polished, some half-wired): display control (text, countdowns, brightness, raw commands), polar sky view with sector heatmap + horizon mask + age-faded trails, offline 3D globe (same HTML as the Mac app), IndexedDB pass history with configurable retention, GPS info, sun/moon positions, auto light/dark mode following the OS.
+
+**Doesn't, by design:**
+- **NTP server** — browsers can't open UDP listen sockets
+- **Firmware / timezone updates** — no USB mass-storage mount
+- **Native map view** — MapKit-only (a Leaflet fallback is possible but not wired up)
+- **WeatherKit** — Apple-only
+- **On-device AI insights** — Apple Foundation Models are Mac-only
+
+The Mac app and the web port are kept in sync via file-level mirrors (e.g. `Sources/PCC/SatPass.swift` ↔ `web/js/satpass.js`). The 3D globe HTML is literally the same file in both trees with a small shim that routes messages to WKWebView on Mac or a parent iframe on the web. See [MAC_PARITY.md](MAC_PARITY.md) for the full convention.
+
+### Run locally
+
+```bash
+git clone https://github.com/peterlewis/pcc.git
+cd pcc
+bash web/serve.sh     # starts a localhost HTTP server on :8765
+```
+
+Web Serial works on `localhost` without HTTPS; any other host needs HTTPS (GitHub Pages, Cloudflare Pages, and Netlify all provide it).
 
 ## Building
 
