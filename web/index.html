@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PCC Web — Precision Clock Companion</title>
-<meta name="description" content="A browser-based companion for the Precision Clock Mk IV. Drives the display, sends text and countdowns, and shows live satellite reception over Web Serial.">
+<title>PCC — Precision Clock Companion (Web)</title>
+<meta name="description" content="A browser-based companion for the Precision Clock Mk IV. Drives the display, sends text and countdowns, and shows live satellite reception, trails, sector heatmaps, and a 3D globe over Web Serial.">
+<meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230e1218'/%3E%3Ccircle cx='32' cy='32' r='20' fill='none' stroke='%234da3ff' stroke-width='3'/%3E%3Cline x1='32' y1='32' x2='32' y2='16' stroke='%234da3ff' stroke-width='3' stroke-linecap='round'/%3E%3Cline x1='32' y1='32' x2='44' y2='38' stroke='%234da3ff' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="./css/app.css">
 </head>
@@ -32,7 +33,7 @@
 </script>
 
 <header class="topbar">
-    <div class="brand">PCC <span class="sub">Web companion for the Precision Clock Mk IV</span></div>
+    <div class="brand"><strong>PCC</strong> <span class="sub">Precision Clock Companion <span class="tag">Web</span></span></div>
     <div class="spacer"></div>
     <div id="statusPill" class="status-pill"><span class="dot"></span><span id="statusText">Disconnected</span></div>
 </header>
@@ -42,6 +43,7 @@
         <button data-tab="connect" class="active">Connect</button>
         <button data-tab="display">Display</button>
         <button data-tab="satellites">Satellites</button>
+        <button data-tab="globe">Globe</button>
         <button data-tab="monitor">Monitor</button>
         <button data-tab="about">About</button>
     </nav>
@@ -65,9 +67,21 @@
                 </div>
             </div>
 
+            <div class="card info-card">
+                <h2>Web edition — reduced feature set</h2>
+                <p>This is the browser port of the native macOS PCC app. It mirrors most of the Mac features (display control, live sky view, trails, sector heatmap, 3D globe, persistent history) but intentionally <strong>omits</strong> anything a browser can't do safely:</p>
+                <ul class="compact">
+                    <li>NTP time server (no UDP listen socket)</li>
+                    <li>Firmware &amp; timezone updates (no USB mass-storage mount)</li>
+                    <li>Native map view &amp; WeatherKit (Apple-only APIs)</li>
+                    <li>On-device AI insights (Foundation Models are Mac-only)</li>
+                </ul>
+                <p class="muted">Run the Mac app for the full experience — see the <a href="#" data-goto="about">About</a> tab for install links.</p>
+            </div>
+
             <div class="card">
                 <h2>Built on</h2>
-                <p class="muted">Web Serial API · HTML5 Canvas · three.js / globe.gl (offline, MIT) · no backend, no account, no tracking. The whole page is static files from a CDN.</p>
+                <p class="muted">Web Serial API · HTML5 Canvas · globe.gl / three.js (offline, MIT) · IndexedDB for pass history · no backend, no account, no tracking. Static files only.</p>
             </div>
         </section>
 
@@ -143,12 +157,63 @@
         <!-- SATELLITES -->
         <section class="panel" id="panel-satellites">
             <h1 class="panel-title">Satellites</h1>
-            <p class="panel-sub">Live sky view from the clock's GNSS module. Dot colour is the constellation; fill is SNR (red → yellow → green → cyan).</p>
+            <p class="panel-sub">Live sky view from the clock's GNSS module. Dot colour is the constellation; fill is SNR. Sector heatmap shows peak SNR per 5° × 5° cell; trails show recent passes.</p>
 
             <div class="row" style="margin-bottom: 14px;">
                 <button class="btn" id="satStartBtn">Start live view</button>
                 <button class="btn ghost" id="satStopBtn" disabled>Stop</button>
                 <span class="muted" id="satCount">0 satellites in view</span>
+            </div>
+
+            <div class="row toggles" style="margin-bottom: 14px;">
+                <label title="Record satellite observations to IndexedDB">
+                    <input type="checkbox" id="logToggle"> Record history
+                </label>
+                <label title="Render persistent passes as age-faded arcs">
+                    <input type="checkbox" id="showTrails" checked> Trails
+                </label>
+                <label title="Colour each 5° × 5° sky cell by peak observed SNR">
+                    <input type="checkbox" id="showHeatmap" checked> Heatmap
+                </label>
+                <label title="Red tint shows the minimum elevation observed per sector — persistent obstructions">
+                    <input type="checkbox" id="showHorizon" checked> Horizon
+                </label>
+                <label title="Show PRN labels next to each live satellite">
+                    <input type="checkbox" id="showLabels" checked> Labels
+                </label>
+                <label title="Apply moving-average smoothing to trail az/el (removes 1° NMEA staircase)">
+                    <input type="checkbox" id="smoothTrails" checked> Smooth
+                </label>
+            </div>
+
+            <div class="row" style="margin-bottom: 14px;">
+                <label for="timeWindow">Show passes from</label>
+                <select id="timeWindow">
+                    <option value="live">Live (last 3 min)</option>
+                    <option value="m5">Last 5 minutes</option>
+                    <option value="m15">Last 15 minutes</option>
+                    <option value="h1" selected>Last hour</option>
+                    <option value="h2">Last 2 hours</option>
+                    <option value="h6">Last 6 hours</option>
+                    <option value="d1">Last 24 hours</option>
+                    <option value="d7">Last 7 days</option>
+                    <option value="d30">Last 30 days</option>
+                    <option value="all">All time</option>
+                </select>
+
+                <label for="retentionSelect" style="margin-left: 14px;">Keep data for</label>
+                <select id="retentionSelect">
+                    <option value="h1">1 hour</option>
+                    <option value="h6">6 hours</option>
+                    <option value="d1">24 hours</option>
+                    <option value="d7">7 days</option>
+                    <option value="d30" selected>30 days</option>
+                    <option value="d90">90 days</option>
+                    <option value="y1">1 year</option>
+                    <option value="unlimited">Unlimited</option>
+                </select>
+
+                <button class="btn ghost" id="clearHistoryBtn" title="Delete all recorded passes from IndexedDB">Clear history</button>
             </div>
 
             <div class="sat-layout">
@@ -183,6 +248,18 @@
                         <p class="muted" style="margin-top: 10px; font-size: 12px;">Computed from the GPS-reported position and UTC time.</p>
                     </div>
 
+                    <div class="card sky-stats">
+                        <h2>History</h2>
+                        <dl>
+                            <dt>Passes</dt><dd id="statPasses">0</dd>
+                            <dt>Today</dt><dd id="statToday">0</dd>
+                            <dt>Observations</dt><dd id="statObs">0</dd>
+                            <dt>Peak elevation</dt><dd id="statPeak">—</dd>
+                            <dt>Longest pass</dt><dd id="statLongest">—</dd>
+                            <dt>Azimuth coverage</dt><dd id="statCoverage">0%</dd>
+                        </dl>
+                    </div>
+
                     <div class="card">
                         <h2>Legend</h2>
                         <div class="legend" id="legend">
@@ -193,6 +270,25 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </section>
+
+        <!-- GLOBE -->
+        <section class="panel" id="panel-globe">
+            <h1 class="panel-title">3D globe</h1>
+            <p class="panel-sub">Photographic Earth with a real day/night terminator. Satellites float above their sub-satellite points; recorded passes render as age-faded arcs. Bundled globe.gl / three.js — no external assets.</p>
+
+            <div class="row toggles" style="margin-bottom: 14px;">
+                <label><input type="checkbox" id="globeShowSats" checked> Satellites</label>
+                <label><input type="checkbox" id="globeShowCelestials" checked> Sun &amp; Moon</label>
+                <label><input type="checkbox" id="globeShowLabels" checked> Labels</label>
+                <label><input type="checkbox" id="globeSmooth" checked> Smooth trails</label>
+                <label><input type="checkbox" id="globeShowClock" checked> Clock overlay</label>
+                <button class="btn ghost" id="globeClockFormatBtn" title="Toggle between Match clock (local) and ISO 8601 (UTC)">Clock format</button>
+            </div>
+
+            <div class="globe-wrap">
+                <iframe id="globeFrame" title="3D globe" src="./globe/index.html" allow="fullscreen"></iframe>
             </div>
         </section>
 
@@ -215,25 +311,30 @@
             <h1 class="panel-title">About PCC Web</h1>
             <p class="panel-sub">A browser-based subset of the native macOS PCC companion.</p>
 
-            <div class="card">
-                <h2>What's here</h2>
-                <ul style="margin: 0; padding-left: 20px; line-height: 1.7;">
-                    <li>Connect over Web Serial (Chromium browsers only)</li>
-                    <li>Drive display modes, text, countdowns, brightness</li>
-                    <li>Live polar sky view with SNR-coloured satellites</li>
-                    <li>GPS fix info, Maidenhead grid, solar &amp; lunar position</li>
-                    <li>Raw serial monitor with custom command input</li>
+            <div class="card info-card">
+                <h2>Reduced feature set</h2>
+                <p>PCC Web aims for visible feature parity with the Mac app wherever the browser allows it — live satellites, polar sky view with sector heatmap, horizon mask, trails with adaptive smoothing, persistent pass history in IndexedDB, and the same offline 3D globe. The globe HTML is a single shared file bundled into both apps, so feature work there lands in both places.</p>
+                <p>What intentionally stays in the Mac app:</p>
+                <ul class="compact">
+                    <li><strong>NTP time server</strong> — browsers can't open UDP sockets or listen on a port.</li>
+                    <li><strong>Firmware / timezone updates</strong> — need USB mass-storage mount.</li>
+                    <li><strong>Native map view</strong> — requires MapKit. A Leaflet fallback is possible but not yet wired up.</li>
+                    <li><strong>WeatherKit</strong> — Apple-only. A generic weather provider would be a swap-in.</li>
+                    <li><strong>On-device AI insights</strong> — Apple Foundation Models are Mac-only.</li>
                 </ul>
             </div>
 
             <div class="card">
-                <h2>What's <em>not</em> here</h2>
-                <ul style="margin: 0; padding-left: 20px; line-height: 1.7;">
-                    <li><strong>NTP time server</strong> — browsers can't open UDP sockets or listen on a port. Stays in the Mac app.</li>
-                    <li><strong>Firmware / timezone updates</strong> — need USB mass-storage mount, which the browser can't do. Stays in the Mac app.</li>
-                    <li><strong>WeatherKit</strong> — Apple-only. A generic weather provider would be a swap-in.</li>
-                    <li><strong>On-device AI insights</strong> — Apple's Foundation Models are Mac-only; a BYO-key LLM call would be a swap-in.</li>
-                    <li><strong>3D globe + long-term trail history</strong> — coming in a follow-up (globe.gl is already bundled; IndexedDB-backed SatPass store is the next port).</li>
+                <h2>What's here</h2>
+                <ul class="compact">
+                    <li>Connect over Web Serial (Chromium browsers only)</li>
+                    <li>Drive display modes, text, countdowns, brightness, raw commands</li>
+                    <li>Polar sky view: live satellites, sector heatmap, horizon mask, trails with adaptive smoothing</li>
+                    <li>3D globe with day/night terminator, satellites, trails, sun &amp; moon</li>
+                    <li>Persistent pass history (IndexedDB) with configurable retention (1 hour → unlimited)</li>
+                    <li>GPS fix info, Maidenhead grid, solar &amp; lunar position, sunrise/sunset</li>
+                    <li>Raw serial monitor with custom command input</li>
+                    <li>Automatic light / dark mode following your system</li>
                 </ul>
             </div>
 
@@ -244,9 +345,10 @@
 
             <div class="card">
                 <h2>Links</h2>
-                <ul style="margin: 0; padding-left: 20px; line-height: 1.7;">
+                <ul class="compact">
                     <li><a href="https://mitxela.com/projects/precision_clock_mk_iv/docs" target="_blank" rel="noopener">Precision Clock Mk IV docs</a> — hardware + serial protocol reference</li>
                     <li><a href="https://github.com/peterlewis/pcc" target="_blank" rel="noopener">peterlewis/pcc</a> — native macOS companion + this web port</li>
+                    <li><a href="https://github.com/peterlewis/pcc/releases" target="_blank" rel="noopener">Releases</a> — notarized macOS builds</li>
                 </ul>
             </div>
         </section>

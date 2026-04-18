@@ -93,6 +93,27 @@
 <div id="globe"></div>
 <div class="clock-overlay hidden" id="clock">—</div>
 <script>
+// ---- Host transport router ---------------------------------------
+// This HTML is shared between two hosts:
+//   - macOS PCC app — loads the page in a WKWebView and listens on
+//     window.webkit.messageHandlers.{globeReady,globeLog,clockToggle,clockCycleFormat}
+//   - PCC Web — loads the page inside an <iframe>; the parent window
+//     listens for message events and can't read `webkit.messageHandlers`
+//
+// `postHost(channel, body)` picks the transport that actually exists in
+// the current host and sends the same payload to both. Kept tiny so
+// the shared file stays readable from either side.
+function postHost(channel, body) {
+    try {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers[channel]) {
+            window.webkit.messageHandlers[channel].postMessage(body);
+            return;
+        }
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ channel: channel, body: body }, '*');
+        }
+    } catch (_) { /* last resort: swallow — we can't report the failure */ }
+}
 try {
     // ---- Globe construction -------------------------------------------
     // Day texture comes in through three-globe's own texture loader via
@@ -210,8 +231,7 @@ try {
             nightTex.needsUpdate = true;
         };
         nightImg.onerror = () => {
-            window.webkit.messageHandlers.globeLog.postMessage(
-                'Night texture failed to load');
+            postHost('globeLog', 'Night texture failed to load');
         };
         nightImg.src = './earth-night.jpg';
 
@@ -283,8 +303,7 @@ try {
         // from the scene altogether.
         try { myGlobe.lights([]); } catch (e) { /* older build */ }
 
-        window.webkit.messageHandlers.globeLog.postMessage(
-            'Day/night shader installed');
+        postHost('globeLog', 'Day/night shader installed');
     }
 
     // Kick off the shader install once the globe's own day-texture
@@ -376,16 +395,12 @@ try {
     if (clockEl) {
         clockEl.addEventListener('click', (ev) => {
             ev.stopPropagation();
-            if (window.webkit && window.webkit.messageHandlers.clockToggle) {
-                window.webkit.messageHandlers.clockToggle.postMessage('toggle');
-            }
+            postHost('clockToggle', 'toggle');
         });
         clockEl.addEventListener('contextmenu', (ev) => {
             ev.preventDefault();
             ev.stopPropagation();
-            if (window.webkit && window.webkit.messageHandlers.clockCycleFormat) {
-                window.webkit.messageHandlers.clockCycleFormat.postMessage('cycle');
-            }
+            postHost('clockCycleFormat', 'cycle');
             // Visible confirmation for an otherwise silent action.
             clockEl.classList.add('flash');
             setTimeout(() => clockEl.classList.remove('flash'), 160);
@@ -403,10 +418,9 @@ try {
         myGlobe.pointOfView({ lat: lat, lng: lng, altitude: 1.8 }, 1000);
     };
 
-    window.webkit.messageHandlers.globeReady.postMessage('ok');
+    postHost('globeReady', 'ok');
 } catch (e) {
-    window.webkit.messageHandlers.globeLog.postMessage(
-        'Error: ' + (e && e.message ? e.message : e));
+    postHost('globeLog', 'Error: ' + (e && e.message ? e.message : e));
 }
 </script>
 </body>

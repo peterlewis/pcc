@@ -1,9 +1,14 @@
 // PCC Web — main wiring.
 //
-// Pulls together Clock (Web Serial), NMEA parsers, polar plot, and the
-// various UI tabs. Intentionally small: each UI affordance is wired
-// directly rather than routed through a state-management layer. If this
-// grows past a few hundred lines, factor out per-tab controllers.
+// Pulls together Clock (Web Serial), NMEA parsers, polar plot, sky-trail
+// store (IndexedDB), 3D globe iframe, and the various UI tabs. Each UI
+// affordance is wired directly rather than routed through a state
+// manager — keep it readable, factor later if it outgrows this file.
+//
+// The polar / store / globe triad is modelled on the Mac app:
+//   SkyView ↔ polar.js, SkyTrailStore ↔ skytrailstore.js,
+//   SkyGlobeView ↔ globe.js + web/globe/index.html (shared HTML).
+// See MAC_PARITY.md for the mirror policy.
 
 import { Clock } from './serial.js';
 import { parseGGA, parseRMC, GSVBuffer } from './nmea.js';
@@ -11,13 +16,16 @@ import { PolarPlot } from './polar.js';
 import {
     sunPosition, moonPosition, moonPhase, sunTimes, maidenhead
 } from './astronomy.js';
+import { SkyTrailStore } from './skytrailstore.js';
+import { RetentionWindow } from './satpass.js';
+import { Globe3D } from './globe.js';
 
 // --- state ----------------------------------------------------------------
 
 const clock = new Clock();
 
 /// Live GPS snapshot. Kept in one object so the periodic celestial-update
-/// timer has a single source of truth.
+/// timer and the globe ticker have a single source of truth.
 const gps = {
     lat: null,
     lon: null,
@@ -34,6 +42,13 @@ let scrollState = null; // { text, wrapLen, pos, timer }
 let scrollIntervalSec = 0.40;
 let monitorPaused = false;
 let satTrackingActive = false;
+let activeTab = 'connect';
+let timeWindow = 'h1';
+
+/// Persistent pass store. Instantiated up-front so prior history is
+/// visible on the polar plot the moment the user opens the Satellites
+/// tab, even before they click Record.
+const store = new SkyTrailStore();
 
 // --- elements -------------------------------------------------------------
 
@@ -64,6 +79,31 @@ const satStopBtn = $('satStopBtn');
 const satCount = $('satCount');
 const polarCanvas = $('polar');
 
+const logToggle = $('logToggle');
+const showTrailsInput = $('showTrails');
+const showHeatmapInput = $('showHeatmap');
+const showHorizonInput = $('showHorizon');
+const showLabelsInput = $('showLabels');
+const smoothTrailsInput = $('smoothTrails');
+const timeWindowSel = $('timeWindow');
+const retentionSel = $('retentionSelect');
+const clearHistoryBtn = $('clearHistoryBtn');
+
+const statPasses = $('statPasses');
+const statToday = $('statToday');
+const statObs = $('statObs');
+const statPeak = $('statPeak');
+const statLongest = $('statLongest');
+const statCoverage = $('statCoverage');
+
+const globeFrame = $('globeFrame');
+const globeShowSats = $('globeShowSats');
+const globeShowCelestials = $('globeShowCelestials');
+const globeShowLabels = $('globeShowLabels');
+const globeSmooth = $('globeSmooth');
+const globeShowClock = $('globeShowClock');
+const globeClockFormatBtn = $('globeClockFormatBtn');
+
 const monitorLog = $('monitorLog');
 const nmeaToggle = $('nmeaToggle');
 const clearLogBtn = $('clearLogBtn');
@@ -77,32 +117,177 @@ if (!Clock.isSupported()) {
     connectBtn.title = 'Web Serial not available in this browser';
 }
 
+// --- flag persistence -----------------------------------------------------
+
+const LS_FLAGS = 'pcc_web.flags';
+const defaultFlags = {
+    showTrails: true, showHeatmap: true, showHorizon: true, showLabels: true,
+    smoothTrails: true,
+    globeShowSats: true, globeShowCelestials: true, globeShowLabels: true,
+    globeSmooth: true, globeShowClock: true,
+};
+let flags = { ...defaultFlags };
+try {
+    const stored = JSON.parse(localStorage.getItem(LS_FLAGS) ?? 'null');
+    if (stored && typeof stored === 'object') flags = { ...defaultFlags, ...stored };
+} catch { /* ignore */ }
+function saveFlags() { localStorage.setItem(LS_FLAGS, JSON.stringify(flags)); }
+
 // --- tabs -----------------------------------------------------------------
 
 document.getElementById('sidebar').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-tab]');
     if (!btn) return;
-    const tab = btn.dataset.tab;
-    document.querySelectorAll('nav.sidebar button').forEach(b => b.classList.toggle('active', b === btn));
-    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `panel-${tab}`));
-    // The polar canvas lives in a display:none panel until this switch;
-    // ResizeObserver *should* fire as it becomes visible, but poke a
-    // redraw explicitly so the rings appear on first reveal even if RO
-    // coalesces the event.
-    if (tab === 'satellites') polar._resize();
+    activateTab(btn.dataset.tab);
+});
+// In-page "jump to tab" anchors — used by the reduced-feature-set notice
+// to point the reader at About.
+document.addEventListener('click', (e) => {
+    const link = e.target.closest('[data-goto]');
+    if (!link) return;
+    e.preventDefault();
+    activateTab(link.dataset.goto);
 });
 
-// --- clock wiring ---------------------------------------------------------
+function activateTab(tab) {
+    activeTab = tab;
+    document.querySelectorAll('nav.sidebar button').forEach(b => {
+        b.classList.toggle('active', b.dataset.tab === tab);
+    });
+    document.querySelectorAll('.panel').forEach(p => {
+        p.classList.toggle('active', p.id === `panel-${tab}`);
+    });
+    // The polar canvas lives in a display:none panel until this switch;
+    // ResizeObserver *should* fire as it becomes visible, but poke a
+    // redraw explicitly so the rings appear on first reveal.
+    if (tab === 'satellites') polar._resize();
+    if (tab === 'globe') {
+        initGlobeIfNeeded();
+        startGlobeTicker();
+    } else {
+        stopGlobeTicker();
+    }
+}
+
+// --- polar plot wiring ----------------------------------------------------
 
 const polar = new PolarPlot(polarCanvas);
+
+// Apply persisted flags to DOM + polar before first paint.
+showTrailsInput.checked   = flags.showTrails;
+showHeatmapInput.checked  = flags.showHeatmap;
+showHorizonInput.checked  = flags.showHorizon;
+showLabelsInput.checked   = flags.showLabels;
+smoothTrailsInput.checked = flags.smoothTrails;
+polar.setFlags({
+    showTrails:   flags.showTrails,
+    showHeatmap:  flags.showHeatmap,
+    showHorizon:  flags.showHorizon,
+    showLabels:   flags.showLabels,
+    smoothTrails: flags.smoothTrails,
+});
+
+function bindPolarFlag(input, key) {
+    input.addEventListener('change', () => {
+        flags[key] = input.checked;
+        saveFlags();
+        polar.setFlags({ [key]: flags[key] });
+    });
+}
+bindPolarFlag(showTrailsInput,   'showTrails');
+bindPolarFlag(showHeatmapInput,  'showHeatmap');
+bindPolarFlag(showHorizonInput,  'showHorizon');
+bindPolarFlag(showLabelsInput,   'showLabels');
+bindPolarFlag(smoothTrailsInput, 'smoothTrails');
+
+// --- store wiring ---------------------------------------------------------
+
+logToggle.checked = store.isLogging;
+retentionSel.value = store.retention;
+timeWindowSel.value = timeWindow;
+
+logToggle.addEventListener('change', () => {
+    store.isLogging = logToggle.checked;
+});
+
+timeWindowSel.addEventListener('change', () => {
+    timeWindow = timeWindowSel.value;
+    pushFilteredPassesToRenderers();
+});
+
+retentionSel.addEventListener('change', async () => {
+    const next = retentionSel.value;
+    if (next === store.retention) return;
+    const toPrune = store.passesThatWouldBePruned(next);
+    if (toPrune.length > 0) {
+        const plural = toPrune.length === 1 ? '' : 'es';
+        const ok = confirm(
+            `Shrinking retention to ${RetentionWindow.label(next)} ` +
+            `will delete ${toPrune.length} stored pass${plural} from this browser.\n\n` +
+            `Continue?`
+        );
+        if (!ok) {
+            retentionSel.value = store.retention;
+            return;
+        }
+    }
+    await store.setRetention(next);
+});
+
+clearHistoryBtn.addEventListener('click', async () => {
+    if (!confirm('Delete all recorded passes from this browser? This cannot be undone.')) return;
+    await store.clear();
+});
+
+// Store → renderers. Passes flow through the time-window filter; mask +
+// heatmap go straight through (they're aggregated-over-all-time).
+store.addEventListener('passes', () => pushFilteredPassesToRenderers());
+store.addEventListener('mask',   (e) => polar.setHorizonMask(e.detail.horizonMask));
+store.addEventListener('heatmap',(e) => polar.setSectorHeatmap(e.detail.sectorHeatmap));
+store.addEventListener('stats',  (e) => updateStatsDOM(e.detail.stats));
+
+function pushFilteredPassesToRenderers() {
+    const filtered = store.filtered(timeWindow);
+    polar.setPasses({ passes: filtered, activePRNs: store.activePRNs });
+    updateGlobeIfActive();
+}
+
+function updateStatsDOM(stats) {
+    statPasses.textContent   = String(stats.totalPasses);
+    statToday.textContent    = String(stats.passesToday);
+    statObs.textContent      = String(stats.observations);
+    statPeak.textContent     = stats.peakElevation > 0
+        ? `${Math.round(stats.peakElevation)}°` : '—';
+    statLongest.textContent  = stats.longestPassSeconds > 0
+        ? formatDuration(stats.longestPassSeconds) : '—';
+    statCoverage.textContent = `${Math.round(stats.coveragePercent)}%`;
+}
+
+function formatDuration(secs) {
+    const s = Math.round(secs);
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    if (m >= 60) {
+        const h = Math.floor(m / 60);
+        const mm = m % 60;
+        return `${h}h ${mm}m`;
+    }
+    return m > 0 ? `${m}m ${r}s` : `${r}s`;
+}
+
+// --- GSV → polar + store --------------------------------------------------
 
 const gsvBuffer = new GSVBuffer({
     onSatellites: (list) => {
         satellites = list;
         satCount.textContent = `${list.length} satellites in view`;
         polar.setSatellites(list);
+        if (store.isLogging) store.update(list);
+        updateGlobeIfActive();
     }
 });
+
+// --- clock wiring ---------------------------------------------------------
 
 clock.addEventListener('status', (e) => {
     const { connected, message } = e.detail;
@@ -378,6 +563,98 @@ function describeMoonPhase(p) {
 setInterval(() => {
     if (gps.lat != null && gps.lon != null) updateCelestial();
 }, 1000);
+
+// --- globe tab ------------------------------------------------------------
+
+/// GlobeClockFormat cycle — mirrors `enum GlobeClockFormat` on the Mac.
+/// The globe itself draws the overlay; we just hand it the format name and
+/// a visible flag. Cycling order matches the Mac's cmd-click behaviour.
+const GLOBE_CLOCK_CYCLE = ['matchClock', 'iso8601Utc', 'iso8601Local', 'utc', 'local'];
+let globe = null;
+let globeTickTimer = null;
+let globeClockFormat = 'matchClock';
+
+globeShowSats.checked       = flags.globeShowSats;
+globeShowCelestials.checked = flags.globeShowCelestials;
+globeShowLabels.checked     = flags.globeShowLabels;
+globeSmooth.checked         = flags.globeSmooth;
+globeShowClock.checked      = flags.globeShowClock;
+
+function initGlobeIfNeeded() {
+    if (globe) return;
+    globe = new Globe3D(globeFrame, {
+        onLog: (msg) => appendMonitor(`[globe] ${msg}\n`, 'rx'),
+        onClockToggle: () => {
+            // The globe HTML treats a tap on the clock overlay as "toggle
+            // visible". Mirror that into our persisted flag + DOM checkbox.
+            flags.globeShowClock = !flags.globeShowClock;
+            globeShowClock.checked = flags.globeShowClock;
+            saveFlags();
+            globe.setClockFormat(globeClockFormat, flags.globeShowClock);
+        },
+        onClockCycleFormat: () => cycleGlobeClockFormat(),
+    });
+    globe.setClockFormat(globeClockFormat, flags.globeShowClock);
+}
+
+function cycleGlobeClockFormat() {
+    const i = GLOBE_CLOCK_CYCLE.indexOf(globeClockFormat);
+    globeClockFormat = GLOBE_CLOCK_CYCLE[(i + 1) % GLOBE_CLOCK_CYCLE.length];
+    if (globe) globe.setClockFormat(globeClockFormat, flags.globeShowClock);
+}
+
+function startGlobeTicker() {
+    if (globeTickTimer) return;
+    updateGlobeIfActive();
+    // 1 Hz is plenty — sat positions move on the order of a pixel/second
+    // at the globe's default scale, and trail/stats updates come through
+    // the store's own event emissions.
+    globeTickTimer = setInterval(updateGlobeIfActive, 1000);
+}
+
+function stopGlobeTicker() {
+    if (globeTickTimer) { clearInterval(globeTickTimer); globeTickTimer = null; }
+}
+
+function updateGlobeIfActive() {
+    if (!globe || activeTab !== 'globe') return;
+    const now = new Date();
+    const sun  = (gps.lat != null && gps.lon != null) ? sunPosition(now,  gps.lat, gps.lon) : null;
+    const moon = (gps.lat != null && gps.lon != null) ? moonPosition(now, gps.lat, gps.lon) : null;
+    globe.update({
+        satellites,
+        sunPosition:  sun,
+        moonPosition: moon,
+        observerLat:  gps.lat,
+        observerLon:  gps.lon,
+        passes:       store.filtered(timeWindow),
+        activePRNs:   store.activePRNs,
+        now,
+        showSatellites: flags.globeShowSats,
+        showCelestials: flags.globeShowCelestials,
+        showLabels:     flags.globeShowLabels,
+        smoothTrails:   flags.globeSmooth,
+    });
+}
+
+function bindGlobeFlag(input, key) {
+    input.addEventListener('change', () => {
+        flags[key] = input.checked;
+        saveFlags();
+        updateGlobeIfActive();
+    });
+}
+bindGlobeFlag(globeShowSats,       'globeShowSats');
+bindGlobeFlag(globeShowCelestials, 'globeShowCelestials');
+bindGlobeFlag(globeShowLabels,     'globeShowLabels');
+bindGlobeFlag(globeSmooth,         'globeSmooth');
+
+globeShowClock.addEventListener('change', () => {
+    flags.globeShowClock = globeShowClock.checked;
+    saveFlags();
+    if (globe) globe.setClockFormat(globeClockFormat, flags.globeShowClock);
+});
+globeClockFormatBtn.addEventListener('click', () => cycleGlobeClockFormat());
 
 // --- monitor tab ----------------------------------------------------------
 

@@ -1,10 +1,12 @@
 /* PCC Web — minimal styling for a serial companion.
-   Dark first; the clock's own "dark workshop" aesthetic — system font,
-   plenty of breathing room, generous tap targets since this will also
-   open on a tablet in Chrome for Android if anyone asks. */
+   Dark-first aesthetic (matching the clock's "dark workshop" look) but
+   following the system preference — prefers-color-scheme: light swaps
+   the palette entirely. Every colour comes from a CSS variable so the
+   only thing the light override does is redefine that block. */
 
 :root {
-    color-scheme: dark;
+    color-scheme: dark light;
+    /* Default palette = dark */
     --bg: #0e1218;
     --surface: #161b24;
     --surface-2: #1d242f;
@@ -17,6 +19,38 @@
     --warn: #ffb74d;
     --danger: #ff5a4e;
     --polar-bg: #12161e;
+    --info-bg: rgba(77,163,255,0.08);
+    --info-border: rgba(77,163,255,0.35);
+    --info-text: #9ecbff;
+    --monitor-bg: #0a0d12;
+    --monitor-tx: #7acbff;
+    --monitor-rx: #b5bcc6;
+    --shadow-strong: 0 6px 18px rgba(0,0,0,0.4);
+}
+
+@media (prefers-color-scheme: light) {
+    :root {
+        color-scheme: light dark;
+        --bg: #f5f7fb;
+        --surface: #ffffff;
+        --surface-2: #eef1f7;
+        --border: #d6dde7;
+        --text: #1a1f2a;
+        --text-dim: #566274;
+        --accent: #1f6fcf;
+        --accent-dim: #5ea2ea;
+        --ok: #248a4b;
+        --warn: #c77700;
+        --danger: #c13a2f;
+        --polar-bg: #ffffff;
+        --info-bg: rgba(31,111,207,0.08);
+        --info-border: rgba(31,111,207,0.3);
+        --info-text: #14457f;
+        --monitor-bg: #f9fafc;
+        --monitor-tx: #0f4f8b;
+        --monitor-rx: #222733;
+        --shadow-strong: 0 4px 12px rgba(17,24,39,0.08);
+    }
 }
 
 * { box-sizing: border-box; }
@@ -45,14 +79,30 @@ header.topbar {
 }
 
 header .brand {
-    font-weight: 600;
-    letter-spacing: 0.02em;
-}
-
-header .brand .sub {
-    color: var(--text-dim);
     font-weight: 400;
+    letter-spacing: 0.02em;
+    color: var(--text-dim);
+}
+header .brand strong {
+    color: var(--text);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+header .brand .sub {
+    margin-left: 8px;
+}
+header .brand .tag {
+    display: inline-block;
     margin-left: 6px;
+    padding: 1px 7px;
+    border-radius: 4px;
+    background: var(--info-bg);
+    color: var(--info-text);
+    border: 1px solid var(--info-border);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    vertical-align: 1px;
 }
 
 header .spacer { flex: 1; }
@@ -147,6 +197,29 @@ h1.panel-title {
     margin: 0 0 12px;
 }
 
+/* Call-out card used for "reduced feature set" / info messaging —
+   same corner radius as .card but with a coloured left edge and a
+   tinted background, so it reads as a notice rather than a section. */
+.info-card {
+    background: var(--info-bg);
+    border-color: var(--info-border);
+    color: var(--text);
+    position: relative;
+    padding-left: 20px;
+}
+.info-card::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--accent);
+    border-top-left-radius: 10px;
+    border-bottom-left-radius: 10px;
+}
+.info-card h2 { color: var(--info-text); }
+.info-card a { color: var(--accent); }
+ul.compact { margin: 0; padding-left: 20px; line-height: 1.7; }
+
 .row {
     display: flex;
     gap: 10px;
@@ -165,7 +238,19 @@ h1.panel-title {
 }
 .row.vstack label { min-width: auto; }
 
-input[type="text"], input[type="number"], select, textarea {
+/* Inline toggle-group row: each label sits with its checkbox, no forced
+   min-width column, so the flags pack naturally. */
+.row.toggles label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: auto;
+    color: var(--text);
+    user-select: none;
+    font-size: 13px;
+}
+
+input[type="text"], input[type="number"], input[type="datetime-local"], select, textarea {
     background: var(--surface-2);
     color: var(--text);
     border: 1px solid var(--border);
@@ -174,7 +259,8 @@ input[type="text"], input[type="number"], select, textarea {
     font: inherit;
     min-width: 0;
 }
-input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:focus {
+input[type="text"]:focus, input[type="number"]:focus, input[type="datetime-local"]:focus,
+select:focus, textarea:focus {
     outline: none;
     border-color: var(--accent);
 }
@@ -195,17 +281,15 @@ button.btn {
     font: inherit;
     cursor: pointer;
 }
-button.btn:hover { background: #60aeff; }
+button.btn:hover { background: var(--accent-dim); }
 button.btn[disabled] { background: var(--surface-2); color: var(--text-dim); cursor: not-allowed; }
 button.btn.ghost {
     background: var(--surface-2);
     color: var(--text);
     border: 1px solid var(--border);
 }
-button.btn.ghost:hover { background: #252d3a; }
-button.btn.danger {
-    background: var(--danger);
-}
+button.btn.ghost:hover { background: var(--border); }
+button.btn.danger { background: var(--danger); }
 button.btn.danger:hover { background: #ff766c; }
 
 .kbd {
@@ -220,6 +304,8 @@ button.btn.danger:hover { background: #ff766c; }
 .muted { color: var(--text-dim); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
+a { color: var(--accent); }
+
 /* Connect panel */
 .connect-card .lede {
     font-size: 15px;
@@ -232,6 +318,9 @@ button.btn.danger:hover { background: #ff766c; }
     padding: 10px 14px;
     border-radius: 8px;
     margin-bottom: 14px;
+}
+@media (prefers-color-scheme: light) {
+    .browser-warn { color: #8a5a00; background: rgba(199,119,0,0.08); border-color: rgba(199,119,0,0.35); }
 }
 
 /* Satellites panel */
@@ -256,17 +345,20 @@ button.btn.danger:hover { background: #ff766c; }
     height: 100%;
 }
 
-.gps-info dl {
+.gps-info dl,
+.sky-stats dl {
     display: grid;
     grid-template-columns: auto 1fr;
     gap: 6px 14px;
     margin: 0;
 }
-.gps-info dt {
+.gps-info dt,
+.sky-stats dt {
     color: var(--text-dim);
     font-size: 12px;
 }
-.gps-info dd {
+.gps-info dd,
+.sky-stats dd {
     margin: 0;
     font-family: ui-monospace, Menlo, monospace;
 }
@@ -288,9 +380,28 @@ button.btn.danger:hover { background: #ff766c; }
     vertical-align: middle;
 }
 
+/* Globe panel */
+.globe-wrap {
+    position: relative;
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    aspect-ratio: 16 / 10;
+    min-height: 420px;
+    box-shadow: var(--shadow-strong);
+}
+.globe-wrap iframe {
+    border: none;
+    width: 100%;
+    height: 100%;
+    display: block;
+    background: #000;
+}
+
 /* Monitor panel */
 .monitor-log {
-    background: #0a0d12;
+    background: var(--monitor-bg);
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 12px;
@@ -300,13 +411,11 @@ button.btn.danger:hover { background: #ff766c; }
     white-space: pre-wrap;
     color: var(--text-dim);
 }
-.monitor-log .tx { color: #7acbff; }
-.monitor-log .rx { color: #b5bcc6; }
+.monitor-log .tx { color: var(--monitor-tx); }
+.monitor-log .rx { color: var(--monitor-rx); }
 .monitor-log .err { color: var(--danger); }
 
-/* file:// fallback banner — shown only when the page is opened directly
-   as a local file, so the user gets a clear nudge to run the helper
-   rather than a silent page of dead buttons. */
+/* file:// fallback banner */
 .file-warn {
     margin: 40px auto;
     max-width: 620px;
@@ -346,4 +455,5 @@ html.file-protocol .layout { display: none; }
     }
     nav.sidebar button { white-space: nowrap; }
     .sat-layout { grid-template-columns: 1fr; }
+    .row.toggles { gap: 12px; }
 }
