@@ -3,7 +3,7 @@
 Browser build of [PCC](../README.md), driving a Precision Clock Mk IV over [Web Serial](https://developer.mozilla.org/docs/Web/API/Web_Serial_API).
 
 > [!WARNING]
-> Proof-of-concept. Work in progress. Things may not work. Use the [Mac app](https://github.com/peterlewis/pcc/releases) for anything you rely on.
+> Proof-of-concept. Work in progress. Things may not work. Use the [Mac app](https://github.com/peterlewis/pcc/releases) for the best experience.
 
 **[Open PCC Web →](https://peterlewis.github.io/pcc/web/)**
 
