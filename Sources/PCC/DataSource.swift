@@ -300,6 +300,12 @@ class DataSourceManager: NSObject, ObservableObject {
     }
 
     private func fetchBash(source: DataSource) {
+        // Cap at the poll interval (or 30s, whichever is smaller) so a user
+        // command that hangs — `ping` with no route, `sleep`, a wedged ssh —
+        // doesn't pin a GCD worker thread indefinitely and doesn't overlap
+        // the next scheduled fetch. Previously an unresponsive command
+        // could leak threads one-per-poll until the app was relaunched.
+        let timeout = min(max(source.pollInterval, 2), 30)
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let process = Process()
             let pipe = Pipe()
@@ -309,15 +315,45 @@ class DataSourceManager: NSObject, ObservableObject {
             process.standardError = pipe
             do {
                 try process.run()
-                process.waitUntilExit()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8) ?? ""
-                let firstLine = output.trimmingCharacters(in: .whitespacesAndNewlines)
-                    .components(separatedBy: .newlines).first
-                DispatchQueue.main.async { self?.processResult(firstLine, for: source.id) }
             } catch {
                 DispatchQueue.main.async { self?.lastErrors[source.id] = error.localizedDescription }
+                return
             }
+
+            // Fire a watchdog on a background queue — if the process is
+            // still running when the timeout elapses, terminate it. The
+            // sequence (SIGTERM, then SIGKILL after 1 s) matches what
+            // `timeout(1)` does and avoids zombies if the child ignores
+            // SIGTERM.
+            let watchdog = DispatchWorkItem {
+                guard process.isRunning else { return }
+                process.terminate()
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1) {
+                    if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+                }
+            }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout,
+                                                            execute: watchdog)
+
+            process.waitUntilExit()
+            watchdog.cancel()
+
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            let firstLine = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                .components(separatedBy: .newlines).first
+
+            // If we timed out, surface that rather than handing a stale /
+            // empty tail to the display. `terminationReason == .uncaughtSignal`
+            // covers both SIGTERM and SIGKILL paths.
+            if process.terminationReason == .uncaughtSignal {
+                DispatchQueue.main.async {
+                    self?.lastErrors[source.id] = "Command timed out after \(Int(timeout))s"
+                }
+                return
+            }
+
+            DispatchQueue.main.async { self?.processResult(firstLine, for: source.id) }
         }
     }
 

@@ -1,35 +1,13 @@
 import SwiftUI
 import AppKit
 
+/// App-wide preferences. Location is intentionally absent: lat/lon are read
+/// from the clock's GPS fix so there's only one place the position can come
+/// from. Users who want to override should fake the GPS output, not the app.
 struct PreferencesView: View {
     @EnvironmentObject var settings: AppSettings
 
     var body: some View {
-        TabView {
-            locationTab
-                .tabItem { Label("Location", systemImage: "location") }
-
-            unitsTab
-                .tabItem { Label("Units", systemImage: "ruler") }
-        }
-        .frame(width: 450, height: 220)
-    }
-
-    // MARK: - Tabs
-
-    private var locationTab: some View {
-        Form {
-            TextField("Latitude", value: $settings.latitude, format: .number)
-            TextField("Longitude", value: $settings.longitude, format: .number)
-
-            Text("Default: 51.4043, -2.3234 (Bath, UK)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .formStyle(.grouped)
-    }
-
-    private var unitsTab: some View {
         Form {
             Picker("Temperature", selection: $settings.temperatureUnit) {
                 Text("Celsius (C)").tag(TemperatureUnit.celsius)
@@ -41,8 +19,8 @@ struct PreferencesView: View {
                     Text(unit.rawValue).tag(unit)
                 }
             }
-
-}
+        }
         .formStyle(.grouped)
+        .frame(width: 420, height: 160)
     }
 }

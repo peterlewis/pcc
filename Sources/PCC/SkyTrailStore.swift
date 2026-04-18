@@ -33,7 +33,6 @@ struct SkyStats {
 class SkyTrailStore: ObservableObject {
     // MARK: Tunables
 
-    static let maxHistoryDays = 30
     static let recordingInterval: TimeInterval = 6    // seconds between saved obs per PRN
     static let passTimeout: TimeInterval = 90         // seconds without signal → close pass
     static let passRejoinWindow: TimeInterval = 300   // same PRN reappearing within window resumes its prior pass
@@ -47,16 +46,46 @@ class SkyTrailStore: ObservableObject {
             UserDefaults.standard.set(isLogging, forKey: Self.isLoggingKey)
         }
     }
+    /// How long completed passes are kept on disk. Changing this re-runs the
+    /// prune pass — if the new window is shorter the extra data is deleted,
+    /// which is why the UI layer wraps changes in a confirmation dialog when
+    /// shrinking. Persisted to UserDefaults so the choice survives relaunch.
+    @Published var retention: RetentionWindow = .d30 {
+        didSet {
+            guard oldValue != retention else { return }
+            UserDefaults.standard.set(retention.rawValue, forKey: RetentionWindow.defaultsKey)
+            pruneOldPasses()
+            objectWillChange.send()
+        }
+    }
     @Published private(set) var passes: [SatPass] = []
     /// Minimum elevation observed per 5° azimuth sector (72 sectors).
     /// Incrementally maintained as observations arrive.
     @Published private(set) var horizonMask: [Double?] = Array(repeating: nil, count: 72)
+    /// Peak SNR observed per (azimuth × elevation) 5° cell — 72 az × 18 el
+    /// bins covering the whole sky hemisphere. Populated from the same stream
+    /// of NMEA observations as `horizonMask` and rebuilt from disk on launch.
+    /// Renders as a u-center-style sky-view heatmap on the polar plot.
+    /// Row index is azimuth / 5 (0..<72), column index is elevation / 5
+    /// (0..<18, i.e. 0°–90° in 5° steps); nil means "never seen".
+    @Published private(set) var sectorHeatmap: [[Int?]] = Array(
+        repeating: Array(repeating: nil, count: 18),
+        count: 72
+    )
 
     // MARK: Private state
 
     private var active: [String: ActivePass] = [:]
     private var timeoutTimer: Timer?
     private let passesDir: URL
+    /// Serial background queue used for per-observation pass writes. Keeps
+    /// the main thread responsive during bursty NMEA updates (one write per
+    /// tracked satellite every ~6 s — up to ~20 writes back-to-back on a
+    /// good sky). Serial because JSON encoding + atomic writes to the same
+    /// path must not interleave; last-writer-wins is fine because each pass
+    /// is keyed by UUID and writes are append-only within a pass's lifetime.
+    private let saveQueue = DispatchQueue(label: "is.peterlew.pcc.skyTrailStore.save",
+                                          qos: .utility)
 
     // MARK: Derived collections
 
@@ -68,10 +97,32 @@ class SkyTrailStore: ObservableObject {
     /// PRNs of satellites currently being tracked.
     var activePRNs: Set<String> { Set(active.keys) }
 
-    /// Passes whose endTime falls within the given window.
+    /// Passes with observations inside the given window. The previous
+    /// implementation only filtered on `endTime >= cutoff`, which kept the
+    /// *entire* arc of any live or recently-ended pass — so the "5 m" view
+    /// still showed a 20-minute arc for an active satellite. This version
+    /// additionally trims each pass's observation array to the subset whose
+    /// absolute time is >= cutoff, giving a true "last N" render across all
+    /// windows. Trimmed passes retain their original `startTime` so the
+    /// internal `t` offsets remain meaningful.
     func filtered(by window: TimeWindow, now: Date = Date()) -> [SatPass] {
         guard let cutoff = window.cutoff(from: now) else { return allPasses }
-        return allPasses.filter { $0.endTime >= cutoff }
+        return allPasses.compactMap { pass in
+            guard pass.endTime >= cutoff else { return nil }
+            let cutoffOffset = cutoff.timeIntervalSince(pass.startTime)
+            // Entire arc is already inside the window — no trimming needed.
+            if cutoffOffset <= 0 { return pass }
+            let cutoffT = max(0, Int(cutoffOffset.rounded()))
+            guard let firstIdx = pass.observations.firstIndex(where: { Int($0.t) >= cutoffT }) else {
+                return nil
+            }
+            // Need at least two samples to render a line segment; skip the
+            // pass entirely if trimming leaves us with a single point.
+            guard pass.observations.count - firstIdx >= 2 else { return nil }
+            var trimmed = pass
+            trimmed.observations = Array(pass.observations[firstIdx...])
+            return trimmed
+        }
     }
 
     // MARK: Summary stats
@@ -116,13 +167,22 @@ class SkyTrailStore: ObservableObject {
     // MARK: Lifecycle
 
     init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        // ~/Library/Application Support on a normal install. Fall back to
+        // the temp directory for the pathological case where the user's
+        // app-support search path is empty — the app still runs, we just
+        // lose persistence across relaunch instead of crashing on boot.
+        let appSupport = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
         passesDir = appSupport
             .appendingPathComponent("Precision Clock Companion", isDirectory: true)
             .appendingPathComponent("passes", isDirectory: true)
         try? FileManager.default.createDirectory(at: passesDir, withIntermediateDirectories: true)
         // Respect the user's previous recording choice (default off for new users).
         isLogging = UserDefaults.standard.bool(forKey: Self.isLoggingKey)
+        // Direct init-time assignment skips didSet — we run the prune once
+        // explicitly below after everything's in place.
+        retention = RetentionWindow.current
         pruneOldPasses()
         loadPasses()
         NotificationCenter.default.addObserver(
@@ -143,6 +203,7 @@ class SkyTrailStore: ObservableObject {
 
         for sat in satellites where (sat.snr ?? 0) > 0 {
             updateHorizonMask(az: sat.azimuth, el: sat.elevation)
+            updateSectorHeatmap(az: sat.azimuth, el: sat.elevation, snr: sat.snr ?? 0)
             appendObservation(for: sat, at: now)
         }
 
@@ -157,6 +218,20 @@ class SkyTrailStore: ObservableObject {
         let current = horizonMask[sector] ?? 90
         if Double(el) < current {
             horizonMask[sector] = Double(el)
+        }
+    }
+
+    /// Records peak SNR per 5°×5° sky cell. Max (not mean) so strong signals
+    /// stay visible even after a low-SNR drag-through later — the u-center
+    /// sky-view it's modelled on shows best-observed strength per cell.
+    private func updateSectorHeatmap(az: Int, el: Int, snr: Int) {
+        guard el >= 0, el <= 90, snr > 0 else { return }
+        let azBin = ((az % 360) + 360) % 360 / 5
+        let elBin = min(17, max(0, el / 5))
+        guard azBin >= 0, azBin < 72 else { return }
+        let current = sectorHeatmap[azBin][elBin] ?? 0
+        if snr > current {
+            sectorHeatmap[azBin][elBin] = snr
         }
     }
 
@@ -212,7 +287,15 @@ class SkyTrailStore: ObservableObject {
 
     private func timeoutStalePasses() {
         let now = Date()
-        for prn in active.keys where now.timeIntervalSince(active[prn]!.lastSeen) >= Self.passTimeout {
+        // Snapshot keys first — `closePass` mutates `active`, which is UB if
+        // we're still iterating `active.keys` (a live view, not a copy). The
+        // same loop previously also force-unwrapped `active[prn]!` in the
+        // where clause, which would crash if the entry somehow vanished
+        // between key enumeration and the lookup.
+        let stalePRNs = active.compactMap { (prn, entry) -> String? in
+            now.timeIntervalSince(entry.lastSeen) >= Self.passTimeout ? prn : nil
+        }
+        for prn in stalePRNs {
             closePass(prn)
         }
         if active.isEmpty {
@@ -245,6 +328,7 @@ class SkyTrailStore: ObservableObject {
         active.removeAll()
         passes.removeAll()
         horizonMask = Array(repeating: nil, count: 72)
+        sectorHeatmap = Array(repeating: Array(repeating: nil, count: 18), count: 72)
         timeoutTimer?.invalidate()
         timeoutTimer = nil
         try? FileManager.default.removeItem(at: passesDir)
@@ -263,12 +347,23 @@ class SkyTrailStore: ObservableObject {
     }
 
     private func savePass(_ pass: SatPass) {
+        // Encode on the caller's thread (cheap — <1kB typical) but send the
+        // atomic disk write to a serial background queue so we don't stall
+        // the main run loop during bursty NMEA frames. The pass URL is
+        // resolved synchronously so it reflects the pass's current startTime
+        // rather than re-querying on the queue.
+        let url = passFileURL(for: pass)
         guard let data = try? JSONEncoder().encode(pass) else { return }
-        try? data.write(to: passFileURL(for: pass), options: .atomic)
+        saveQueue.async {
+            try? data.write(to: url, options: .atomic)
+        }
     }
 
     private func deletePassFile(_ pass: SatPass) {
-        try? FileManager.default.removeItem(at: passFileURL(for: pass))
+        let url = passFileURL(for: pass)
+        saveQueue.async {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     private func loadPasses() {
@@ -285,27 +380,70 @@ class SkyTrailStore: ObservableObject {
         }
         passes = loaded.sorted { $0.startTime > $1.startTime }
 
-        // Rebuild horizon mask from loaded observations.
+        // Rebuild horizon mask and sector heatmap from loaded observations in
+        // a single pass. Both are derived state — cheap to reconstruct — so
+        // there's no need to persist them separately alongside the raw passes.
         var mask = [Double?](repeating: nil, count: 72)
+        var heat: [[Int?]] = Array(repeating: Array(repeating: nil, count: 18), count: 72)
         for pass in passes {
-            for obs in pass.observations where obs.el > 1 {
-                let sector = ((Int(obs.az) % 360) + 360) % 360 / 5
-                guard sector >= 0, sector < 72 else { continue }
-                let current = mask[sector] ?? 90
-                if Double(obs.el) < current { mask[sector] = Double(obs.el) }
+            for obs in pass.observations {
+                let az = Int(obs.az)
+                let el = Int(obs.el)
+                let snr = Int(obs.snr)
+                let azBin = ((az % 360) + 360) % 360 / 5
+                guard azBin >= 0, azBin < 72 else { continue }
+                if el > 1 {
+                    let current = mask[azBin] ?? 90
+                    if Double(el) < current { mask[azBin] = Double(el) }
+                }
+                if el >= 0, el <= 90, snr > 0 {
+                    let elBin = min(17, max(0, el / 5))
+                    let best = heat[azBin][elBin] ?? 0
+                    if snr > best { heat[azBin][elBin] = snr }
+                }
             }
         }
         horizonMask = mask
+        sectorHeatmap = heat
+    }
+
+    /// Passes that a given retention window would delete right now. Used by
+    /// the UI to warn before shrinking retention — we count how many will be
+    /// permanently lost so the dialog can quote a real number.
+    func passesThatWouldBePruned(by retention: RetentionWindow, at now: Date = Date()) -> [SatPass] {
+        guard let secs = retention.seconds else { return [] }
+        let cutoff = now.addingTimeInterval(-secs)
+        return allPasses.filter { $0.endTime < cutoff }
     }
 
     private func pruneOldPasses() {
-        let cutoff = Date().addingTimeInterval(-Double(Self.maxHistoryDays) * 86_400)
+        guard let secs = retention.seconds else {
+            // Unlimited: nothing to delete.
+            return
+        }
+        let now = Date()
+        let cutoff = now.addingTimeInterval(-secs)
+
+        // In-memory drop (completed passes whose endTime precedes the cutoff).
+        let doomed = passes.filter { $0.endTime < cutoff }
+        if !doomed.isEmpty {
+            for p in doomed { deletePassFile(p) }
+            passes.removeAll { $0.endTime < cutoff }
+        }
+
+        // Disk cleanup: remove day-directories whose name precedes the cutoff
+        // day entirely. Anything partial-day gets handled above.
         let fmt = ISO8601DateFormatter()
         fmt.formatOptions = [.withFullDate, .withDashSeparatorInDate]
+        let cutoffDay = Calendar(identifier: .gregorian).startOfDay(for: cutoff)
         let fm = FileManager.default
         guard let dayDirs = try? fm.contentsOfDirectory(at: passesDir, includingPropertiesForKeys: nil) else { return }
         for dayDir in dayDirs {
-            if let date = fmt.date(from: dayDir.lastPathComponent), date < cutoff {
+            if let date = fmt.date(from: dayDir.lastPathComponent), date < cutoffDay {
+                try? fm.removeItem(at: dayDir)
+            } else if let contents = try? fm.contentsOfDirectory(at: dayDir, includingPropertiesForKeys: nil),
+                      contents.isEmpty {
+                // Clean up any day-dirs emptied by the in-memory pass pruning above.
                 try? fm.removeItem(at: dayDir)
             }
         }

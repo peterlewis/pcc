@@ -201,23 +201,25 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 - Poll REST APIs or shell commands and rotate values on the clock (with HTTP header support)
 - Edit the 5-point brightness curve with a draggable graph; save custom presets
 - Read and write `config.txt` with local backups kept on the Mac
-- Check for firmware and timezone updates; install to the <kbd>CLOCK</kbd> USB volume
+- Check for firmware and timezone updates; install to the <kbd>CLOCK</kbd> USB volume (auto-ejects after copy so the mass-storage write cache is flushed before reconnect)
 
 ### GPS & Satellites
 - Three satellite views — Polar plot, world Map, and interactive 3D Globe — with consistent toggles for satellites, labels, and trails
 - Per-pass trail recording: each satellite's continuous arc is captured as a distinct pass, rendered through five age tiers (live → recent → today → week → archive) with live passes glowing and older ones fading
+- Adaptive moving-average smoothing on trails so older passes read as clean arcs rather than noisy dotting
 - Time-window filter: scrub trails by recency — Live, 5m, 15m, 1h, 6h, 24h, 7d, 30d, or All — consistent across all three views
-- Crash-safe persistence: atomic per-observation writes, 30-day retention; brief signal drop-outs (< 5 min) rejoin the prior pass rather than splitting the trail
-- Horizon mask: sky obstructions inferred from the minimum observed elevation per 5° azimuth sector
+- Crash-safe persistence: atomic per-observation writes; retention configurable from 1 hour to unlimited (30-day default); brief signal drop-outs (< 5 min) rejoin the prior pass rather than splitting the trail
+- Sector heatmap (u-center style): peak SNR per 5° × 5° sky cell, navy → purple → warm-red ramp — toggleable on the polar view
 - GPS info: coordinates, Maidenhead grid locator, altitude, HDOP[^1], fix type, satellites used
 - Celestial data: sun rise/set, solar noon, golden hour, civil twilight; moon phase, illumination, altitude, azimuth
 - Signal analysis with diagnostics panel
+- GPS Insights: on-device AI (Apple Foundation Models) summarises siting, signal quality, and reception trends from accumulated pass history — private, offline, no API key
 
 ### NTP Time Server
 - Basic Stratum 1 server on `localhost:12321`, disciplined by the clock’s GNSS module — see [setup below](#ntp-time-server)
 
 ### Weather
-- Conditions scrolled on the clock via WeatherKit; configurable location and update interval
+- Conditions scrolled on the clock via WeatherKit; GPS-derived location, configurable update interval
 
 ### Other
 - Serial monitor for raw NMEA and debug output
@@ -298,8 +300,13 @@ Commands are `key = value\r\n` over USB serial at 115200 baud. They take effect 
 | Dependency | Type | Purpose |
 |---|---|---|
 | [ORSSerialPort](https://github.com/armadsen/ORSSerialPort) | SPM | USB serial communication |
-| [globe.gl](https://globe.gl) | Runtime | Interactive 3D globe view |
+| [globe.gl](https://globe.gl) | Bundled | Interactive 3D globe view (MIT, served offline from `Resources/Globe/`) |
+| [three.js](https://threejs.org) / [three-globe](https://github.com/vasturiano/three-globe) | Bundled | Day/night `ShaderMaterial` and sphere layers (MIT, bundled transitively inside `globe.gl.min.js`) |
+| NASA Blue Marble / Earth's City Lights | Bundled | Day and night Earth textures (public domain, redistributed via three-globe) |
+| MapKit | Apple framework | Satellite world-map view (Apple Maps) |
 | WeatherKit | Apple framework | Weather data |
+
+Full license texts for bundled third-party code and assets are in [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
 
 ## Related
 

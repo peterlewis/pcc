@@ -172,6 +172,10 @@ class SerialManager: NSObject, ObservableObject {
     private var scrollText: String = ""
     private var scrollPosition: Int = 0
     private var scrollWrapPosition: Int = 0
+    /// Current seconds-per-shift for the marquee scroll. Mirrored from
+    /// `AppSettings.scrollInterval` via `setScrollInterval(_:)` so SerialManager
+    /// doesn't need its own reference to AppSettings.
+    private var scrollInterval: TimeInterval = 0.40
 
     /// Send text to the display. If > 10 chars, starts a marquee scroll.
     /// Uses underscore as separator — visible on 7-segment at any position,
@@ -195,14 +199,34 @@ class SerialManager: NSObject, ObservableObject {
             scrollWrapPosition = newScrollText.count
             scrollPosition = 0
             sendScrollFrame()
-            scrollTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { [weak self] _ in
-                guard let self else { return }
-                self.scrollPosition += 1
-                if self.scrollPosition >= self.scrollWrapPosition {
-                    self.scrollPosition = 0
-                }
-                self.sendScrollFrame()
+            scrollTimer = scheduledScrollTimer()
+        }
+    }
+
+    /// Update the marquee interval. If a scroll is currently running, the
+    /// existing timer is torn down and re-scheduled at the new rate while
+    /// preserving the current position/text so the user sees the speed change
+    /// take effect on the next tick without a visible reset.
+    func setScrollInterval(_ interval: TimeInterval) {
+        let clamped = max(0.05, min(2.0, interval))
+        guard abs(clamped - scrollInterval) > 0.001 else { return }
+        scrollInterval = clamped
+        if scrollTimer != nil {
+            scrollTimer?.invalidate()
+            scrollTimer = scheduledScrollTimer()
+        }
+    }
+
+    /// Factory for the marquee timer — one body, used both for a fresh scroll
+    /// and for the live-reload restart.
+    private func scheduledScrollTimer() -> Timer {
+        Timer.scheduledTimer(withTimeInterval: scrollInterval, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.scrollPosition += 1
+            if self.scrollPosition >= self.scrollWrapPosition {
+                self.scrollPosition = 0
             }
+            self.sendScrollFrame()
         }
     }
 
@@ -271,25 +295,34 @@ extension SerialManager: ORSSerialPortDelegate {
 
     /// Request NMEA data output from the clock. Reference counted so multiple
     /// consumers (Sky View, NTP server) can independently request/release.
+    ///
+    /// Must be called on the main thread — `nmeaConsumerCount` and
+    /// `nmeaConsumers` are read-modify-written without synchronisation, so
+    /// off-main callers would race with each other (and with the `@Published`
+    /// `nmeaConsumers`, which must be mutated on main anyway). Every known
+    /// caller today is main-thread (SwiftUI `.onAppear`/`.onDisappear`,
+    /// `NTPServer.start/stop` invoked from SwiftUI state flips), and the
+    /// precondition makes any regression crash loudly in debug rather than
+    /// silently dropping consumer-count transitions.
     func requestNMEA(consumer: String = "Unknown") {
+        dispatchPrecondition(condition: .onQueue(.main))
         nmeaConsumerCount += 1
-        DispatchQueue.main.async { self.nmeaConsumers.append(consumer) }
+        nmeaConsumers.append(consumer)
         if nmeaConsumerCount == 1 {
             sendCommand("NMEA = all")
-            DispatchQueue.main.async { self.nmeaActive = true }
+            nmeaActive = true
         }
     }
 
     func releaseNMEA(consumer: String = "Unknown") {
+        dispatchPrecondition(condition: .onQueue(.main))
         nmeaConsumerCount = max(0, nmeaConsumerCount - 1)
-        DispatchQueue.main.async {
-            if let idx = self.nmeaConsumers.firstIndex(of: consumer) {
-                self.nmeaConsumers.remove(at: idx)
-            }
+        if let idx = nmeaConsumers.firstIndex(of: consumer) {
+            nmeaConsumers.remove(at: idx)
         }
         if nmeaConsumerCount == 0 {
             sendCommand("NMEA = off")
-            DispatchQueue.main.async { self.nmeaActive = false }
+            nmeaActive = false
         }
     }
 

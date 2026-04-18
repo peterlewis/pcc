@@ -88,7 +88,11 @@ struct UpdatesView: View {
                             ProgressView().controlSize(.small)
                             Text(updateManager.installProgress)
                         }
-                    } else if updateManager.installProgress == "Done. Eject or reconnect the clock to apply." {
+                    } else if updateManager.installProgress.hasPrefix("Done.") {
+                        // "Done." prefix covers both the ejected and
+                        // eject-failed variants of the completion message,
+                        // so the success state still renders even when the
+                        // volume unmount succeeds.
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
@@ -111,23 +115,12 @@ struct UpdatesView: View {
                     }
                     .disabled(updateManager.isInstalling)
 
-                    Text("Copying files to the clock is slow by design \u{2014} the clock prioritises display stability over USB transfer speed. After installation, eject or reconnect the clock to apply the update.")
+                    Text("Copying files to the clock is slow by design \u{2014} the clock prioritises display stability over USB transfer speed. When the copy finishes PCC ejects the CLOCK volume for you; reconnect the clock to apply.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } header: {
                     Text("Install")
                 }
-            }
-            Section {
-                Button("Reboot Clock") {
-                    serialManager.rebootClock()
-                }
-                .disabled(!serialManager.isConnected)
-                Text("Reboot the clock to apply firmware updates. The clock will disconnect briefly and reconnect automatically.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } header: {
-                Text("Clock")
             }
         }
         .formStyle(.grouped)

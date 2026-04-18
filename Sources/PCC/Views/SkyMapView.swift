@@ -11,10 +11,15 @@ struct SkyMapView: View {
     let userLatitude: Double?
     let userLongitude: Double?
     var showLabels: Bool = true
-    var showTrails: Bool = false
     var passes: [SatPass] = []
     var activePRNs: Set<String> = []
     var now: Date = Date()
+    /// When `false`, disables the Swift-side az/el moving-average filter so
+    /// the rendered polyline passes through every raw NMEA observation
+    /// (visible 1° integer-quantization staircase). Maps through to
+    /// `SatPass.groundTrack(smoothingWindow:)` — `1` disables smoothing,
+    /// `0` enables the adaptive window.
+    var smoothTrails: Bool = true
     var toggles: AnyView?
 
     @State private var cameraPosition: MapCameraPosition = .automatic
@@ -64,18 +69,24 @@ struct SkyMapView: View {
     var body: some View {
         Map(position: $cameraPosition) {
             // Pass polylines, oldest first so fresh passes layer on top.
-            if showTrails, let lat = userLatitude, let lon = userLongitude {
+            if let lat = userLatitude, let lon = userLongitude {
                 let ordered = passes.sorted { $0.endTime < $1.endTime }
                 ForEach(ordered) { pass in
                     let isLive = activePRNs.contains(pass.prn)
-                    let tier = PassAgeTier.tier(endAge: now.timeIntervalSince(pass.endTime),
-                                                 isLive: isLive)
+                    let age = now.timeIntervalSince(pass.endTime)
+                    // No decimation — every rendered vertex is a real observation.
+                    // `smoothingWindow: 1` disables smoothing so the raw
+                    // NMEA 1° quantisation shows through; `0` asks for the
+                    // adaptive moving-average.
                     let coords = pass.groundTrack(observerLat: lat, observerLon: lon,
-                                                   maxPoints: tier.maxPoints)
+                                                   maxPoints: .max,
+                                                   smoothingWindow: smoothTrails ? 0 : 1)
                     if coords.count >= 2 {
+                        let alpha = PassAgeTier.opacity(endAge: age, isLive: isLive)
+                        let stroke = PassAgeTier.strokeWidth(endAge: age, isLive: isLive)
                         MapPolyline(coordinates: coords)
-                            .stroke(pass.constellation.color.opacity(tier.opacity),
-                                    style: StrokeStyle(lineWidth: tier.strokeWidth,
+                            .stroke(pass.constellation.color.opacity(alpha),
+                                    style: StrokeStyle(lineWidth: stroke,
                                                        lineCap: .round, lineJoin: .round))
                     }
                 }

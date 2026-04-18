@@ -13,9 +13,9 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case sky = "Satellites"
     case timeServer = "Time Server"
     case serialMonitor = "Serial Monitor"
+    case scrolling = "Scrolling"
     case advanced = "Advanced"
     case documentation = "Mk IV User Manual"
-    case gpsDiagnostics = "Signal Analysis"
     case updates = "Updates"
 
     var id: String { rawValue }
@@ -33,9 +33,9 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .sky:            return "scope"
         case .timeServer:     return "clock.badge.checkmark"
         case .serialMonitor:  return "terminal"
+        case .scrolling:      return "text.line.first.and.arrowtriangle.forward"
         case .advanced:       return "slider.horizontal.3"
         case .documentation:  return "book"
-        case .gpsDiagnostics: return "sparkles"
         case .updates:     return "arrow.triangle.2.circlepath"
         }
     }
@@ -49,6 +49,7 @@ struct ContentView: View {
     @EnvironmentObject var serialManager: SerialManager
     @EnvironmentObject var ntpServer: NTPServer
     @EnvironmentObject var trailStore: SkyTrailStore
+    @EnvironmentObject var settings: AppSettings
     @State private var selectedItem: SidebarItem? = .dataSources
 
     var body: some View {
@@ -68,14 +69,14 @@ struct ContentView: View {
                 case .sky:           SkyView()
                 case .timeServer:    TimeServerView()
                 case .serialMonitor: SerialMonitorView()
+                case .scrolling:     ScrollingView()
                 case .advanced:      ClockSettingsView()
                 case .updates:     UpdatesView()
                 case .documentation: DocumentationView()
-                case .gpsDiagnostics: GPSDiagnosticsView()
                 case nil:          Text("Select a panel")
                 }
             }
-            .frame(minWidth: 300)
+            .frame(minWidth: 320)
         }
         .navigationTitle("Precision Clock Companion")
         .onReceive(NotificationCenter.default.publisher(for: .navigateToPanel)) { notification in
@@ -112,6 +113,13 @@ struct ContentView: View {
         .onChange(of: serialManager.satellites) { _, sats in
             trailStore.update(satellites: sats)
         }
+        // Keep the SerialManager's scroll timer in lockstep with the user's
+        // preference. `initial: true` pushes the stored value on launch so
+        // the very first scroll after relaunch honours it without waiting
+        // for the picker to be touched.
+        .onChange(of: settings.scrollInterval, initial: true) { _, v in
+            serialManager.setScrollInterval(v)
+        }
     }
 
     private var sidebarList: some View {
@@ -127,7 +135,6 @@ struct ContentView: View {
 
             Section("GPS") {
                 sidebarRow(.sky)
-                sidebarRow(.gpsDiagnostics)
             }
 
             Section("Configuration") {
@@ -136,6 +143,7 @@ struct ContentView: View {
                 sidebarRow(.timeServer)
                 sidebarRow(.diagnostics)
                 sidebarRow(.serialMonitor)
+                sidebarRow(.scrolling)
                 sidebarRow(.advanced)
                 sidebarRow(.updates)
             }
@@ -181,22 +189,21 @@ struct ContentView: View {
     }
 
     private func idealHeight(for item: SidebarItem) -> CGFloat {
+        // Standard sizes on a 40-pt grid. The compact tier matches the
+        // window's minHeight so short forms don't trigger a pointless resize
+        // animation on first select; everything richer steps up in 80-pt
+        // increments from there.
         switch item {
-        // Compact — simple forms
-        case .connect, .countdown:
-            return 550
-        // Medium — lists and status panels
-        case .text, .diagnostics, .gpsDiagnostics:
-            return 650
-        // Standard — tables and scrollable content
+        case .connect, .countdown, .scrolling:
+            return 640   // = window minHeight
+        case .text, .diagnostics:
+            return 720
         case .serialMonitor:
-            return 700
-        // Tall — charts, rich visuals
-        case .dataSources, .weather, .brightness, .sky, .modes, .updates, .documentation:
+            return 760
+        case .dataSources, .weather, .brightness, .modes, .updates, .documentation:
             return 800
-        // Full — dense settings
-        case .advanced, .timeServer:
-            return 900
+        case .sky, .advanced, .timeServer:
+            return 880
         }
     }
 

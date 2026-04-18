@@ -5,6 +5,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
     private let serialManager: SerialManager
     private let dataSourceManager: DataSourceManager
     private let ntpServer: NTPServer
+    private let trailStore: SkyTrailStore
     private var appearanceObserver: NSKeyValueObservation?
 
     private var redModeEnabled: Bool {
@@ -15,10 +16,14 @@ class StatusBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    init(serialManager: SerialManager, dataSourceManager: DataSourceManager, ntpServer: NTPServer) {
+    init(serialManager: SerialManager,
+         dataSourceManager: DataSourceManager,
+         ntpServer: NTPServer,
+         trailStore: SkyTrailStore) {
         self.serialManager = serialManager
         self.dataSourceManager = dataSourceManager
         self.ntpServer = ntpServer
+        self.trailStore = trailStore
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
@@ -58,6 +63,23 @@ class StatusBarController: NSObject, NSMenuDelegate {
                 item.isEnabled = false
                 menu.addItem(item)
             }
+        }
+
+        // Satellite trail recording — runs as a background service whether
+        // or not the Sky panel is visible, so it belongs in the menu bar
+        // alongside the other always-on services. The leading dot mirrors
+        // the red recording indicator used on the Sky panel's Record button,
+        // and the pass count gives a quick sanity check that data is
+        // actually accumulating.
+        if trailStore.isLogging {
+            menu.addItem(.separator())
+            let count = trailStore.allPasses.count
+            let title = count == 0
+                ? "\u{25CF} Recording satellites (waiting for data)"
+                : "\u{25CF} Recording satellites (\(count) pass\(count == 1 ? "" : "es"))"
+            let recItem = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            recItem.isEnabled = false
+            menu.addItem(recItem)
         }
 
         // NTP server status

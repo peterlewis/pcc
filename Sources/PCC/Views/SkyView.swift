@@ -9,13 +9,36 @@ enum SatConstellation: String, CaseIterable, Hashable, Codable {
     case galileo = "Galileo"
     case beidou = "BeiDou"
 
-    var color: Color {
+    /// Apple-system palette for constellation-coloured rendering. Kept as
+    /// raw 0–255 RGB so the same channels drive SwiftUI `Color`, globe.gl
+    /// hex, and pre-formatted `rgba(...)` strings without palette drift.
+    var rgb255: (r: Int, g: Int, b: Int) {
         switch self {
-        case .gps:     return .blue
-        case .glonass: return .red
-        case .galileo: return .orange
-        case .beidou:  return .teal
+        case .gps:     return (0, 122, 255)    // Apple blue
+        case .glonass: return (255, 59, 48)    // Apple red
+        case .galileo: return (255, 149, 0)    // Apple orange
+        case .beidou:  return (90, 200, 250)   // Apple light blue
         }
+    }
+
+    /// SwiftUI `Color` — polar plot, map overlays, legends, signal bars.
+    var color: Color {
+        let (r, g, b) = rgb255
+        return Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255)
+    }
+
+    /// Hex string — globe.gl HTML dot `color` field.
+    var hex: String {
+        let (r, g, b) = rgb255
+        return String(format: "#%02x%02x%02x", r, g, b)
+    }
+
+    /// Pre-formatted `rgba(...)` with baked alpha — globe.gl `pathColor`
+    /// and translucent dot `fill` colours.
+    func rgba(alpha: Double) -> String {
+        let (r, g, b) = rgb255
+        let a = max(0, min(1, alpha))
+        return String(format: "rgba(%d,%d,%d,%.3f)", r, g, b, a)
     }
 
     var prefix: String {
@@ -80,12 +103,34 @@ enum SkyViewMode: String, CaseIterable {
 struct SkyView: View {
     @EnvironmentObject var serialManager: SerialManager
     @EnvironmentObject var trailStore: SkyTrailStore
+    @EnvironmentObject var settings: AppSettings
     @State private var now = Date()
-    @State private var viewMode: SkyViewMode = .polar
-    @State private var showSatellites = true
-    @State private var showLabels = true
-    @State private var showTrails = true
-    @State private var timeWindow: TimeWindow = .h1
+    @State private var showClearConfirm = false
+    @State private var showInsights = false
+
+    // Sky-view toggles live in `AppSettings` so they persist across relaunch.
+    // The view exposes them through lightweight computed `Binding`s below —
+    // enum values (`SkyViewMode`, `TimeWindow`) are stored as raw strings
+    // because `@AppStorage` doesn't support them natively and `AppSettings`
+    // is already the single source for UserDefaults-backed state.
+    private var viewModeBinding: Binding<SkyViewMode> {
+        Binding(
+            get: { SkyViewMode(rawValue: settings.skyViewMode) ?? .polar },
+            set: { settings.skyViewMode = $0.rawValue }
+        )
+    }
+    private var timeWindowBinding: Binding<TimeWindow> {
+        Binding(
+            get: { TimeWindow(rawValue: settings.skyTimeWindow) ?? .h1 },
+            set: { settings.skyTimeWindow = $0.rawValue }
+        )
+    }
+    private var viewMode: SkyViewMode {
+        SkyViewMode(rawValue: settings.skyViewMode) ?? .polar
+    }
+    private var timeWindow: TimeWindow {
+        TimeWindow(rawValue: settings.skyTimeWindow) ?? .h1
+    }
 
     /// Drives the comet-head pulse and age-fade refresh.
     private let celestialTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
@@ -133,6 +178,38 @@ struct SkyView: View {
                       : "Record satellite positions for heatmaps")
 
                 if !trailStore.allPasses.isEmpty {
+                    Button {
+                        showClearConfirm = true
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "trash")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text("Clear")
+                                .font(.caption)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(.secondary.opacity(0.08))
+                        )
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Delete all recorded satellite passes")
+                    .confirmationDialog(
+                        "Clear all recorded satellite passes?",
+                        isPresented: $showClearConfirm,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Clear All Passes", role: .destructive) {
+                            trailStore.clear()
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("This permanently deletes every recorded pass and cannot be undone.")
+                    }
+
                     if let dur = trailStore.durationSummary {
                         Text(dur)
                             .font(.caption)
@@ -141,23 +218,41 @@ struct SkyView: View {
                     Text(trailStore.dataSummary)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
-
-                    Spacer()
-
-                    Button("Clear") {
-                        trailStore.clear()
-                    }
-                    .font(.caption)
-                    .buttonStyle(.borderless)
-                } else {
-                    Spacer()
                 }
+
+                Spacer()
+
+                // Insights button — analytical companion to the recording
+                // controls. Dimmed when there's nothing to analyse (no passes
+                // on disk); opens a sheet with three trail-grounded modes.
+                Button {
+                    showInsights = true
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "sparkles")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                        Text("Insights")
+                            .font(.caption)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(.orange.opacity(0.08))
+                    )
+                }
+                .buttonStyle(.borderless)
+                .disabled(trailStore.allPasses.isEmpty)
+                .help(trailStore.allPasses.isEmpty
+                      ? "Record satellite passes first to enable analysis"
+                      : "Analyse recorded passes with on-device AI")
             }
             .padding(.horizontal)
             .padding(.top, 8)
 
             HStack(spacing: 8) {
-                Picker("View", selection: $viewMode) {
+                Picker("View", selection: viewModeBinding) {
                     ForEach(SkyViewMode.allCases, id: \.self) { mode in
                         Text(mode.rawValue).tag(mode)
                     }
@@ -165,7 +260,9 @@ struct SkyView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
 
-                TimeWindowMenu(selection: $timeWindow)
+                TimeWindowMenu(selection: timeWindowBinding)
+
+                RetentionMenu(trailStore: trailStore)
             }
             .padding(.horizontal)
             .padding(.top, 4)
@@ -175,24 +272,49 @@ struct SkyView: View {
                     emptyStateView
                 } else {
                     SkyPlotCanvas(
-                        satellites: showSatellites ? serialManager.satellites : [],
-                        passes: showTrails ? visiblePasses : [],
+                        satellites: settings.skyShowSatellites ? serialManager.satellites : [],
+                        passes: visiblePasses,
                         activePRNs: trailStore.activePRNs,
-                        sunPosition: sunPos,
-                        moonPosition: moonPos,
+                        // Pass nil when celestials are toggled off — the
+                        // canvas already bails out on nil so this is the
+                        // cheapest way to suppress them.
+                        sunPosition: settings.skyShowCelestials ? sunPos : nil,
+                        moonPosition: settings.skyShowCelestials ? moonPos : nil,
                         moonPhase: Astronomy.moonPhase(date: now),
-                        horizonMask: showTrails ? trailStore.horizonMask : [],
+                        // Horizon mask is currently locked-out (feature
+                        // hidden) — the sector heatmap below covers the
+                        // same information in 2D with SNR colouring. The
+                        // toggle, setting, store-side computation, and
+                        // drawHorizonMask canvas method are all still in
+                        // place; to re-enable, restore the toggle in the
+                        // overlay HStack and swap this back to:
+                        //     settings.skyShowHorizonMask
+                        //         ? trailStore.horizonMask
+                        //         : Array(repeating: nil, count: 72)
+                        horizonMask: Array(repeating: nil, count: 72),
+                        // Same trick for the sector heatmap: empty grid ⇒
+                        // canvas draws nothing, no extra flag needed.
+                        sectorHeatmap: settings.skyShowSectorHeatmap
+                            ? trailStore.sectorHeatmap
+                            : Array(repeating: Array(repeating: nil, count: 18), count: 72),
                         now: now,
-                        showLabels: showLabels
+                        showLabels: settings.skyShowLabels
                     )
                     .aspectRatio(1, contentMode: .fit)
                     .padding(.horizontal)
                     .padding(.top, 4)
                     .overlay(alignment: .topTrailing) {
                         HStack(spacing: 2) {
-                            polarToggle("scope", isOn: $showSatellites, tip: "Satellites")
-                            polarToggle("tag", isOn: $showLabels, tip: "Labels")
-                            polarToggle("point.3.filled.connected.trianglepath.dotted", isOn: $showTrails, tip: "Trails")
+                            polarToggle("scope", isOn: $settings.skyShowSatellites, tip: "Satellites")
+                            polarToggle("sun.and.horizon", isOn: $settings.skyShowCelestials, tip: "Sun & Moon")
+                            polarToggle("tag", isOn: $settings.skyShowLabels, tip: "Labels")
+                            polarToggle("square.grid.3x3.fill", isOn: $settings.skyShowSectorHeatmap,
+                                        tip: "Sector heatmap (peak SNR per 5° sky cell)")
+                            // Horizon-mask toggle intentionally hidden — the
+                            // sector heatmap supersedes it. Re-add here if
+                            // the mask is brought back:
+                            //   polarToggle("mountain.2", isOn: $settings.skyShowHorizonMask,
+                            //               tip: "Horizon mask (lowest elevation seen per sector)")
                         }
                         .padding(4)
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
@@ -201,21 +323,23 @@ struct SkyView: View {
                 }
             } else if viewMode == .map {
                 SkyMapView(
-                    satellites: showSatellites ? serialManager.satellites : [],
-                    sunPosition: sunPos,
-                    moonPosition: moonPos,
+                    satellites: settings.skyShowSatellites ? serialManager.satellites : [],
+                    sunPosition: settings.skyShowCelestials ? sunPos : nil,
+                    moonPosition: settings.skyShowCelestials ? moonPos : nil,
                     userLatitude: serialManager.gpsLatitude,
                     userLongitude: serialManager.gpsLongitude,
-                    showLabels: showLabels,
-                    showTrails: showTrails,
+                    showLabels: settings.skyShowLabels,
                     passes: visiblePasses,
                     activePRNs: trailStore.activePRNs,
                     now: now,
+                    smoothTrails: settings.skySmoothTrails,
                     toggles: AnyView(
                         HStack(spacing: 2) {
-                            polarToggle("scope", isOn: $showSatellites, tip: "Satellites")
-                            polarToggle("tag", isOn: $showLabels, tip: "Labels")
-                            polarToggle("point.3.filled.connected.trianglepath.dotted", isOn: $showTrails, tip: "Trails")
+                            polarToggle("scope", isOn: $settings.skyShowSatellites, tip: "Satellites")
+                            polarToggle("sun.and.horizon", isOn: $settings.skyShowCelestials, tip: "Sun & Moon")
+                            polarToggle("tag", isOn: $settings.skyShowLabels, tip: "Labels")
+                            polarToggle("waveform.path", isOn: $settings.skySmoothTrails,
+                                        tip: "Smooth trails (average NMEA jitter)")
                         }
                         .padding(4)
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
@@ -233,7 +357,8 @@ struct SkyView: View {
                     userLongitude: serialManager.gpsLongitude,
                     passes: visiblePasses,
                     activePRNs: trailStore.activePRNs,
-                    now: now
+                    now: now,
+                    smoothTrails: settings.skySmoothTrails
                 )
                 .frame(minHeight: 350)
                 .padding(.horizontal)
@@ -311,6 +436,11 @@ struct SkyView: View {
             serialManager.releaseSatelliteTracking()
             serialManager.releaseNMEA(consumer: "Sky View")
         }
+        .sheet(isPresented: $showInsights) {
+            GPSInsightsView()
+                .environmentObject(serialManager)
+                .environmentObject(trailStore)
+        }
     }
 
     private func polarToggle(_ icon: String, isOn: Binding<Bool>, tip: String) -> some View {
@@ -364,6 +494,8 @@ private struct SkyPlotCanvas: View {
     let moonPosition: CelestialPosition?
     let moonPhase: Double
     let horizonMask: [Double?]
+    /// 72 az × 18 el grid of peak SNR per 5°×5° sky cell, nil when unseen.
+    let sectorHeatmap: [[Int?]]
     let now: Date
     var showLabels: Bool = true
 
@@ -373,6 +505,10 @@ private struct SkyPlotCanvas: View {
             let maxR = min(size.width, size.height) / 2 - 24
             guard maxR > 10 else { return }
 
+            // Heatmap goes below everything so the red horizon-mask tint,
+            // grid lines, and trails all sit visibly on top of the coloured
+            // cells.
+            drawSectorHeatmap(context: &context, center: center, maxR: maxR)
             drawHorizonMask(context: &context, center: center, maxR: maxR)
             drawGrid(context: &context, center: center, maxR: maxR)
             drawTrails(context: &context, center: center, maxR: maxR)
@@ -391,8 +527,11 @@ private struct SkyPlotCanvas: View {
         for pass in ordered {
             let isLive = activePRNs.contains(pass.prn)
             let age = now.timeIntervalSince(pass.endTime)
-            let tier = PassAgeTier.tier(endAge: age, isLive: isLive)
-            let obs = pass.decimated(maxPoints: tier.maxPoints)
+            // Every real observation — previously decimated to `tier.maxPoints`
+            // which produced visible beading on the stroke at today/week tiers.
+            // The Canvas renderer handles even long passes fine at 6-second
+            // observation cadence.
+            let obs = pass.observations
             guard obs.count >= 2 else { continue }
 
             var path = Path()
@@ -400,9 +539,11 @@ private struct SkyPlotCanvas: View {
                 let pt = polarPoint(az: Int(o.az), el: Int(o.el), center: center, maxR: maxR)
                 if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
             }
-            let baseColor = pass.constellation.color.opacity(tier.opacity)
+            let alpha = PassAgeTier.opacity(endAge: age, isLive: isLive)
+            let stroke = PassAgeTier.strokeWidth(endAge: age, isLive: isLive)
+            let baseColor = pass.constellation.color.opacity(alpha)
             context.stroke(path, with: .color(baseColor),
-                           style: StrokeStyle(lineWidth: tier.strokeWidth, lineCap: .round, lineJoin: .round))
+                           style: StrokeStyle(lineWidth: stroke, lineCap: .round, lineJoin: .round))
 
             // Live comet-head: a glowing dot at the current position.
             if isLive, let last = obs.last {
@@ -474,6 +615,99 @@ private struct SkyPlotCanvas: View {
             }
         }
         context.stroke(maskLine, with: .color(.red.opacity(0.25)), lineWidth: 0.75)
+    }
+
+    // MARK: - Sector Heatmap
+
+    /// u-center-style sky-view: each observed 5°×5° sky cell is painted as a
+    /// wedge coloured by peak SNR. Empty cells render nothing, so the
+    /// transparent background fades smoothly between cardinal directions.
+    private func drawSectorHeatmap(context: inout GraphicsContext, center: CGPoint, maxR: CGFloat) {
+        // Cheap early-out: don't touch the canvas at all if there's no data.
+        let hasAny = sectorHeatmap.contains { row in row.contains { $0 != nil } }
+        guard hasAny else { return }
+
+        let azBins = sectorHeatmap.count         // 72
+        let elBins = sectorHeatmap.first?.count ?? 0    // 18
+        guard azBins == 72, elBins == 18 else { return }
+
+        let sectorWidthDeg = 360.0 / Double(azBins)       // 5°
+        let elStepDeg = 90.0 / Double(elBins)             // 5°
+
+        for azBin in 0..<azBins {
+            for elBin in 0..<elBins {
+                guard let snr = sectorHeatmap[azBin][elBin] else { continue }
+
+                // Elevation → radius: 0° at outer edge, 90° at center.
+                let elLo = Double(elBin) * elStepDeg
+                let elHi = elLo + elStepDeg
+                let rOuter = (90.0 - elLo) / 90.0 * Double(maxR)
+                let rInner = (90.0 - elHi) / 90.0 * Double(maxR)
+
+                // Azimuth → angle: 0° north, clockwise. Two radian endpoints.
+                let azStart = Double(azBin) * sectorWidthDeg * .pi / 180.0
+                let azEnd = (Double(azBin) + 1) * sectorWidthDeg * .pi / 180.0
+
+                // Build wedge: outer arc clockwise, then inner arc counter-
+                // clockwise. Sampled at 3 intermediate angles because the
+                // radial lines alone make a straight chord that looks jagged
+                // at the outer edge.
+                var path = Path()
+                let steps = 4
+                for i in 0...steps {
+                    let t = Double(i) / Double(steps)
+                    let a = azStart + (azEnd - azStart) * t
+                    let pt = CGPoint(
+                        x: center.x + CGFloat(rOuter * sin(a)),
+                        y: center.y - CGFloat(rOuter * cos(a))
+                    )
+                    if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
+                }
+                for i in stride(from: steps, through: 0, by: -1) {
+                    let t = Double(i) / Double(steps)
+                    let a = azStart + (azEnd - azStart) * t
+                    let pt = CGPoint(
+                        x: center.x + CGFloat(rInner * sin(a)),
+                        y: center.y - CGFloat(rInner * cos(a))
+                    )
+                    path.addLine(to: pt)
+                }
+                path.closeSubpath()
+
+                context.fill(path, with: .color(snrHeatColor(snr: snr)))
+            }
+        }
+    }
+
+    /// SNR → heatmap colour. Matches u-center's blue→purple→red ramp
+    /// roughly: low SNR is a cool cyan/blue, mid is purple, strong signal is
+    /// warm magenta/red. Opacity is capped so bright cells don't swamp the
+    /// satellite dots and trails overlaid on top.
+    private func snrHeatColor(snr: Int) -> Color {
+        // Clamp into the 10–50 dBHz band that matters for GPS.
+        let lo = 10.0, hi = 50.0
+        let t = min(1.0, max(0.0, (Double(snr) - lo) / (hi - lo)))
+
+        // Two-stop ramp through purple: navy → purple → warm red.
+        // Values picked to echo the u-center colour wheel without being a
+        // direct lift.
+        let r, g, b: Double
+        if t < 0.5 {
+            let u = t / 0.5
+            r = 0.10 + (0.55 - 0.10) * u
+            g = 0.20 + (0.10 - 0.20) * u
+            b = 0.55 + (0.75 - 0.55) * u
+        } else {
+            let u = (t - 0.5) / 0.5
+            r = 0.55 + (0.95 - 0.55) * u
+            g = 0.10 + (0.25 - 0.10) * u
+            b = 0.75 + (0.30 - 0.75) * u
+        }
+
+        // Opacity ramps up a bit with SNR so weaker cells are visible but
+        // strong cells really stand out.
+        let alpha = 0.25 + 0.25 * t
+        return Color(red: r, green: g, blue: b, opacity: alpha)
     }
 
     // MARK: - Grid
@@ -573,7 +807,9 @@ private struct SkyPlotCanvas: View {
         let rad = pos.azimuth * .pi / 180.0
         let pt = CGPoint(x: center.x + r * sin(rad), y: center.y - r * cos(rad))
 
-        let size: CGFloat = 14
+        // Visual hierarchy: sun dominates, moon is a quieter body.
+        // (Real angular diameters are nearly equal; we deliberately exaggerate.)
+        let size: CGFloat = 16
         let rect = CGRect(x: pt.x - size / 2, y: pt.y - size / 2, width: size, height: size)
 
         // Glow
@@ -601,7 +837,7 @@ private struct SkyPlotCanvas: View {
         let rad = pos.azimuth * .pi / 180.0
         let pt = CGPoint(x: center.x + r * sin(rad), y: center.y - r * cos(rad))
 
-        let size: CGFloat = 12
+        let size: CGFloat = 9
         let rect = CGRect(x: pt.x - size / 2, y: pt.y - size / 2, width: size, height: size)
 
         // Brightness based on illumination
@@ -686,6 +922,89 @@ private struct TimeWindowMenu: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help("Filter trails by time window (\(selection.description))")
+    }
+}
+
+// MARK: - Retention Menu
+
+/// Picker for how long recorded passes persist on disk. Selecting a window
+/// shorter than the data currently stored triggers a confirmation dialog
+/// that quotes the exact number of passes that would be deleted — the user
+/// must explicitly opt in before old data is lost. Picking a longer window
+/// (or the same one) applies silently.
+private struct RetentionMenu: View {
+    @ObservedObject var trailStore: SkyTrailStore
+    @State private var pendingRetention: RetentionWindow?
+
+    var body: some View {
+        Menu {
+            ForEach(RetentionWindow.allCases) { w in
+                Button {
+                    attemptSet(w)
+                } label: {
+                    if w == trailStore.retention {
+                        Label(w.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(w.displayName)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "externaldrive")
+                    .font(.system(size: 10))
+                Text(trailStore.retention.rawValue)
+                    .font(.caption)
+                    .monospacedDigit()
+                    .frame(minWidth: 22)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("How long to keep recorded passes on disk (currently \(trailStore.retention.displayName))")
+        .confirmationDialog(
+            dialogTitle,
+            isPresented: Binding(
+                get: { pendingRetention != nil },
+                set: { if !$0 { pendingRetention = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete older passes", role: .destructive) {
+                if let w = pendingRetention { trailStore.retention = w }
+                pendingRetention = nil
+            }
+            Button("Cancel", role: .cancel) { pendingRetention = nil }
+        } message: {
+            if let w = pendingRetention {
+                Text(warningMessage(for: w))
+            }
+        }
+    }
+
+    private func attemptSet(_ w: RetentionWindow) {
+        guard w != trailStore.retention else { return }
+        let doomed = trailStore.passesThatWouldBePruned(by: w).count
+        if doomed > 0 {
+            pendingRetention = w
+        } else {
+            trailStore.retention = w
+        }
+    }
+
+    private var dialogTitle: String {
+        guard let w = pendingRetention else { return "" }
+        let n = trailStore.passesThatWouldBePruned(by: w).count
+        return "Delete \(n) older pass\(n == 1 ? "" : "es")?"
+    }
+
+    private func warningMessage(for w: RetentionWindow) -> String {
+        let n = trailStore.passesThatWouldBePruned(by: w).count
+        return "Setting retention to \(w.displayName) will permanently delete \(n) pass\(n == 1 ? "" : "es") older than that window. This cannot be undone."
     }
 }
 

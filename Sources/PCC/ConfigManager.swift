@@ -18,7 +18,14 @@ class ConfigManager: ObservableObject {
     static let configPath = "/Volumes/CLOCK/config.txt"
 
     private static var backupDir: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        // Same defensive fallback as SkyTrailStore: on a normal install this
+        // resolves to `~/Library/Application Support/PCC/config-backups`,
+        // but rather than crashing if the search path is ever empty we
+        // degrade to the temp dir (backups are a safety net, not critical
+        // state).
+        let appSupport = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
         return appSupport.appendingPathComponent("PCC/config-backups")
     }
     private static let maxBackups = 10

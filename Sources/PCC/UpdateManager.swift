@@ -80,9 +80,16 @@ class UpdateManager: ObservableObject {
     func checkForUpdates() {
         isChecking = true
         error = nil
+        // Static string, parses in practice — but avoid the force-unwrap so
+        // a future edit that breaks the literal can't ship a crash to users.
+        guard let apiURL = URL(string: Self.apiURL) else {
+            error = "Invalid update API URL"
+            isChecking = false
+            return
+        }
         Task {
             do {
-                var req = URLRequest(url: URL(string: Self.apiURL)!)
+                var req = URLRequest(url: apiURL)
                 req.timeoutInterval = 15
                 let (data, _) = try await URLSession.shared.data(for: req)
                 guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -190,8 +197,23 @@ class UpdateManager: ObservableObject {
                     }
                 }
 
+                // Eject via diskutil — this issues a SCSI STOP UNIT to the
+                // mass-storage device, which forces macOS to flush any
+                // buffered writes before the volume unmounts. Relying on
+                // the user to pull the cable (or on the clock's `reboot`
+                // serial command) can truncate the last few kB of the
+                // firmware image if the cache hasn't been committed yet,
+                // which mitxela flagged as a real-world cause of bricked
+                // updates. On failure we fall through to the old advisory
+                // message rather than hard-erroring: the files were copied
+                // successfully, the user just needs to eject manually.
+                await MainActor.run { self.installProgress = "Ejecting CLOCK volume…" }
+                let ejected = Self.ejectClockVolume()
+
                 await MainActor.run {
-                    self.installProgress = "Done. Eject or reconnect the clock to apply."
+                    self.installProgress = ejected
+                        ? "Done. Clock ejected — reconnect to apply."
+                        : "Done. Eject or reconnect the clock to apply."
                     self.isInstalling = false
                     self.readInstalledVersions()
                 }
@@ -203,6 +225,26 @@ class UpdateManager: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Ejects `/Volumes/CLOCK` via `diskutil eject`, which flushes the
+    /// mass-storage write cache (SCSI STOP UNIT) before unmounting. Returns
+    /// `true` if the volume is gone afterwards. Callers treat a `false`
+    /// return as non-fatal — the files are already on disk, eject is just a
+    /// courtesy so the user doesn't have to do it manually.
+    private static func ejectClockVolume() -> Bool {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/diskutil")
+        task.arguments = ["eject", clockVolume]
+        task.standardOutput = nil
+        task.standardError = nil
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch {
+            return false
+        }
+        return !FileManager.default.fileExists(atPath: clockVolume)
     }
 
     private func extractBacktickValue(_ line: String) -> String {

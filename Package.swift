@@ -13,6 +13,13 @@ let package = Package(
             dependencies: [
                 .product(name: "ORSSerial", package: "ORSSerialPort")
             ],
+            // `Resources/Globe/` ships the globe.gl UMD bundle and its earth
+            // textures so the 3D globe view works offline with a deterministic
+            // version pin. See `THIRD_PARTY_LICENSES.md` at the repo root for
+            // the MIT attributions.
+            resources: [
+                .copy("Resources/Globe")
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v5)
             ],

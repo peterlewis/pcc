@@ -2,10 +2,107 @@ import SwiftUI
 import WebKit
 import CoreLocation
 
+// MARK: - Clock overlay format
+
+/// Format used by the on-globe digital clock overlay.
+///
+/// - `.matchClock` — the app's local-time clock format, `YYYY-MM-DD HH:MM:SS.mmm`
+///                   in the user's local timezone. This is the default.
+/// - `.iso8601`    — full ISO 8601 with `T` separator and `Z` suffix in UTC,
+///                   `YYYY-MM-DDTHH:MM:SS.mmmZ`.
+enum GlobeClockFormat: String, CaseIterable, Identifiable, Codable {
+    case matchClock
+    case iso8601
+
+    var id: Self { self }
+
+    var displayName: String {
+        switch self {
+        case .matchClock: return "Match clock format"
+        case .iso8601:    return "ISO 8601"
+        }
+    }
+
+    /// Short example showing the resulting string shape.
+    var example: String {
+        switch self {
+        case .matchClock: return "2026-04-18 14:23:05.123"
+        case .iso8601:    return "2026-04-18T14:23:05.123Z"
+        }
+    }
+
+    static let defaultsKey = "globeClockFormat"
+
+    static var current: GlobeClockFormat {
+        if let raw = UserDefaults.standard.string(forKey: defaultsKey),
+           let v = GlobeClockFormat(rawValue: raw) {
+            return v
+        }
+        return .matchClock
+    }
+}
+
+/// Observable holder for the globe's clock-overlay preferences. Persists to
+/// UserDefaults so the choice survives relaunch.
+@MainActor
+final class GlobeClockSettings: ObservableObject {
+    static let shared = GlobeClockSettings()
+
+    @Published var format: GlobeClockFormat {
+        didSet {
+            UserDefaults.standard.set(format.rawValue, forKey: GlobeClockFormat.defaultsKey)
+        }
+    }
+
+    @Published var isVisible: Bool {
+        didSet {
+            UserDefaults.standard.set(isVisible, forKey: "globeClockVisible")
+        }
+    }
+
+    private init() {
+        self.format = GlobeClockFormat.current
+        // Default to ON — the user wants the clock visible by default.
+        if UserDefaults.standard.object(forKey: "globeClockVisible") == nil {
+            self.isVisible = true
+        } else {
+            self.isVisible = UserDefaults.standard.bool(forKey: "globeClockVisible")
+        }
+    }
+}
+
+// MARK: - SkyGlobeView
+
 /// 3D globe visualization of satellite positions using globe.gl.
-/// Shows live satellites as floating dots at their sub-satellite points, plus
-/// recorded passes as WebGL polylines (pathsData), sun/moon, user location, and
-/// a space background.
+///
+/// Rendering model:
+/// - Live satellites → HTML elements at sub-satellite lat/lng (pulsing dots).
+/// - Recorded passes → WebGL polylines via `pathsData`, altitude per-point
+///   matching the live satellite's observer-elevation formula so arcs rise
+///   with elevation instead of skating flat across the sphere.
+/// - Sun/Moon → HTML elements at observer-relative projected positions.
+/// - User location → animated ring.
+/// - Digital clock → HTML overlay, format user-selectable.
+///
+/// Look: photographic Earth with a real day/night terminator driven by
+/// `Astronomy.subSolarPoint(date:)`. globe.gl UMD bundles its own THREE
+/// instance and doesn't expose it; trying to hand it a `ShaderMaterial`
+/// built from a separately-loaded THREE leaves the globe black because
+/// three-globe's duck-typing rejects cross-instance objects.
+///
+/// The working approach (shipped): patch the default `MeshPhongMaterial`
+/// via `onBeforeCompile` — everything stays inside globe.gl's bundled
+/// THREE. The shader replaces `<opaque_fragment>` with
+/// `mix(nightTex, dayTex, smoothstep(-0.1, 0.1, sunDotN))` and we switch
+/// the scene's lights off (`myGlobe.lights([])`) so the Phong lighting
+/// gradient never muddies either hemisphere. The result matches the
+/// globe.gl `day-night-cycle` reference example: full texture saturation
+/// on both sides of a crisp, narrow terminator band.
+///
+/// All runtime assets (globe.gl UMD, earth-day/earth-night/night-sky
+/// images) live under `Sources/PCC/Resources/Globe/` and are bundled
+/// locally — the globe works offline with a pinned version of every
+/// third-party asset. Licensing: see `THIRD_PARTY_LICENSES.md`.
 struct SkyGlobeView: View {
     let satellites: [SatelliteInfo]
     let sunPosition: CelestialPosition?
@@ -15,28 +112,44 @@ struct SkyGlobeView: View {
     var passes: [SatPass] = []
     var activePRNs: Set<String> = []
     var now: Date = Date()
+    /// When `false`, bypasses the Swift-side moving-average filter on az/el
+    /// so every rendered vertex is literally a NMEA observation (visible 1°
+    /// integer-quantization staircase and all). The toggle lives in `SkyView`;
+    /// this property is the bound value.
+    var smoothTrails: Bool = true
 
-    @State private var showSatellites = true
-    @State private var showTrails = true
-    @State private var showLabels = false
+    // Toggle state is owned by the shared `AppSettings` so the user's
+    // choices persist across launches. The overlay buttons bind directly
+    // into the published properties.
+    @EnvironmentObject var settings: AppSettings
+    @ObservedObject private var clockSettings = GlobeClockSettings.shared
 
     var body: some View {
         GlobeWebView(
-            satellites: showSatellites ? satellites : [],
-            sunPosition: sunPosition,
-            moonPosition: moonPosition,
+            satellites: settings.skyShowSatellites ? satellites : [],
+            sunPosition: settings.skyShowCelestials ? sunPosition : nil,
+            moonPosition: settings.skyShowCelestials ? moonPosition : nil,
             userLatitude: userLatitude,
             userLongitude: userLongitude,
-            passes: showTrails ? passes : [],
+            passes: passes,
             activePRNs: activePRNs,
             now: now,
-            showLabels: showLabels
+            showLabels: settings.skyShowLabels,
+            smoothTrails: smoothTrails,
+            clockFormat: clockSettings.format,
+            clockVisible: clockSettings.isVisible,
+            clockSettings: clockSettings
         )
         .overlay(alignment: .topTrailing) {
             HStack(spacing: 2) {
-                toggleButton("scope", isOn: $showSatellites, tip: "Satellites")
-                toggleButton("tag", isOn: $showLabels, tip: "Labels")
-                toggleButton("point.3.filled.connected.trianglepath.dotted", isOn: $showTrails, tip: "Trails")
+                toggleButton("scope", isOn: $settings.skyShowSatellites, tip: "Satellites")
+                toggleButton("sun.and.horizon", isOn: $settings.skyShowCelestials, tip: "Sun & Moon")
+                toggleButton("tag", isOn: $settings.skyShowLabels, tip: "Labels")
+                toggleButton("waveform.path", isOn: $settings.skySmoothTrails,
+                             tip: "Smooth trails (average NMEA jitter)")
+                toggleButton(clockSettings.isVisible ? "clock" : "clock.badge.xmark",
+                             isOn: $clockSettings.isVisible,
+                             tip: "Clock (right-click the clock to change format)")
             }
             .padding(4)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
@@ -70,21 +183,69 @@ private struct GlobeWebView: NSViewRepresentable {
     let activePRNs: Set<String>
     let now: Date
     let showLabels: Bool
+    /// Passed through to `SatPass.groundTrackPoints` — when `false`, disables
+    /// the Swift-side az/el moving-average filter so the rendered polyline
+    /// passes through every raw NMEA observation (visible 1° staircase).
+    let smoothTrails: Bool
+    let clockFormat: GlobeClockFormat
+    let clockVisible: Bool
+    /// Shared clock-overlay settings. The coordinator holds a reference so
+    /// that click/right-click on the HTML clock element can mutate visibility
+    /// and format directly — no round-trip through the overlay button is
+    /// required for the "just click the clock" UX.
+    let clockSettings: GlobeClockSettings
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         let userController = WKUserContentController()
         userController.add(context.coordinator, name: "globeReady")
         userController.add(context.coordinator, name: "globeLog")
+        userController.add(context.coordinator, name: "clockToggle")
+        userController.add(context.coordinator, name: "clockCycleFormat")
         config.userContentController = userController
+
+        // Serve bundled globe resources via a custom URL scheme instead of
+        // `file://`. Two problems this solves at once:
+        //
+        //   1. three.js's TextureLoader sets `image.crossOrigin = 'anonymous'`
+        //      on every image load, which triggers CORS. `file://` has no
+        //      HTTP headers → no `Access-Control-Allow-Origin` → CORS fails
+        //      silently → globe renders black with no textures. (The previous
+        //      attempt poked `allowFileAccessFromFileURLs` on `WKPreferences`
+        //      via KVC, but those keys are no longer KVC-accessible on
+        //      macOS 26.4 — `setValue(_:forKey:)` raises
+        //      `NSUndefinedKeyException` at layout time and crashes the app.)
+        //
+        //   2. A `WKURLSchemeHandler` lets us answer every request with a
+        //      proper `Content-Type` and `Access-Control-Allow-Origin: *`
+        //      header, so CORS-anonymous image loads succeed with no
+        //      private API.
+        //
+        // The handler is retained by the configuration, so no storage on
+        // `self` or the coordinator is required.
+        let resourceHandler = GlobeResourceHandler()
+        config.setURLSchemeHandler(resourceHandler,
+                                   forURLScheme: GlobeResourceHandler.scheme)
+
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.setValue(false, forKey: "drawsBackground")
-        webView.loadHTMLString(Self.globeHTML, baseURL: nil)
+
+        // Relative refs (`./globe.gl.min.js`, `./earth-day.jpg`, …) in the
+        // bundled HTML resolve against this document URL, so they all go
+        // through `GlobeResourceHandler`.
+        if let url = URL(string: "\(GlobeResourceHandler.scheme)://globe/index.html") {
+            webView.load(URLRequest(url: url))
+        }
+
         context.coordinator.webView = webView
+        context.coordinator.clockSettings = clockSettings
         return webView
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
+        // Keep the coordinator's settings ref fresh in case the SwiftUI
+        // identity changes across updates (cheap and avoids stale closures).
+        context.coordinator.clockSettings = clockSettings
         let js = buildUpdateJS()
         context.coordinator.pendingJS = js
         context.coordinator.sendIfReady()
@@ -94,16 +255,39 @@ private struct GlobeWebView: NSViewRepresentable {
 
     class Coordinator: NSObject, WKScriptMessageHandler {
         weak var webView: WKWebView?
+        weak var clockSettings: GlobeClockSettings?
         var isReady = false
         var pendingJS: String?
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            if message.name == "globeReady" {
+            switch message.name {
+            case "globeReady":
                 isReady = true
                 sendIfReady()
-            }
-            if message.name == "globeLog" {
+            case "globeLog":
                 print("[Globe] \(message.body)")
+            case "clockToggle":
+                // Left-click on the clock overlay → toggle visibility. The
+                // new state flows back down through the next SwiftUI update
+                // via `setClockFormat(mode, visible)` so CSS and state stay
+                // in lockstep.
+                DispatchQueue.main.async { [weak self] in
+                    self?.clockSettings?.isVisible.toggle()
+                }
+            case "clockCycleFormat":
+                // Right-click on the clock overlay → cycle through available
+                // formats. With only two formats (match-clock / ISO 8601) a
+                // cycle feels natural; if we grow the format list we'll swap
+                // this for a proper menu.
+                DispatchQueue.main.async { [weak self] in
+                    guard let settings = self?.clockSettings else { return }
+                    let all = GlobeClockFormat.allCases
+                    guard let idx = all.firstIndex(of: settings.format) else { return }
+                    let next = all[(idx + 1) % all.count]
+                    settings.format = next
+                }
+            default:
+                break
             }
         }
 
@@ -117,6 +301,12 @@ private struct GlobeWebView: NSViewRepresentable {
     // MARK: - Data → JS
 
     private func buildUpdateJS() -> String {
+        // Globe trails get a modest stroke boost so WebGL-smoothed lines read
+        // at a similar visual weight to the Canvas-rasterised polar plot.
+        // Opacity comes directly from `PassAgeTier.opacity(endAge:isLive:)`
+        // without any additional multiplier — one source of truth for fade.
+        let trailStrokeScale = 1.7
+
         var satData: [[String: Any]] = []
         for sat in satellites where (sat.snr ?? 0) > 0 {
             guard let coord = sat.subSatellitePoint(
@@ -124,42 +314,63 @@ private struct GlobeWebView: NSViewRepresentable {
                 observerLon: userLongitude ?? 0
             ) else { continue }
             let isLive = activePRNs.contains(sat.id)
+            let dotAlpha: Double = isLive ? 0.92 : 0.72  // Translucent, not solid.
             satData.append([
                 "lat": coord.latitude,
                 "lng": coord.longitude,
-                "alt": 0.02 + Double(sat.elevation) / 90.0 * 0.08,
-                "color": colorHex(for: sat.constellation),
-                "size": isLive ? 6 : 4,
+                "alt": satAltitude(forElevation: Double(sat.elevation)),
+                "color": sat.constellation.hex,
+                "fill": sat.constellation.rgba(alpha: dotAlpha),
+                "size": isLive ? 9 : 7,
                 "name": sat.id,
                 "label": showLabels ? sat.id : "",
                 "type": isLive ? "live" : "satellite"
             ])
         }
 
-        // Trail paths per pass, rendered as WebGL polylines via globe.gl pathsData.
-        // Oldest first so fresh passes layer on top.
+        // Trail paths — one polyline per pass. Per-point altitude matches the
+        // live-satellite formula so a recorded arc rises with observed
+        // elevation instead of skating flat across the sphere.
         var pathData: [[String: Any]] = []
+
         if let lat = userLatitude, let lon = userLongitude {
             let ordered = passes.sorted { $0.endTime < $1.endTime }
             for pass in ordered {
                 let isLive = activePRNs.contains(pass.prn)
-                let tier = PassAgeTier.tier(endAge: now.timeIntervalSince(pass.endTime),
-                                             isLive: isLive)
-                let coords = pass.groundTrack(observerLat: lat, observerLon: lon,
-                                               maxPoints: tier.maxPoints)
-                guard coords.count >= 2 else { continue }
-                let points = coords.map { coord -> [Double] in
-                    [coord.latitude, coord.longitude, 0.008]
+                let endAge = now.timeIntervalSince(pass.endTime)
+                // Render every real observation — no decimation. Earlier
+                // versions passed `tier.maxPoints` here; globe.gl's path
+                // smoothing then interpolated phantom vertices between the
+                // sparse survivors, which looked like fake "points" along
+                // the line. Feeding every real fix keeps segments short
+                // enough that the spline has no room to wobble, and every
+                // visible vertex corresponds to an actual NMEA observation.
+                let samples = pass.groundTrackPoints(observerLat: lat, observerLon: lon,
+                                                     maxPoints: .max,
+                                                     smoothingWindow: smoothTrails ? 0 : 1)
+                guard samples.count >= 2 else { continue }
+                let points: [[Double]] = samples.map { sample in
+                    [sample.coord.latitude,
+                     sample.coord.longitude,
+                     satAltitude(forElevation: sample.elevation)]
                 }
+                let alpha = PassAgeTier.opacity(endAge: endAge, isLive: isLive)
+                let stroke = Double(PassAgeTier.strokeWidth(endAge: endAge, isLive: isLive))
+                    * trailStrokeScale
                 pathData.append([
                     "coords": points,
-                    "color": rgbaColor(for: pass.constellation, alpha: tier.opacity),
-                    "stroke": Double(tier.strokeWidth)
+                    "color": pass.constellation.rgba(alpha: alpha),
+                    "stroke": stroke
                 ])
             }
         }
 
-        // Sun & Moon
+        // Sun & Moon. Altitude is the dot's distance above the sphere (globe
+        // radius = 1). Satellites top out at 0.10 (90° elevation). The
+        // celestial bodies live much farther out in reality, so visually
+        // perch them well above the satellite shell — 0.30 / 0.24 reads as
+        // "up in the sky" rather than "a high satellite". The atmosphere is
+        // drawn at 0.15, so these also clear that layer cleanly.
         var celestialData: [[String: Any]] = []
         if let lat = userLatitude, let lon = userLongitude {
             if let sun = sunPosition, sun.altitude > 0,
@@ -167,9 +378,14 @@ private struct GlobeWebView: NSViewRepresentable {
                 celestialData.append([
                     "lat": coord.latitude,
                     "lng": coord.longitude,
-                    "alt": 0.12,
+                    "alt": 0.30,
                     "color": "rgba(255,230,100,0.9)",
-                    "size": 14,
+                    "fill": "rgba(255,230,100,0.85)",
+                    // The real angular diameters of sun and moon are nearly
+                    // identical (~0.5°), but visually the sun reads as the
+                    // dominant light source, so we give it a clear size
+                    // advantage here rather than faithful-but-confusing parity.
+                    "size": 18,
                     "name": "Sun", "label": "", "type": "celestial"
                 ])
             }
@@ -178,9 +394,10 @@ private struct GlobeWebView: NSViewRepresentable {
                 celestialData.append([
                     "lat": coord.latitude,
                     "lng": coord.longitude,
-                    "alt": 0.10,
+                    "alt": 0.24,
                     "color": "rgba(230,232,240,0.9)",
-                    "size": 13,
+                    "fill": "rgba(230,232,240,0.85)",
+                    "size": 11,
                     "name": "Moon", "label": "", "type": "celestial"
                 ])
             }
@@ -192,7 +409,16 @@ private struct GlobeWebView: NSViewRepresentable {
             rings.append(["lat": lat, "lng": lon])
         }
 
+        // Sub-solar point — drives the day/night terminator and the
+        // directional-light position.
+        let subSolar = Astronomy.subSolarPoint(date: now)
+
         var js = ""
+        js += "if(window.setSunDirection)setSunDirection(\(subSolar.latitude),\(subSolar.longitude));"
+
+        // Clock overlay: mode + visibility. The JS side drives its own tick
+        // loop so the displayed time doesn't stutter at Swift's push cadence.
+        js += "if(window.setClockFormat)setClockFormat('\(clockFormat.rawValue)',\(clockVisible ? "true" : "false"));"
 
         let allElements = satData + celestialData
         if let json = jsonString(allElements) {
@@ -208,6 +434,15 @@ private struct GlobeWebView: NSViewRepresentable {
             js += "if(window.focusOn)focusOn(\(lat),\(lon));"
         }
         return js
+    }
+
+    /// Satellite-to-globe altitude mapping. Sits on a band well off the sphere
+    /// (0.02–0.10) so both the live dot and the recorded trail clearly float
+    /// over the surface, with higher-elevation passes visibly higher than
+    /// low ones — same geometry for both so a trail traces the dot's arc.
+    private func satAltitude(forElevation elDeg: Double) -> Double {
+        let clamped = max(0.0, min(90.0, elDeg))
+        return 0.02 + (clamped / 90.0) * 0.08
     }
 
     private func jsonString(_ obj: Any) -> String? {
@@ -232,162 +467,112 @@ private struct GlobeWebView: NSViewRepresentable {
         )
         return (lat * 180 / .pi, lon * 180 / .pi)
     }
+}
 
-    private func colorHex(for constellation: SatConstellation) -> String {
-        switch constellation {
-        case .gps: return "#007aff"
-        case .glonass: return "#ff3b30"
-        case .galileo: return "#ff9500"
-        case .beidou: return "#5ac8fa"
+// MARK: - Bundle resource scheme handler
+
+/// Serves files under `Bundle.module`'s `Globe/` directory via a custom URL
+/// scheme so the WKWebView can load them with a real HTTP-style response.
+///
+/// Why a scheme handler and not `loadFileURL`: three.js's `TextureLoader`
+/// sets `image.crossOrigin = 'anonymous'` on every load, which turns the
+/// request into a CORS request. `file://` has no HTTP headers, so CORS
+/// fails silently and every texture comes back empty — the globe renders
+/// black even though the scripts run. Serving via this handler lets us
+/// attach `Access-Control-Allow-Origin: *` and a proper `Content-Type`,
+/// which satisfies CORS without touching private WebKit API.
+///
+/// Scheme layout: `pccglobe://globe/<relative path under Globe/>`.
+/// The host is fixed at `globe` so everything lives on one origin; only
+/// the path varies. Example URLs the HTML ends up requesting:
+///
+///   - `pccglobe://globe/index.html`        (the page itself)
+///   - `pccglobe://globe/globe.gl.min.js`   (via `<script src>`)
+///   - `pccglobe://globe/earth-day.jpg`     (via three.js TextureLoader)
+///   - `pccglobe://globe/earth-night.jpg`
+///   - `pccglobe://globe/night-sky.png`
+///
+/// Path-traversal guard: the resolved path is checked against the bundle
+/// directory's prefix so a crafted `../` can't escape. We only serve
+/// content from our own bundle, but the guard is cheap insurance.
+private final class GlobeResourceHandler: NSObject, WKURLSchemeHandler {
+    static let scheme = "pccglobe"
+
+    func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
+        guard let url = urlSchemeTask.request.url else {
+            urlSchemeTask.didFailWithError(URLError(.badURL))
+            return
+        }
+
+        // Map the URL path onto a file inside the bundled `Globe/` dir.
+        // Default to `index.html` for `/` so a bare host URL works.
+        var relative = url.path
+        if relative.hasPrefix("/") { relative.removeFirst() }
+        if relative.isEmpty { relative = "index.html" }
+
+        let globeDir = Bundle.module.bundleURL
+            .appendingPathComponent("Globe")
+            .standardizedFileURL
+        let fileURL = globeDir
+            .appendingPathComponent(relative)
+            .standardizedFileURL
+
+        // Keep the scheme handler a strict servant of the bundled dir —
+        // reject anything that resolves outside it (defence in depth).
+        guard fileURL.path.hasPrefix(globeDir.path) else {
+            urlSchemeTask.didFailWithError(URLError(.badURL))
+            return
+        }
+
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let mime = Self.mimeType(forExtension: fileURL.pathExtension)
+            // `Access-Control-Allow-Origin: *` keeps three.js's
+            // `crossOrigin = 'anonymous'` image loads happy. `no-store`
+            // stops WKWebView caching a stale copy if we ever edit the
+            // HTML/JS during development.
+            guard let response = HTTPURLResponse(
+                url: url,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: [
+                    "Content-Type": mime,
+                    "Content-Length": "\(data.count)",
+                    "Access-Control-Allow-Origin": "*",
+                    "Cache-Control": "no-store"
+                ]
+            ) else {
+                // Effectively unreachable with these inputs, but avoid force
+                // unwrapping so a malformed header value never brings the
+                // whole globe view down.
+                urlSchemeTask.didFailWithError(URLError(.cannotParseResponse))
+                return
+            }
+            urlSchemeTask.didReceive(response)
+            urlSchemeTask.didReceive(data)
+            urlSchemeTask.didFinish()
+        } catch {
+            urlSchemeTask.didFailWithError(error)
         }
     }
 
-    private func rgbaColor(for constellation: SatConstellation, alpha: Double) -> String {
-        let (r, g, b): (Int, Int, Int)
-        switch constellation {
-        case .gps:     (r, g, b) = (0, 122, 255)
-        case .glonass: (r, g, b) = (255, 59, 48)
-        case .galileo: (r, g, b) = (255, 149, 0)
-        case .beidou:  (r, g, b) = (90, 200, 250)
-        }
-        return String(format: "rgba(%d,%d,%d,%.3f)", r, g, b, max(0, min(1, alpha)))
+    func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {
+        // We complete synchronously in `start`, so there's nothing to
+        // cancel — but WKURLSchemeHandler requires the method regardless.
     }
 
-    // MARK: - HTML
-
-    static let globeHTML = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-    <meta charset="utf-8">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: black; overflow: hidden; }
-        #globe { width: 100vw; height: 100vh; }
-        .sat-el {
-            display: flex;
-            align-items: center;
-            gap: 3px;
-            pointer-events: none;
+    private static func mimeType(forExtension ext: String) -> String {
+        switch ext.lowercased() {
+        case "html", "htm":  return "text/html; charset=utf-8"
+        case "js", "mjs":    return "application/javascript; charset=utf-8"
+        case "css":          return "text/css; charset=utf-8"
+        case "json":         return "application/json; charset=utf-8"
+        case "jpg", "jpeg":  return "image/jpeg"
+        case "png":          return "image/png"
+        case "webp":         return "image/webp"
+        case "svg":          return "image/svg+xml"
+        case "gif":          return "image/gif"
+        default:             return "application/octet-stream"
         }
-        .sat-dot {
-            border-radius: 50%;
-            flex-shrink: 0;
-        }
-        .sat-dot.satellite {
-            box-shadow: 0 0 6px currentColor;
-        }
-        .sat-dot.live {
-            box-shadow: 0 0 12px currentColor, 0 0 4px currentColor;
-            animation: sat-pulse 1.4s ease-in-out infinite;
-        }
-        @keyframes sat-pulse {
-            0%, 100% { transform: scale(1); }
-            50%      { transform: scale(1.22); }
-        }
-        .sat-dot.celestial {
-            box-shadow: 0 0 8px currentColor, 0 0 3px currentColor;
-        }
-        .sat-label {
-            font: 9px -apple-system, sans-serif;
-            color: #fff;
-            text-shadow: 0 0 3px rgba(0,0,0,0.8);
-            white-space: nowrap;
-        }
-    </style>
-    <script src="https://unpkg.com/globe.gl@2.41.3/dist/globe.gl.min.js"></script>
-    </head>
-    <body>
-    <div id="globe"></div>
-    <script>
-    try {
-        const myGlobe = Globe()
-            .globeImageUrl('https://unpkg.com/three-globe@2.35.2/example/img/earth-blue-marble.jpg')
-            .bumpImageUrl('https://unpkg.com/three-globe@2.35.2/example/img/earth-topology.png')
-            .backgroundImageUrl('https://unpkg.com/three-globe@2.35.2/example/img/night-sky.png')
-            .atmosphereColor('#6699ff')
-            .atmosphereAltitude(0.15)
-            .showAtmosphere(true)
-
-            // Satellites + celestial bodies as HTML elements
-            .htmlElementsData([])
-            .htmlLat('lat')
-            .htmlLng('lng')
-            .htmlAltitude('alt')
-            .htmlElement(d => {
-                const wrapper = document.createElement('div');
-                wrapper.className = 'sat-el';
-
-                const dot = document.createElement('div');
-                dot.className = 'sat-dot ' + (d.type || 'satellite');
-                const s = d.size || 6;
-                dot.style.width = s + 'px';
-                dot.style.height = s + 'px';
-                dot.style.backgroundColor = d.color || '#fff';
-                dot.style.color = d.color || '#fff';
-                wrapper.appendChild(dot);
-
-                if (d.label) {
-                    const lbl = document.createElement('span');
-                    lbl.className = 'sat-label';
-                    lbl.textContent = d.label;
-                    lbl.style.color = d.color || '#fff';
-                    wrapper.appendChild(lbl);
-                }
-
-                if (d.name) wrapper.title = d.name;
-                return wrapper;
-            })
-
-            // Rings at user location
-            .ringsData([])
-            .ringLat('lat')
-            .ringLng('lng')
-            .ringColor(() => '#ff3b30')
-            .ringMaxRadius(3)
-            .ringPropagationSpeed(2)
-            .ringRepeatPeriod(1200)
-            .ringAltitude(0.002)
-
-            // Per-pass trail polylines, WebGL-rendered
-            .pathsData([])
-            .pathPoints('coords')
-            .pathColor(d => d.color)
-            .pathStroke(d => d.stroke || 1.2)
-            .pathPointAlt(p => p[2])
-            .pathTransitionDuration(0)
-
-            (document.getElementById('globe'));
-
-        window.updateElements = function(data) {
-            myGlobe.htmlElementsData(data);
-        };
-
-        window.updateRings = function(data) {
-            myGlobe.ringsData(data);
-        };
-
-        window.updatePaths = function(data) {
-            myGlobe.pathsData(data);
-        };
-
-        window.addEventListener('resize', () => {
-            myGlobe.width(window.innerWidth).height(window.innerHeight);
-        });
-
-        let hasFocused = false;
-        window.focusOn = function(lat, lng) {
-            if (hasFocused) return;
-            hasFocused = true;
-            myGlobe.pointOfView({ lat: lat, lng: lng, altitude: 1.8 }, 1000);
-        };
-
-        window.webkit.messageHandlers.globeReady.postMessage('ok');
-    } catch(e) {
-        window.webkit.messageHandlers.globeLog.postMessage('Error: ' + e.message);
     }
-    </script>
-    </body>
-    </html>
-    """
 }

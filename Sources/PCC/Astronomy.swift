@@ -71,13 +71,48 @@ enum Astronomy {
         return CelestialPosition(altitude: altitude, azimuth: azimuth)
     }
 
+    // MARK: - Sub-solar point
+
+    /// Latitude/longitude on Earth where the sun is directly overhead at `date`.
+    /// Used by the globe view to drive the day/night terminator.
+    ///
+    /// Latitude equals the solar declination (±23.44° seasonally). Longitude is
+    /// derived from the sun's apparent right ascension and Greenwich mean
+    /// sidereal time: the sub-solar meridian is where the hour-angle is zero,
+    /// which gives `lon = RA − GMST·15`, wrapped into (−180, +180].
+    static func subSolarPoint(date: Date) -> (latitude: Double, longitude: Double) {
+        let n = julianDate(from: date)
+
+        let L = (280.460 + 0.9856474 * n).truncatingRemainder(dividingBy: 360)
+        let g = (357.528 + 0.9856003 * n).truncatingRemainder(dividingBy: 360)
+        let gRad = g * .pi / 180
+        let lambda = L + 1.915 * sin(gRad) + 0.020 * sin(2 * gRad)
+        let lambdaRad = lambda * .pi / 180
+        let epsilon = (23.439 - 0.0000004 * n) * .pi / 180
+
+        let alpha = atan2(cos(epsilon) * sin(lambdaRad), cos(lambdaRad)) * 180 / .pi
+        let delta = asin(sin(epsilon) * sin(lambdaRad)) * 180 / .pi
+
+        let gmst = (18.697374558 + 24.06570982441908 * n)
+            .truncatingRemainder(dividingBy: 24)
+
+        // Sub-solar longitude. Wrap into (−180, +180] so callers get a tidy
+        // signed longitude regardless of how many modulo cycles have passed.
+        var lon = alpha - gmst * 15
+        lon = lon.truncatingRemainder(dividingBy: 360)
+        if lon > 180       { lon -= 360 }
+        else if lon <= -180 { lon += 360 }
+
+        return (latitude: delta, longitude: lon)
+    }
+
     // MARK: - Sunrise / Sunset / Twilight
 
     /// Calculate sun times for a given date and location.
     static func sunTimes(date: Date, latitude: Double, longitude: Double) -> SunTimes? {
         // Use noon on the given date as reference
         let cal = Calendar(identifier: .gregorian)
-        var comps = cal.dateComponents(in: TimeZone(identifier: "UTC")!, from: date)
+        var comps = cal.dateComponents(in: .gmt, from: date)
         comps.hour = 12; comps.minute = 0; comps.second = 0
         guard let noon = cal.date(from: comps) else { return nil }
 

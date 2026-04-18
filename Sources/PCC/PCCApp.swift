@@ -27,11 +27,20 @@ struct PCCApp: App {
                 .environmentObject(configManager)
                 .environmentObject(ntpServer)
                 .environmentObject(trailStore)
-                .frame(minWidth: 460, minHeight: 500)
+                // Standard 40-pt grid sizes. 480 × 640 is tall enough for the
+                // full sidebar (15 items + section headers + safe-area
+                // connection status) to render without the last row colliding
+                // with the bottom inset, and wide enough to show form content
+                // at a comfortable reading width. 480 is also wide enough for
+                // the Text view's 10 recent messages to lay out cleanly.
+                .frame(minWidth: 480, minHeight: 640)
                 .onAppear {
                     dataSourceManager.serialManager = serialManager
                     weatherManager.serialManager = serialManager
-                    appDelegate.setUp(serialManager: serialManager, dataSourceManager: dataSourceManager, ntpServer: ntpServer)
+                    appDelegate.setUp(serialManager: serialManager,
+                                      dataSourceManager: dataSourceManager,
+                                      ntpServer: ntpServer,
+                                      trailStore: trailStore)
                     dataSourceManager.activate()
                     weatherManager.activate()
                     configManager.load()
@@ -39,7 +48,7 @@ struct PCCApp: App {
                 }
         }
         .windowResizability(.contentMinSize)
-        .defaultSize(width: 700, height: 800)
+        .defaultSize(width: 800, height: 800)
 
         Settings {
             PreferencesView()

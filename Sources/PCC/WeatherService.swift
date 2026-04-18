@@ -1,6 +1,7 @@
 import Foundation
 import WeatherKit
 import CoreLocation
+import MapKit
 
 class WeatherManager: ObservableObject {
     @Published var temperature: String = ""
@@ -10,6 +11,10 @@ class WeatherManager: ObservableObject {
     @Published var displayString: String = ""
     @Published var lastFetchTime: Date?
     @Published var lastError: String?
+    /// Human-readable place name for the current weather fix
+    /// (e.g. "Bath, Somerset"). Populated asynchronously by reverse-geocoding
+    /// the GPS coordinates — empty until the first geocode resolves.
+    @Published var locationName: String = ""
     @Published var isEnabled = false {
         didSet {
             UserDefaults.standard.set(isEnabled, forKey: "weatherEnabled")
@@ -20,6 +25,12 @@ class WeatherManager: ObservableObject {
     weak var serialManager: SerialManager?
     private var timer: Timer?
     private let service = WeatherKit.WeatherService.shared
+
+    /// Coordinates last sent to the geocoder — used to avoid re-geocoding on
+    /// every poll when the GPS hasn't moved meaningfully. Empty until the
+    /// first resolve.
+    private var geocodedLat: Double?
+    private var geocodedLon: Double?
 
     init() {
         self.isEnabled = UserDefaults.standard.bool(forKey: "weatherEnabled")
@@ -58,8 +69,14 @@ class WeatherManager: ObservableObject {
     }
 
     func fetchNow() {
-        let lat = UserDefaults.standard.object(forKey: "latitude") as? Double ?? 51.4043
-        let lon = UserDefaults.standard.object(forKey: "longitude") as? Double ?? -2.3234
+        // Location comes from the clock's own GPS fix — we never hit macOS
+        // Location Services. No fix, no fetch; we surface the reason via
+        // `lastError` so the weather UI can say something useful.
+        guard let lat = serialManager?.gpsLatitude,
+              let lon = serialManager?.gpsLongitude else {
+            self.lastError = "Waiting for GPS fix from the clock"
+            return
+        }
         let location = CLLocation(latitude: lat, longitude: lon)
 
         Task {
@@ -83,6 +100,59 @@ class WeatherManager: ObservableObject {
                 }
             }
         }
+        resolveLocationName(lat: lat, lon: lon)
+    }
+
+    /// Reverse-geocode the current GPS fix into a readable place name, caching
+    /// aggressively so we don't hammer the geocoder on every poll. Only
+    /// re-resolves when the position has shifted by more than ~500 m from the
+    /// last successful resolve — GPS noise on a stationary clock wouldn't
+    /// change the name anyway, and the geocoder has rate limits. Uses
+    /// `MKReverseGeocodingRequest` (the macOS 26+ replacement for the
+    /// deprecated `CLGeocoder`).
+    private func resolveLocationName(lat: Double, lon: Double) {
+        if let lastLat = geocodedLat, let lastLon = geocodedLon {
+            let dLat = (lat - lastLat) * 111_000        // ~metres/degree
+            let dLon = (lon - lastLon) * 111_000 * cos(lat * .pi / 180)
+            if (dLat * dLat + dLon * dLon) < (500 * 500) { return }
+        }
+        let loc = CLLocation(latitude: lat, longitude: lon)
+        guard let request = MKReverseGeocodingRequest(location: loc) else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let items = try await request.mapItems
+                guard let item = items.first else { return }
+                let name = Self.formatMapItem(item)
+                await MainActor.run {
+                    self.locationName = name
+                    self.geocodedLat = lat
+                    self.geocodedLon = lon
+                }
+            } catch {
+                // Silently ignore — we'll retry on the next GPS tick.
+            }
+        }
+    }
+
+    /// Compose a settlement-level label from an `MKMapItem`, trimmed down to
+    /// "locality, region" style ("Bath, Somerset" / "Cupertino, CA"). The
+    /// raw reverse-geocode against a GPS fix is doorstep-precise — it hands
+    /// back "218 High Street, Bath, Somerset, BA1 5EA, United Kingdom" — which
+    /// is more specific than a weather header needs, and more exposing than
+    /// the user wants on a shared screen.
+    ///
+    /// `MKAddressRepresentations.cityWithContext` is Apple's built-in answer
+    /// to exactly that problem: it returns "Cupertino, CA" / "Bath, Somerset"
+    /// with locality + administrativeArea already composed, skipping the
+    /// street and postcode. Falls back to `cityName` alone, then
+    /// `regionName`, then empty.
+    private static func formatMapItem(_ item: MKMapItem) -> String {
+        guard let reps = item.addressRepresentations else { return "" }
+        return reps.cityWithContext
+            ?? reps.cityName
+            ?? reps.regionName
+            ?? ""
     }
 
     private func sendToDisplay(_ value: String) {
