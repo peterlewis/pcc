@@ -304,6 +304,37 @@ button.btn.danger:hover { background: #ff766c; }
 .monitor-log .rx { color: #b5bcc6; }
 .monitor-log .err { color: var(--danger); }
 
+/* file:// fallback banner — shown only when the page is opened directly
+   as a local file, so the user gets a clear nudge to run the helper
+   rather than a silent page of dead buttons. */
+.file-warn {
+    margin: 40px auto;
+    max-width: 620px;
+    background: rgba(255,183,77,0.08);
+    border: 1px solid rgba(255,183,77,0.4);
+    border-radius: 10px;
+    padding: 20px 24px;
+    color: #ffcc80;
+}
+.file-warn h2 {
+    margin: 0 0 10px;
+    font-size: 18px;
+    color: #ffcc80;
+}
+.file-warn p { margin: 8px 0; }
+.file-warn pre {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    color: var(--text);
+    overflow-x: auto;
+    font-size: 13px;
+}
+.file-warn .muted { color: #c9a66b; }
+html.file-protocol header.topbar,
+html.file-protocol .layout { display: none; }
+
 /* Small-screen fallback */
 @media (max-width: 720px) {
     .layout { grid-template-columns: 1fr; }

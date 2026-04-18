@@ -85,6 +85,11 @@ document.getElementById('sidebar').addEventListener('click', (e) => {
     const tab = btn.dataset.tab;
     document.querySelectorAll('nav.sidebar button').forEach(b => b.classList.toggle('active', b === btn));
     document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `panel-${tab}`));
+    // The polar canvas lives in a display:none panel until this switch;
+    // ResizeObserver *should* fire as it becomes visible, but poke a
+    // redraw explicitly so the rings appear on first reveal even if RO
+    // coalesces the event.
+    if (tab === 'satellites') polar._resize();
 });
 
 // --- clock wiring ---------------------------------------------------------

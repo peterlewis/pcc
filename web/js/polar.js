@@ -58,6 +58,15 @@ export class PolarPlot {
         const cy = h / 2;
         const radius = Math.min(w, h) / 2 - 18;
 
+        // The canvas lives inside a .panel that is display:none until the
+        // Satellites tab is activated, so on first construction w/h are 0
+        // and radius goes negative — CanvasRenderingContext2D.arc throws
+        // (IndexSizeError) on negative radii, which would otherwise blow
+        // up the whole module and leave every button un-wired. Bail out;
+        // the ResizeObserver + tab-switch redraw will call us again once
+        // the canvas has real dimensions.
+        if (!(radius > 0)) return;
+
         ctx.clearRect(0, 0, w, h);
 
         // Background disc

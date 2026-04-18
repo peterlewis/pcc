@@ -5,9 +5,31 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PCC Web — Precision Clock Companion</title>
 <meta name="description" content="A browser-based companion for the Precision Clock Mk IV. Drives the display, sends text and countdowns, and shows live satellite reception over Web Serial.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230e1218'/%3E%3Ccircle cx='32' cy='32' r='20' fill='none' stroke='%234da3ff' stroke-width='3'/%3E%3Cline x1='32' y1='32' x2='32' y2='16' stroke='%234da3ff' stroke-width='3' stroke-linecap='round'/%3E%3Cline x1='32' y1='32' x2='44' y2='38' stroke='%234da3ff' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="./css/app.css">
 </head>
 <body>
+
+<!--
+  Classic (non-module) script so it still runs when the file:// origin
+  blocks ES modules. If the page was opened by double-clicking index.html
+  rather than served over HTTP, flip the banner on and hide the rest of
+  the UI so the user isn't mashing dead buttons.
+-->
+<div id="fileProtocolWarn" class="file-warn" hidden>
+    <h2>Open via a local web server</h2>
+    <p>You've opened this page as a file. Browsers block JavaScript modules and Web Serial from <span class="mono">file://</span> URLs, so none of the buttons will work from here.</p>
+    <p><strong>From the <span class="mono">pcc</span> folder, run:</strong></p>
+    <pre class="mono">bash web/serve.sh</pre>
+    <p class="muted">…or manually: <span class="mono">python3 -m http.server 8765 -d web</span> then open <span class="mono">http://localhost:8765</span>.</p>
+    <p class="muted">Web Serial also requires HTTPS on public hosting, but localhost is exempt.</p>
+</div>
+<script>
+    if (location.protocol === 'file:') {
+        document.getElementById('fileProtocolWarn').hidden = false;
+        document.documentElement.classList.add('file-protocol');
+    }
+</script>
 
 <header class="topbar">
     <div class="brand">PCC <span class="sub">Web companion for the Precision Clock Mk IV</span></div>
