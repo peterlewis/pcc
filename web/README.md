@@ -3,7 +3,7 @@
 Browser port of [PCC](../README.md) — drives a Precision Clock Mk IV over [Web Serial](https://developer.mozilla.org/docs/Web/API/Web_Serial_API), renders the live sky view, 3D globe, and pass history, all as a static site.
 
 > [!WARNING]
-> **Work in progress / proof-of-concept — not even beta.** The Mac app is the primary, supported companion. This web port exists to cover non-Mac users with a deliberately reduced subset and to explore how much of the app maps cleanly to browser APIs. **Not all features function yet** — expect rough edges, missing polish, half-wired controls, and breaking changes without notice.
+> **Work in progress / proof-of-concept.** The Mac app is the primary, supported companion. This web port exists to explore how much of the app maps cleanly to browser APIs. **Not all features function yet** — expect rough edges, missing polish, half-wired controls, and breaking changes without notice.
 
 **[Open PCC Web →](https://peterlewis.github.io/pcc/web/)**
 
