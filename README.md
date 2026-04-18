@@ -13,8 +13,8 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 ## Screenshots
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/satellites-globe-dark.png">
-  <img src="docs/screenshots/satellites-globe-light.png" alt="Satellites — Globe">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/satellites-polar-dark.png">
+  <img src="docs/screenshots/satellites-polar-light.png" alt="Satellites — Polar">
 </picture>
 
 <table>
