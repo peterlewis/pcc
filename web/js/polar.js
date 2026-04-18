@@ -79,6 +79,24 @@ export class PolarPlot {
 
     // MARK: - Colour helpers ---------------------------------------------
 
+    /// Read themed CSS vars once per draw so the polar plot tracks the OS
+    /// light/dark swap automatically (everything comes from app.css).
+    _palette() {
+        const cs = getComputedStyle(this.canvas);
+        const get = (name, fallback) => {
+            const v = cs.getPropertyValue(name).trim();
+            return v || fallback;
+        };
+        return {
+            bg:       get('--polar-bg',        '#12161e'),
+            grid:     get('--polar-grid',      'rgba(255,255,255,0.12)'),
+            spoke:    get('--polar-spoke',     'rgba(255,255,255,0.08)'),
+            label:    get('--polar-label',     'rgba(255,255,255,0.55)'),
+            labelDim: get('--polar-label-dim', 'rgba(255,255,255,0.35)'),
+            satLabel: get('--polar-sat-label', 'rgba(255,255,255,0.85)'),
+        };
+    }
+
     /// SNR → live-dot fill. Smooth red→yellow→green→cyan ramp over 0..50 dBHz.
     _snrColor(snr) {
         if (snr == null || snr <= 0) return 'rgba(128,128,128,0.4)';
@@ -128,18 +146,19 @@ export class PolarPlot {
         if (!(radius > 0)) return;
 
         ctx.clearRect(0, 0, w, h);
+        const palette = this._palette();
 
         // Background disc
-        ctx.fillStyle = getComputedStyle(this.canvas).getPropertyValue('--polar-bg') || '#12161e';
+        ctx.fillStyle = palette.bg;
         ctx.beginPath();
         ctx.arc(cx, cy, radius, 0, Math.PI * 2);
         ctx.fill();
 
         if (this.showHeatmap) this._drawSectorHeatmap(cx, cy, radius);
         if (this.showHorizon) this._drawHorizonMask(cx, cy, radius);
-        this._drawGrid(cx, cy, radius);
+        this._drawGrid(cx, cy, radius, palette);
         if (this.showTrails)  this._drawTrails(cx, cy, radius);
-        this._drawSatellites(cx, cy, radius);
+        this._drawSatellites(cx, cy, radius, palette);
     }
 
     // MARK: - Sector heatmap ---------------------------------------------
@@ -249,9 +268,9 @@ export class PolarPlot {
 
     // MARK: - Grid -------------------------------------------------------
 
-    _drawGrid(cx, cy, radius) {
+    _drawGrid(cx, cy, radius, palette) {
         const { ctx } = this;
-        ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+        ctx.strokeStyle = palette.grid;
         ctx.lineWidth = 1;
         for (const el of [0, 30, 60]) {
             const r = radius * (1 - el / 90);
@@ -260,7 +279,7 @@ export class PolarPlot {
             ctx.stroke();
         }
 
-        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.strokeStyle = palette.spoke;
         for (const az of [0, 90, 180, 270]) {
             const [x, y] = this._project(az, 0, cx, cy, radius);
             ctx.beginPath();
@@ -269,7 +288,7 @@ export class PolarPlot {
             ctx.stroke();
         }
 
-        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.fillStyle = palette.label;
         ctx.font = '11px system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -281,7 +300,7 @@ export class PolarPlot {
         }
 
         ctx.textAlign = 'left';
-        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        ctx.fillStyle = palette.labelDim;
         for (const el of [30, 60]) {
             const r = radius * (1 - el / 90);
             ctx.fillText(`${el}°`, cx + 2, cy - r);
@@ -357,7 +376,7 @@ export class PolarPlot {
 
     // MARK: - Live satellites --------------------------------------------
 
-    _drawSatellites(cx, cy, radius) {
+    _drawSatellites(cx, cy, radius, palette) {
         const { ctx } = this;
         for (const sat of this.satellites) {
             if (sat.elevation < 0) continue;
@@ -376,7 +395,7 @@ export class PolarPlot {
             ctx.fill();
 
             if (this.showLabels) {
-                ctx.fillStyle = 'rgba(255,255,255,0.85)';
+                ctx.fillStyle = palette.satLabel;
                 ctx.font = '10px system-ui, sans-serif';
                 ctx.textAlign = 'left';
                 ctx.fillText(sat.id, x + 9, y - 6);
