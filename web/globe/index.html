@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: black; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+    #globe { width: 100vw; height: 100vh; }
+    .sat-el {
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        pointer-events: none;
+    }
+    .sat-dot {
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+    /* Modest glow — just enough to read against the globe, not neon. */
+    .sat-dot.satellite { box-shadow: 0 0 5px currentColor; }
+    .sat-dot.live {
+        box-shadow: 0 0 9px currentColor, 0 0 3px currentColor;
+        animation: sat-pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes sat-pulse {
+        0%, 100% { transform: scale(1); }
+        50%      { transform: scale(1.22); }
+    }
+    .sat-dot.celestial {
+        box-shadow: 0 0 8px currentColor, 0 0 3px currentColor;
+    }
+    .sat-label {
+        font: 9px -apple-system, sans-serif;
+        color: #fff;
+        text-shadow: 0 0 3px rgba(0,0,0,0.8);
+        white-space: nowrap;
+    }
+    /* Clock overlay — sits top-left, monospace so the digits don't jiggle.
+       Subtle panel so it doesn't compete with the globe for attention.
+       Left-click toggles visibility; right-click cycles through clock
+       formats. `pointer-events: auto` so those clicks land; the panel
+       is small so this doesn't disrupt globe-drag interactions around it. */
+    .clock-overlay {
+        position: fixed;
+        top: 12px;
+        left: 14px;
+        padding: 6px 10px;
+        font: 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: rgba(255,255,255,0.92);
+        background: rgba(0,0,0,0.28);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 6px;
+        letter-spacing: 0.02em;
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        pointer-events: auto;
+        cursor: pointer;
+        user-select: none;
+        z-index: 10;
+        transition: opacity 160ms ease, transform 160ms ease;
+    }
+    .clock-overlay:hover { background: rgba(0,0,0,0.38); }
+    .clock-overlay.hidden {
+        opacity: 0;
+        pointer-events: none;
+    }
+    /* A tiny pulse used to confirm a right-click landed and cycled the
+       format — the label flashes so the user knows the click registered
+       even though the menu-like affordance is implicit. */
+    .clock-overlay.flash {
+        transform: scale(1.05);
+        background: rgba(60,120,255,0.35);
+    }
+</style>
+<!--
+  globe.gl UMD ships with its own bundled THREE (see
+  `window.THREE?window.THREE:{BufferGeometry:ti,...}` pattern in the
+  source). That internal copy is the only THREE three-globe's materials
+  trust — a separately-loaded external THREE produces objects three-globe
+  silently rejects, which is what left the globe stuck at black in a
+  previous ShaderMaterial attempt.
+
+  This HTML sidesteps the problem by *not* constructing any THREE objects
+  directly. We hand the default MeshPhongMaterial an `onBeforeCompile`
+  hook that rewrites the final fragment so the day/night mix is computed
+  inside globe.gl's own THREE instance. Same approach the globe.gl
+  day-night-cycle reference example demonstrates, but without importing a
+  second copy of three.js.
+-->
+<script src="./globe.gl.min.js"></script>
+</head>
+<body>
+<div id="globe"></div>
+<div class="clock-overlay hidden" id="clock">—</div>
+<script>
+try {
+    // ---- Globe construction -------------------------------------------
+    // Day texture comes in through three-globe's own texture loader via
+    // `globeImageUrl` — that keeps the loader inside globe.gl's bundled
+    // THREE instance, so `material.map` ends up as a Texture three-globe
+    // fully trusts. We swap in the emissive (night) map once the globe
+    // is ready, reusing `material.map.constructor` to construct the
+    // Texture so we never touch any external THREE namespace.
+
+    const myGlobe = Globe()
+        .globeImageUrl('./earth-day.jpg')
+        .backgroundImageUrl('./night-sky.png')
+        .atmosphereColor('#6699ff')
+        .atmosphereAltitude(0.15)
+        .showAtmosphere(true)
+
+        // Satellites + celestial bodies as HTML elements.
+        .htmlElementsData([])
+        .htmlLat('lat')
+        .htmlLng('lng')
+        .htmlAltitude('alt')
+        .htmlElement(d => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'sat-el';
+
+            const dot = document.createElement('div');
+            const baseType = d.type || 'satellite';
+            dot.className = 'sat-dot ' + baseType;
+            const s = d.size || 6;
+            dot.style.width = s + 'px';
+            dot.style.height = s + 'px';
+            // Prefer the translucent `fill` rgba for the body; keep
+            // full-colour `color` for currentColor-driven box-shadows so
+            // glows stay vivid.
+            dot.style.backgroundColor = d.fill || d.color || '#fff';
+            dot.style.color = d.color || '#fff';
+            wrapper.appendChild(dot);
+
+            if (d.label) {
+                const lbl = document.createElement('span');
+                lbl.className = 'sat-label';
+                lbl.textContent = d.label;
+                lbl.style.color = d.color || '#fff';
+                wrapper.appendChild(lbl);
+            }
+
+            if (d.name) wrapper.title = d.name;
+            return wrapper;
+        })
+
+        // Rings at user location. Small max radius and slow propagation
+        // so the "you are here" indicator reads as a subtle beacon
+        // rather than a strobe.
+        .ringsData([])
+        .ringLat('lat')
+        .ringLng('lng')
+        .ringColor(() => '#ff3b30')
+        .ringMaxRadius(1.6)
+        .ringPropagationSpeed(0.9)
+        .ringRepeatPeriod(2800)
+        .ringAltitude(0.002)
+
+        // Per-pass trail polylines, WebGL-rendered.
+        .pathsData([])
+        .pathPoints('coords')
+        .pathColor(d => d.color)
+        .pathStroke(d => d.stroke || 1.2)
+        .pathPointAlt(p => p[2])
+        .pathTransitionDuration(0)
+
+        (document.getElementById('globe'));
+
+    // ---- Day/night shader via onBeforeCompile -------------------------
+    // Instead of replacing the material wholesale with a ShaderMaterial
+    // we patch the existing MeshPhongMaterial's shader after three.js
+    // compiles it. Two benefits over the previous ShaderMaterial try:
+    //
+    //   1. We stay inside globe.gl's bundled THREE — no instance-of
+    //      mismatches, no duck-typing, no black globe.
+    //   2. three-globe keeps owning the day texture load, so we don't
+    //      re-implement TextureLoader or worry about colorSpace quirks.
+    //
+    // The shader itself computes `dot(worldNormal, sunDir)` and
+    // smoothsteps it to pick between the day texture (already in
+    // `diffuseColor.rgb` after `<map_fragment>`) and the night texture
+    // (in `totalEmissiveRadiance` after `<emissivemap_fragment>`). With
+    // lights disabled (`intensity = 0`) there's no Phong gradient
+    // muddying either hemisphere — both read at full texture saturation
+    // either side of a narrow terminator band.
+
+    // Uniform shared between the onBeforeCompile closure and the
+    // `setSunDirection` global. Swift calls in every ~second with the
+    // current sub-solar lat/lng; this gets turned into a unit vector in
+    // the globe's object frame (the globe sits at the origin with its
+    // modelMatrix the identity, so object and world space coincide).
+    const sunUniform = { value: { x: 1, y: 0, z: 0 } };
+
+    function installDayNightShader() {
+        const mat = myGlobe.globeMaterial();
+        if (!mat || !mat.map || !mat.map.constructor) {
+            // globeMaterial is available but its day texture hasn't
+            // come back yet — retry once the browser hands us the
+            // image. Cheap to poll, only runs during first load.
+            setTimeout(installDayNightShader, 50);
+            return;
+        }
+        const TextureClass = mat.map.constructor;
+
+        // Load the night (lights-at-night) texture by hand, wrapping an
+        // HTMLImageElement in a new Texture from globe.gl's own THREE.
+        const nightTex = new TextureClass();
+        const nightImg = new Image();
+        nightImg.onload = () => {
+            nightTex.image = nightImg;
+            nightTex.needsUpdate = true;
+        };
+        nightImg.onerror = () => {
+            window.webkit.messageHandlers.globeLog.postMessage(
+                'Night texture failed to load');
+        };
+        nightImg.src = './earth-night.jpg';
+
+        // colorSpace lives as a plain string in recent three.js
+        // ('srgb' / 'srgb-linear'). Setting it on the day texture too
+        // so we don't fall prey to three-globe's default of not
+        // setting it on older builds.
+        if ('colorSpace' in mat.map) mat.map.colorSpace = 'srgb';
+        if ('colorSpace' in nightTex) nightTex.colorSpace = 'srgb';
+
+        mat.emissiveMap = nightTex;
+        // Emissive white means `totalEmissiveRadiance = nightTex.rgb`
+        // exactly (no tint) — the night side reads as true city-lights
+        // colour instead of being multiplied by a dim grey default.
+        if (mat.emissive && mat.emissive.setHex) {
+            mat.emissive.setHex(0xffffff);
+        }
+        // Shininess to 0 — we're going to throw away the Phong result
+        // anyway, but this avoids any specular highlight artefacts if
+        // a light ever sneaks back on.
+        mat.shininess = 0;
+
+        mat.onBeforeCompile = function(shader) {
+            shader.uniforms.sunDirectionSky = sunUniform;
+
+            shader.vertexShader = shader.vertexShader
+                .replace(
+                    '#include <common>',
+                    '#include <common>\nvarying vec3 vWorldNormalSkyGlobe;'
+                )
+                .replace(
+                    '#include <worldpos_vertex>',
+                    '#include <worldpos_vertex>\n' +
+                    'vWorldNormalSkyGlobe = normalize((modelMatrix * vec4(normal, 0.0)).xyz);'
+                );
+
+            shader.fragmentShader = shader.fragmentShader
+                .replace(
+                    '#include <common>',
+                    '#include <common>\n' +
+                    'varying vec3 vWorldNormalSkyGlobe;\n' +
+                    'uniform vec3 sunDirectionSky;'
+                )
+                .replace(
+                    '#include <opaque_fragment>',
+                    // Inlined `<opaque_fragment>` body plus our override.
+                    // The include normally sets gl_FragColor from
+                    // `outgoingLight`; we bypass that entirely in favour
+                    // of the day/night mix so the Phong result never
+                    // reaches the framebuffer. Matches the crispness of
+                    // the globe.gl day-night-cycle reference example.
+                    '#ifdef OPAQUE\n' +
+                    'diffuseColor.a = 1.0;\n' +
+                    '#endif\n' +
+                    'vec3 dayC = diffuseColor.rgb;\n' +
+                    'vec3 nightC = totalEmissiveRadiance;\n' +
+                    'float sunDotN = dot(normalize(vWorldNormalSkyGlobe), normalize(sunDirectionSky));\n' +
+                    'float blend = smoothstep(-0.1, 0.1, sunDotN);\n' +
+                    'gl_FragColor = vec4(mix(nightC, dayC, blend), diffuseColor.a);'
+                );
+        };
+        mat.needsUpdate = true;
+
+        // Disable the built-in ambient + directional lights. We're
+        // overriding `gl_FragColor` so their contribution would be
+        // invisible, but setting intensity to 0 also keeps them from
+        // doing any shadow/shader work we'd pay for. globe.gl's
+        // `.lights()` setter accepts an empty array which removes them
+        // from the scene altogether.
+        try { myGlobe.lights([]); } catch (e) { /* older build */ }
+
+        window.webkit.messageHandlers.globeLog.postMessage(
+            'Day/night shader installed');
+    }
+
+    // Kick off the shader install once the globe's own day-texture
+    // load settles. `.onGlobeReady` fires after three-globe has loaded
+    // + applied the globeImageUrl image.
+    if (typeof myGlobe.onGlobeReady === 'function') {
+        myGlobe.onGlobeReady(installDayNightShader);
+    } else {
+        // Fallback — older builds: just poll until the material's
+        // map populates.
+        setTimeout(installDayNightShader, 50);
+    }
+
+    // ---- Sun direction ------------------------------------------------
+    // Swift calls this with the current sub-solar (lat, lng) every
+    // update. Convert to a unit vector using three-globe's
+    // lat/lng→cartesian convention so the terminator lines up with the
+    // actual globe geometry.
+    window.setSunDirection = function(lat, lng) {
+        const toRad = Math.PI / 180;
+        const phi = (90 - lat) * toRad;
+        const theta = (90 - lng) * toRad;
+        sunUniform.value.x = Math.sin(phi) * Math.cos(theta);
+        sunUniform.value.y = Math.cos(phi);
+        sunUniform.value.z = Math.sin(phi) * Math.sin(theta);
+    };
+
+    window.updateElements = function(data) { myGlobe.htmlElementsData(data); };
+    window.updateRings    = function(data) { myGlobe.ringsData(data); };
+    window.updatePaths    = function(data) { myGlobe.pathsData(data); };
+
+    // ---- Clock overlay ------------------------------------------------
+    // JS drives its own tick loop so the displayed time updates smoothly
+    // independent of Swift's refresh cadence. Format matches what the app
+    // clock shows by default ("match clock" = YYYY-MM-DD HH:MM:SS.mmm
+    // local); ISO-8601 adds T separator and Z suffix in UTC.
+
+    const clockEl = document.getElementById('clock');
+    window.__clockFormat = 'matchClock';
+    window.__clockVisible = true;
+
+    window.setClockFormat = function(mode, visible) {
+        window.__clockFormat = mode || 'matchClock';
+        window.__clockVisible = !!visible;
+        if (!clockEl) return;
+        if (window.__clockVisible) {
+            clockEl.classList.remove('hidden');
+        } else {
+            clockEl.classList.add('hidden');
+        }
+    };
+
+    function pad(n, w) {
+        const s = String(n);
+        return s.length >= w ? s : '0'.repeat(w - s.length) + s;
+    }
+
+    function formatClock(now) {
+        if (window.__clockFormat === 'iso8601') {
+            // UTC, T-separated, millisecond precision, Z suffix — full ISO 8601.
+            return now.getUTCFullYear()
+                + '-' + pad(now.getUTCMonth() + 1, 2)
+                + '-' + pad(now.getUTCDate(), 2)
+                + 'T' + pad(now.getUTCHours(), 2)
+                + ':' + pad(now.getUTCMinutes(), 2)
+                + ':' + pad(now.getUTCSeconds(), 2)
+                + '.' + pad(now.getUTCMilliseconds(), 3)
+                + 'Z';
+        }
+        // matchClock: local timezone, space separator, ms precision,
+        // no zone suffix — matches the rest of the app's display.
+        return now.getFullYear()
+            + '-' + pad(now.getMonth() + 1, 2)
+            + '-' + pad(now.getDate(), 2)
+            + ' ' + pad(now.getHours(), 2)
+            + ':' + pad(now.getMinutes(), 2)
+            + ':' + pad(now.getSeconds(), 2)
+            + '.' + pad(now.getMilliseconds(), 3);
+    }
+
+    function tickClock() {
+        if (clockEl && window.__clockVisible) {
+            clockEl.textContent = formatClock(new Date());
+        }
+        requestAnimationFrame(tickClock);
+    }
+    requestAnimationFrame(tickClock);
+
+    if (clockEl) {
+        clockEl.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            if (window.webkit && window.webkit.messageHandlers.clockToggle) {
+                window.webkit.messageHandlers.clockToggle.postMessage('toggle');
+            }
+        });
+        clockEl.addEventListener('contextmenu', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (window.webkit && window.webkit.messageHandlers.clockCycleFormat) {
+                window.webkit.messageHandlers.clockCycleFormat.postMessage('cycle');
+            }
+            // Visible confirmation for an otherwise silent action.
+            clockEl.classList.add('flash');
+            setTimeout(() => clockEl.classList.remove('flash'), 160);
+        });
+    }
+
+    window.addEventListener('resize', () => {
+        myGlobe.width(window.innerWidth).height(window.innerHeight);
+    });
+
+    let hasFocused = false;
+    window.focusOn = function(lat, lng) {
+        if (hasFocused) return;
+        hasFocused = true;
+        myGlobe.pointOfView({ lat: lat, lng: lng, altitude: 1.8 }, 1000);
+    };
+
+    window.webkit.messageHandlers.globeReady.postMessage('ok');
+} catch (e) {
+    window.webkit.messageHandlers.globeLog.postMessage(
+        'Error: ' + (e && e.message ? e.message : e));
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PCC Web — Precision Clock Companion</title>
+<meta name="description" content="A browser-based companion for the Precision Clock Mk IV. Drives the display, sends text and countdowns, and shows live satellite reception over Web Serial.">
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+
+<header class="topbar">
+    <div class="brand">PCC <span class="sub">Web companion for the Precision Clock Mk IV</span></div>
+    <div class="spacer"></div>
+    <div id="statusPill" class="status-pill"><span class="dot"></span><span id="statusText">Disconnected</span></div>
+</header>
+
+<div class="layout">
+    <nav class="sidebar" id="sidebar">
+        <button data-tab="connect" class="active">Connect</button>
+        <button data-tab="display">Display</button>
+        <button data-tab="satellites">Satellites</button>
+        <button data-tab="monitor">Monitor</button>
+        <button data-tab="about">About</button>
+    </nav>
+
+    <main>
+        <!-- CONNECT -->
+        <section class="panel active" id="panel-connect">
+            <h1 class="panel-title">Connect</h1>
+            <p class="panel-sub">Pair the browser with the clock over USB. Click Connect and pick the clock's serial port in the browser prompt.</p>
+
+            <div id="browserWarn" class="browser-warn" hidden>
+                Your browser doesn't support Web Serial. Open this page in Chrome, Edge, Arc, Brave, or Opera on a desktop OS.
+            </div>
+
+            <div class="card connect-card">
+                <h2>Serial port</h2>
+                <p class="lede" id="connectLede">The Mk IV enumerates as a <span class="mono">cu.usbmodem*</span> device on macOS and a COM port on Windows. If this is your first connect, the browser will ask which port to grant access to — pick the one that appears when you plug the clock in.</p>
+                <div class="row">
+                    <button class="btn" id="connectBtn">Connect</button>
+                    <button class="btn ghost" id="disconnectBtn" disabled>Disconnect</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Built on</h2>
+                <p class="muted">Web Serial API · HTML5 Canvas · three.js / globe.gl (offline, MIT) · no backend, no account, no tracking. The whole page is static files from a CDN.</p>
+            </div>
+        </section>
+
+        <!-- DISPLAY -->
+        <section class="panel" id="panel-display">
+            <h1 class="panel-title">Display</h1>
+            <p class="panel-sub">Drive the clock's face: mode, free text, countdowns, brightness.</p>
+
+            <div class="card">
+                <h2>Mode</h2>
+                <div class="row">
+                    <label>Active mode</label>
+                    <select id="modeSelect">
+                        <option value="none">None (default face)</option>
+                        <option value="text">Text</option>
+                        <option value="countdown">Countdown</option>
+                    </select>
+                </div>
+                <p class="muted" style="margin-top: 10px; font-size: 12px;">Changing mode sends <span class="mono">mode_text</span> / <span class="mono">mode_countdown</span> toggles and clears the previous mode first.</p>
+            </div>
+
+            <div class="card">
+                <h2>Text</h2>
+                <div class="row">
+                    <input type="text" id="textInput" placeholder="Up to 10 chars for static, longer marches" style="flex:1; min-width: 240px;">
+                    <button class="btn" id="textSendBtn">Send</button>
+                    <button class="btn ghost" id="textStopBtn">Stop</button>
+                </div>
+                <p class="muted" style="margin-top: 10px; font-size: 12px;">Longer than 10 characters scrolls as a marquee. Speed is app-side — adjust below.</p>
+                <div class="row" style="margin-top: 14px;">
+                    <label>Scroll speed</label>
+                    <select id="scrollSpeed">
+                        <option value="0.55">Slow</option>
+                        <option value="0.40" selected>Normal</option>
+                        <option value="0.28">Fast</option>
+                        <option value="0.18">Very fast</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Countdown</h2>
+                <div class="row">
+                    <label>Target (local)</label>
+                    <input type="datetime-local" id="countdownTarget">
+                    <button class="btn" id="countdownStartBtn">Start</button>
+                    <button class="btn ghost" id="countdownStopBtn">Stop</button>
+                </div>
+                <p class="muted" style="margin-top: 10px; font-size: 12px;">Sends <span class="mono">countdown_to = &lt;unix&gt;</span> then <span class="mono">mode_countdown = 1</span>.</p>
+            </div>
+
+            <div class="card">
+                <h2>Brightness</h2>
+                <div class="row">
+                    <label>Lock brightness</label>
+                    <input type="checkbox" id="brightLock">
+                    <input type="range" id="brightSlider" min="0" max="1" step="0.01" value="0.5" disabled style="flex: 1; min-width: 200px;">
+                    <span id="brightValue" class="mono muted">50%</span>
+                </div>
+                <p class="muted" style="margin-top: 10px; font-size: 12px;">Manual brightness persists until the clock resets. Unlock to restore ambient tracking.</p>
+            </div>
+
+            <div class="card">
+                <h2>Send raw command</h2>
+                <div class="row">
+                    <input type="text" id="rawInput" placeholder="e.g. mode_satview = 1" class="mono" style="flex: 1; min-width: 280px;">
+                    <button class="btn" id="rawSendBtn">Send</button>
+                </div>
+                <p class="muted" style="margin-top: 10px; font-size: 12px;">The clock's serial protocol is <span class="mono">key = value</span> terminated by CRLF. See the Mk IV docs for the full command list.</p>
+            </div>
+        </section>
+
+        <!-- SATELLITES -->
+        <section class="panel" id="panel-satellites">
+            <h1 class="panel-title">Satellites</h1>
+            <p class="panel-sub">Live sky view from the clock's GNSS module. Dot colour is the constellation; fill is SNR (red → yellow → green → cyan).</p>
+
+            <div class="row" style="margin-bottom: 14px;">
+                <button class="btn" id="satStartBtn">Start live view</button>
+                <button class="btn ghost" id="satStopBtn" disabled>Stop</button>
+                <span class="muted" id="satCount">0 satellites in view</span>
+            </div>
+
+            <div class="sat-layout">
+                <div class="polar-canvas-wrap">
+                    <canvas id="polar"></canvas>
+                </div>
+
+                <div>
+                    <div class="card gps-info">
+                        <h2>GPS fix</h2>
+                        <dl>
+                            <dt>Status</dt><dd id="gpsStatus" class="muted">No fix</dd>
+                            <dt>Latitude</dt><dd id="gpsLat">—</dd>
+                            <dt>Longitude</dt><dd id="gpsLon">—</dd>
+                            <dt>Altitude</dt><dd id="gpsAlt">—</dd>
+                            <dt>HDOP</dt><dd id="gpsHdop">—</dd>
+                            <dt>Sats used</dt><dd id="gpsSats">—</dd>
+                            <dt>Maidenhead</dt><dd id="gpsGrid">—</dd>
+                            <dt>UTC</dt><dd id="gpsUtc">—</dd>
+                        </dl>
+                    </div>
+
+                    <div class="card">
+                        <h2>Celestial</h2>
+                        <dl style="display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0;">
+                            <dt class="muted" style="font-size: 12px;">Sun alt / az</dt><dd id="sunAltAz" class="mono">—</dd>
+                            <dt class="muted" style="font-size: 12px;">Moon alt / az</dt><dd id="moonAltAz" class="mono">—</dd>
+                            <dt class="muted" style="font-size: 12px;">Moon phase</dt><dd id="moonPhase" class="mono">—</dd>
+                            <dt class="muted" style="font-size: 12px;">Sunrise</dt><dd id="sunrise" class="mono">—</dd>
+                            <dt class="muted" style="font-size: 12px;">Sunset</dt><dd id="sunset" class="mono">—</dd>
+                        </dl>
+                        <p class="muted" style="margin-top: 10px; font-size: 12px;">Computed from the GPS-reported position and UTC time.</p>
+                    </div>
+
+                    <div class="card">
+                        <h2>Legend</h2>
+                        <div class="legend" id="legend">
+                            <span><i class="swatch" style="background:#007aff"></i>GPS</span>
+                            <span><i class="swatch" style="background:#ff3b30"></i>GLONASS</span>
+                            <span><i class="swatch" style="background:#ff9500"></i>Galileo</span>
+                            <span><i class="swatch" style="background:#5ac8fa"></i>BeiDou</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- MONITOR -->
+        <section class="panel" id="panel-monitor">
+            <h1 class="panel-title">Serial monitor</h1>
+            <p class="panel-sub">Raw NMEA and command echoes from the clock. Enable NMEA to see the GNSS firehose; leave it off to watch replies to commands.</p>
+
+            <div class="row" style="margin-bottom: 12px;">
+                <label><input type="checkbox" id="nmeaToggle"> Request NMEA stream</label>
+                <button class="btn ghost" id="clearLogBtn">Clear log</button>
+                <button class="btn ghost" id="pauseLogBtn" data-paused="false">Pause</button>
+            </div>
+
+            <div class="monitor-log" id="monitorLog"></div>
+        </section>
+
+        <!-- ABOUT -->
+        <section class="panel" id="panel-about">
+            <h1 class="panel-title">About PCC Web</h1>
+            <p class="panel-sub">A browser-based subset of the native macOS PCC companion.</p>
+
+            <div class="card">
+                <h2>What's here</h2>
+                <ul style="margin: 0; padding-left: 20px; line-height: 1.7;">
+                    <li>Connect over Web Serial (Chromium browsers only)</li>
+                    <li>Drive display modes, text, countdowns, brightness</li>
+                    <li>Live polar sky view with SNR-coloured satellites</li>
+                    <li>GPS fix info, Maidenhead grid, solar &amp; lunar position</li>
+                    <li>Raw serial monitor with custom command input</li>
+                </ul>
+            </div>
+
+            <div class="card">
+                <h2>What's <em>not</em> here</h2>
+                <ul style="margin: 0; padding-left: 20px; line-height: 1.7;">
+                    <li><strong>NTP time server</strong> — browsers can't open UDP sockets or listen on a port. Stays in the Mac app.</li>
+                    <li><strong>Firmware / timezone updates</strong> — need USB mass-storage mount, which the browser can't do. Stays in the Mac app.</li>
+                    <li><strong>WeatherKit</strong> — Apple-only. A generic weather provider would be a swap-in.</li>
+                    <li><strong>On-device AI insights</strong> — Apple's Foundation Models are Mac-only; a BYO-key LLM call would be a swap-in.</li>
+                    <li><strong>3D globe + long-term trail history</strong> — coming in a follow-up (globe.gl is already bundled; IndexedDB-backed SatPass store is the next port).</li>
+                </ul>
+            </div>
+
+            <div class="card">
+                <h2>Browser support</h2>
+                <p>Web Serial ships in Chromium-based browsers — Chrome, Edge, Arc, Brave, Opera — on desktop OSes. Safari and Firefox don't implement it, and there's no public roadmap for them to do so. HTTPS is required for non-localhost hosting; GitHub Pages, Cloudflare Pages, and Netlify all provide that out of the box.</p>
+            </div>
+
+            <div class="card">
+                <h2>Links</h2>
+                <ul style="margin: 0; padding-left: 20px; line-height: 1.7;">
+                    <li><a href="https://mitxela.com/projects/precision_clock_mk_iv/docs" target="_blank" rel="noopener">Precision Clock Mk IV docs</a> — hardware + serial protocol reference</li>
+                    <li><a href="https://github.com/peterlewis/pcc" target="_blank" rel="noopener">peterlewis/pcc</a> — native macOS companion + this web port</li>
+                </ul>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>

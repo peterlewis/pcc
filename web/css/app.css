@@ -1,0 +1,318 @@
+/* PCC Web — minimal styling for a serial companion.
+   Dark first; the clock's own "dark workshop" aesthetic — system font,
+   plenty of breathing room, generous tap targets since this will also
+   open on a tablet in Chrome for Android if anyone asks. */
+
+:root {
+    color-scheme: dark;
+    --bg: #0e1218;
+    --surface: #161b24;
+    --surface-2: #1d242f;
+    --border: #2a323f;
+    --text: #e9edf2;
+    --text-dim: #9aa5b3;
+    --accent: #4da3ff;
+    --accent-dim: #2a6fb5;
+    --ok: #35c16a;
+    --warn: #ffb74d;
+    --danger: #ff5a4e;
+    --polar-bg: #12161e;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+}
+
+body {
+    display: grid;
+    grid-template-rows: auto 1fr;
+}
+
+header.topbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+}
+
+header .brand {
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+header .brand .sub {
+    color: var(--text-dim);
+    font-weight: 400;
+    margin-left: 6px;
+}
+
+header .spacer { flex: 1; }
+
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-dim);
+}
+.status-pill .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--danger);
+}
+.status-pill.connected .dot { background: var(--ok); }
+.status-pill.connected { color: var(--text); }
+
+.layout {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    min-height: 0;
+}
+
+nav.sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 10px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+nav.sidebar button {
+    background: none;
+    border: none;
+    padding: 8px 12px;
+    color: var(--text-dim);
+    border-radius: 6px;
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+}
+nav.sidebar button:hover { color: var(--text); background: var(--surface-2); }
+nav.sidebar button.active {
+    color: var(--text);
+    background: var(--surface-2);
+    box-shadow: inset 2px 0 0 var(--accent);
+}
+
+main {
+    padding: 22px 28px;
+    overflow: auto;
+    min-width: 0;
+}
+
+.panel {
+    display: none;
+}
+.panel.active {
+    display: block;
+}
+
+h1.panel-title {
+    font-size: 20px;
+    margin: 0 0 4px;
+}
+.panel-sub {
+    color: var(--text-dim);
+    margin: 0 0 18px;
+    font-size: 13px;
+}
+
+.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    margin-bottom: 16px;
+}
+.card h2 {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin: 0 0 12px;
+}
+
+.row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.row + .row { margin-top: 10px; }
+.row label {
+    color: var(--text-dim);
+    min-width: 110px;
+    font-size: 13px;
+}
+.row.vstack {
+    flex-direction: column;
+    align-items: stretch;
+}
+.row.vstack label { min-width: auto; }
+
+input[type="text"], input[type="number"], select, textarea {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font: inherit;
+    min-width: 0;
+}
+input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+textarea {
+    min-height: 140px;
+    font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre;
+    width: 100%;
+    resize: vertical;
+}
+
+button.btn {
+    background: var(--accent);
+    border: none;
+    color: #fff;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font: inherit;
+    cursor: pointer;
+}
+button.btn:hover { background: #60aeff; }
+button.btn[disabled] { background: var(--surface-2); color: var(--text-dim); cursor: not-allowed; }
+button.btn.ghost {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+}
+button.btn.ghost:hover { background: #252d3a; }
+button.btn.danger {
+    background: var(--danger);
+}
+button.btn.danger:hover { background: #ff766c; }
+
+.kbd {
+    font: 12px ui-monospace, Menlo, monospace;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: var(--text);
+}
+
+.muted { color: var(--text-dim); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Connect panel */
+.connect-card .lede {
+    font-size: 15px;
+    margin-bottom: 14px;
+}
+.browser-warn {
+    background: rgba(255,183,77,0.08);
+    border: 1px solid rgba(255,183,77,0.4);
+    color: #ffcc80;
+    padding: 10px 14px;
+    border-radius: 8px;
+    margin-bottom: 14px;
+}
+
+/* Satellites panel */
+.sat-layout {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 16px;
+    align-items: start;
+}
+.polar-canvas-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    aspect-ratio: 1 / 1;
+    min-height: 420px;
+    max-width: 640px;
+    margin-inline: auto;
+}
+.polar-canvas-wrap canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.gps-info dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 6px 14px;
+    margin: 0;
+}
+.gps-info dt {
+    color: var(--text-dim);
+    font-size: 12px;
+}
+.gps-info dd {
+    margin: 0;
+    font-family: ui-monospace, Menlo, monospace;
+}
+
+/* Satellite legend */
+.legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    font-size: 12px;
+    color: var(--text-dim);
+}
+.legend .swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    margin-right: 5px;
+    vertical-align: middle;
+}
+
+/* Monitor panel */
+.monitor-log {
+    background: #0a0d12;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    height: 50vh;
+    overflow: auto;
+    font: 12px/1.4 ui-monospace, Menlo, monospace;
+    white-space: pre-wrap;
+    color: var(--text-dim);
+}
+.monitor-log .tx { color: #7acbff; }
+.monitor-log .rx { color: #b5bcc6; }
+.monitor-log .err { color: var(--danger); }
+
+/* Small-screen fallback */
+@media (max-width: 720px) {
+    .layout { grid-template-columns: 1fr; }
+    nav.sidebar {
+        flex-direction: row;
+        overflow-x: auto;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+    }
+    nav.sidebar button { white-space: nowrap; }
+    .sat-layout { grid-template-columns: 1fr; }
+}
