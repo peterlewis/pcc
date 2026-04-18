@@ -68,15 +68,8 @@
             </div>
 
             <div class="card info-card">
-                <h2>Web edition — reduced feature set</h2>
-                <p>This is the browser port of the native macOS PCC app. It mirrors most of the Mac features (display control, live sky view, trails, sector heatmap, 3D globe, persistent history) but intentionally <strong>omits</strong> anything a browser can't do safely:</p>
-                <ul class="compact">
-                    <li>NTP time server (no UDP listen socket)</li>
-                    <li>Firmware &amp; timezone updates (no USB mass-storage mount)</li>
-                    <li>Native map view &amp; WeatherKit (Apple-only APIs)</li>
-                    <li>On-device AI insights (Foundation Models are Mac-only)</li>
-                </ul>
-                <p class="muted">Run the Mac app for the full experience — see the <a href="#" data-goto="about">About</a> tab for install links.</p>
+                <h2>WIP / POC</h2>
+                <p>Browser port of the Mac PCC app. Work in progress, things may not work. See <a href="#" data-goto="about">About</a> for what's in and out.</p>
             </div>
 
             <div class="card">
@@ -309,46 +302,42 @@
         <!-- ABOUT -->
         <section class="panel" id="panel-about">
             <h1 class="panel-title">About PCC Web</h1>
-            <p class="panel-sub">A browser-based subset of the native macOS PCC companion.</p>
+            <p class="panel-sub">Browser build of PCC — WIP / POC.</p>
 
             <div class="card info-card">
-                <h2>Reduced feature set</h2>
-                <p>PCC Web aims for visible feature parity with the Mac app wherever the browser allows it — live satellites, polar sky view with sector heatmap, horizon mask, trails with adaptive smoothing, persistent pass history in IndexedDB, and the same offline 3D globe. The globe HTML is a single shared file bundled into both apps, so feature work there lands in both places.</p>
-                <p>What intentionally stays in the Mac app:</p>
+                <h2>Status</h2>
+                <p>Proof-of-concept. Work in progress. Things may not work. The <a href="https://github.com/peterlewis/pcc/releases" target="_blank" rel="noopener">Mac app</a> is the supported companion.</p>
+            </div>
+
+            <div class="card">
+                <h2>What it does</h2>
                 <ul class="compact">
-                    <li><strong>NTP time server</strong> — browsers can't open UDP sockets or listen on a port.</li>
-                    <li><strong>Firmware / timezone updates</strong> — need USB mass-storage mount.</li>
-                    <li><strong>Native map view</strong> — requires MapKit. A Leaflet fallback is possible but not yet wired up.</li>
-                    <li><strong>WeatherKit</strong> — Apple-only. A generic weather provider would be a swap-in.</li>
-                    <li><strong>On-device AI insights</strong> — Apple Foundation Models are Mac-only.</li>
+                    <li>Drive the clock: display modes, text, countdowns, brightness, raw commands</li>
+                    <li>Polar sky view: sector heatmap, horizon mask, trails</li>
+                    <li>3D globe (shared HTML with the Mac app)</li>
+                    <li>IndexedDB pass history with retention + time-window filter</li>
+                    <li>GPS info, sun/moon, raw serial monitor</li>
+                    <li>Light/dark follows the OS</li>
                 </ul>
             </div>
 
             <div class="card">
-                <h2>What's here</h2>
+                <h2>What it can't</h2>
                 <ul class="compact">
-                    <li>Connect over Web Serial (Chromium browsers only)</li>
-                    <li>Drive display modes, text, countdowns, brightness, raw commands</li>
-                    <li>Polar sky view: live satellites, sector heatmap, horizon mask, trails with adaptive smoothing</li>
-                    <li>3D globe with day/night terminator, satellites, trails, sun &amp; moon</li>
-                    <li>Persistent pass history (IndexedDB) with configurable retention (1 hour → unlimited)</li>
-                    <li>GPS fix info, Maidenhead grid, solar &amp; lunar position, sunrise/sunset</li>
-                    <li>Raw serial monitor with custom command input</li>
-                    <li>Automatic light / dark mode following your system</li>
+                    <li>NTP server — no UDP listen from a browser</li>
+                    <li>Firmware / timezone updates — no USB mass-storage mount</li>
+                    <li>Native map — MapKit-only</li>
+                    <li>WeatherKit — Apple-only</li>
+                    <li>AI insights — Foundation Models are Mac-only</li>
                 </ul>
-            </div>
-
-            <div class="card">
-                <h2>Browser support</h2>
-                <p>Web Serial ships in Chromium-based browsers — Chrome, Edge, Arc, Brave, Opera — on desktop OSes. Safari and Firefox don't implement it, and there's no public roadmap for them to do so. HTTPS is required for non-localhost hosting; GitHub Pages, Cloudflare Pages, and Netlify all provide that out of the box.</p>
             </div>
 
             <div class="card">
                 <h2>Links</h2>
                 <ul class="compact">
-                    <li><a href="https://mitxela.com/projects/precision_clock_mk_iv/docs" target="_blank" rel="noopener">Precision Clock Mk IV docs</a> — hardware + serial protocol reference</li>
-                    <li><a href="https://github.com/peterlewis/pcc" target="_blank" rel="noopener">peterlewis/pcc</a> — native macOS companion + this web port</li>
-                    <li><a href="https://github.com/peterlewis/pcc/releases" target="_blank" rel="noopener">Releases</a> — notarized macOS builds</li>
+                    <li><a href="https://mitxela.com/projects/precision_clock_mk_iv/docs" target="_blank" rel="noopener">Precision Clock Mk IV docs</a></li>
+                    <li><a href="https://github.com/peterlewis/pcc" target="_blank" rel="noopener">peterlewis/pcc</a></li>
+                    <li><a href="https://github.com/peterlewis/pcc/releases" target="_blank" rel="noopener">macOS releases</a></li>
                 </ul>
             </div>
         </section>
