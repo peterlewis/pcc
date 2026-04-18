@@ -4,6 +4,8 @@
 <dict>
     <key>CFBundleIdentifier</key>
     <string>is.peterlew.pcc</string>
+    <key>CFBundleExecutable</key>
+    <string>PCC</string>
     <key>CFBundleName</key>
     <string>Precision Clock Companion</string>
     <key>CFBundleDisplayName</key>
