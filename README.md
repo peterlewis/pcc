@@ -146,13 +146,6 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 <tr>
 <td>
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/signal-analysis-dark.png">
-  <img src="docs/screenshots/signal-analysis-light.png" width="280">
-</picture>
-<br><sub>Signal Analysis</sub>
-</td>
-<td>
-<picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/modes-dark.png">
   <img src="docs/screenshots/modes-light.png" width="280">
 </picture>
@@ -165,9 +158,6 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 </picture>
 <br><sub>Diagnostics</sub>
 </td>
-</tr>
-
-<tr>
 <td>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/serial-monitor-dark.png">
@@ -175,6 +165,9 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 </picture>
 <br><sub>Serial Monitor</sub>
 </td>
+</tr>
+
+<tr>
 <td>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/advanced-dark.png">
@@ -189,6 +182,7 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 </picture>
 <br><sub>Updates</sub>
 </td>
+<td></td>
 </tr>
 
 
