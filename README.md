@@ -224,7 +224,7 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 ## PCC Web (WIP / POC)
 
 > [!WARNING]
-> Proof-of-concept. Work in progress. Things may not work. Use the Mac app for anything you rely on.
+> Proof-of-concept. Work in progress. Things may not work. Use the Mac app for the best experience.
 
 Browser build of PCC for Chromium-based browsers (needs Web Serial). **[Open PCC Web](https://peterlewis.github.io/pcc/web/)** · details in [web/README.md](web/README.md) · Swift ↔ JS mirror conventions in [MAC_PARITY.md](MAC_PARITY.md).
 
