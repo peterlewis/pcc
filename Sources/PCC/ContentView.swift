@@ -97,19 +97,20 @@ struct ContentView: View {
                 window.animator().setFrame(frame, display: true)
             }
         }
-        // Background satellite trail recording — runs regardless of active pane
-        .onChange(of: trailStore.isLogging) { _, logging in
+        // Background satellite trail recording — runs regardless of active pane.
+        // `initial: true` fires on launch so the default-on recording registers
+        // its consumer without needing the user to visit the Sky panel.
+        .onChange(of: trailStore.isLogging, initial: true) { _, logging in
             if logging {
                 serialManager.requestSatelliteTracking()
                 serialManager.requestNMEA(consumer: "Trail Logger")
             } else {
                 serialManager.releaseSatelliteTracking()
                 serialManager.releaseNMEA(consumer: "Trail Logger")
-                trailStore.save()
             }
         }
         .onChange(of: serialManager.satellites) { _, sats in
-            trailStore.record(sats)
+            trailStore.update(satellites: sats)
         }
     }
 

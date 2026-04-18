@@ -3,15 +3,18 @@ import WebKit
 import CoreLocation
 
 /// 3D globe visualization of satellite positions using globe.gl.
-/// Shows satellites as floating dots at their sub-satellite points,
-/// with recorded trails, sun/moon, user location, and space background.
+/// Shows live satellites as floating dots at their sub-satellite points, plus
+/// recorded passes as WebGL polylines (pathsData), sun/moon, user location, and
+/// a space background.
 struct SkyGlobeView: View {
     let satellites: [SatelliteInfo]
     let sunPosition: CelestialPosition?
     let moonPosition: CelestialPosition?
     var userLatitude: Double?
     var userLongitude: Double?
-    var heatmapGrid: TrailGrid?
+    var passes: [SatPass] = []
+    var activePRNs: Set<String> = []
+    var now: Date = Date()
 
     @State private var showSatellites = true
     @State private var showTrails = true
@@ -24,7 +27,9 @@ struct SkyGlobeView: View {
             moonPosition: moonPosition,
             userLatitude: userLatitude,
             userLongitude: userLongitude,
-            heatmapGrid: showTrails ? heatmapGrid : nil,
+            passes: showTrails ? passes : [],
+            activePRNs: activePRNs,
+            now: now,
             showLabels: showLabels
         )
         .overlay(alignment: .topTrailing) {
@@ -61,7 +66,9 @@ private struct GlobeWebView: NSViewRepresentable {
     let moonPosition: CelestialPosition?
     let userLatitude: Double?
     let userLongitude: Double?
-    let heatmapGrid: TrailGrid?
+    let passes: [SatPass]
+    let activePRNs: Set<String>
+    let now: Date
     let showLabels: Bool
 
     func makeNSView(context: Context) -> WKWebView {
@@ -110,51 +117,44 @@ private struct GlobeWebView: NSViewRepresentable {
     // MARK: - Data → JS
 
     private func buildUpdateJS() -> String {
-        // Satellites as HTML elements (colored dots floating above the globe)
         var satData: [[String: Any]] = []
-        for sat in satellites {
-            let tracked = (sat.snr ?? 0) > 0
-            guard tracked else { continue }
+        for sat in satellites where (sat.snr ?? 0) > 0 {
             guard let coord = sat.subSatellitePoint(
                 observerLat: userLatitude ?? 0,
                 observerLon: userLongitude ?? 0
             ) else { continue }
+            let isLive = activePRNs.contains(sat.id)
             satData.append([
                 "lat": coord.latitude,
                 "lng": coord.longitude,
                 "alt": 0.02 + Double(sat.elevation) / 90.0 * 0.08,
                 "color": colorHex(for: sat.constellation),
-                "size": 8,
+                "size": isLive ? 6 : 4,
                 "name": sat.id,
                 "label": showLabels ? sat.id : "",
-                "type": "satellite"
+                "type": isLive ? "live" : "satellite"
             ])
         }
 
-        // Trail points from recorded data (capped at 300, absolute density for consistent dots)
-        let maxTrailPoints = 600
-        var trailData: [[String: Any]] = []
-        if let grid = heatmapGrid, let lat = userLatitude, let lon = userLongitude {
-            let sorted = grid.cells
-                .filter { !$0.value.isEmpty }
-                .sorted { $0.value.count > $1.value.count }
-
-            for entry in sorted.prefix(maxTrailPoints) {
-                let az = entry.key / TrailGrid.elBins
-                let el = entry.key % TrailGrid.elBins
-                guard let coord = SatelliteInfo(
-                    prn: 0, constellation: .gps,
-                    elevation: el, azimuth: az, snr: Int(entry.value.avgSNR)
-                ).subSatellitePoint(observerLat: lat, observerLon: lon) else { continue }
-                let density = min(Double(entry.value.count) / 80.0, 1.0)
-                let alpha = 0.5
-                trailData.append([
-                    "lat": coord.latitude,
-                    "lng": coord.longitude,
-                    "alt": 0.005,
-                    "color": "rgba(60,180,255,\(String(format: "%.2f", alpha)))",
-                    "size": 3 + density * 5,
-                    "name": "", "label": "", "type": "trail"
+        // Trail paths per pass, rendered as WebGL polylines via globe.gl pathsData.
+        // Oldest first so fresh passes layer on top.
+        var pathData: [[String: Any]] = []
+        if let lat = userLatitude, let lon = userLongitude {
+            let ordered = passes.sorted { $0.endTime < $1.endTime }
+            for pass in ordered {
+                let isLive = activePRNs.contains(pass.prn)
+                let tier = PassAgeTier.tier(endAge: now.timeIntervalSince(pass.endTime),
+                                             isLive: isLive)
+                let coords = pass.groundTrack(observerLat: lat, observerLon: lon,
+                                               maxPoints: tier.maxPoints)
+                guard coords.count >= 2 else { continue }
+                let points = coords.map { coord -> [Double] in
+                    [coord.latitude, coord.longitude, 0.008]
+                }
+                pathData.append([
+                    "coords": points,
+                    "color": rgbaColor(for: pass.constellation, alpha: tier.opacity),
+                    "stroke": Double(tier.strokeWidth)
                 ])
             }
         }
@@ -194,12 +194,15 @@ private struct GlobeWebView: NSViewRepresentable {
 
         var js = ""
 
-        let allElements = satData + trailData + celestialData
+        let allElements = satData + celestialData
         if let json = jsonString(allElements) {
             js += "if(window.updateElements)updateElements(\(json));"
         }
         if let ringJson = jsonString(rings) {
             js += "if(window.updateRings)updateRings(\(ringJson));"
+        }
+        if let pathJson = jsonString(pathData) {
+            js += "if(window.updatePaths)updatePaths(\(pathJson));"
         }
         if let lat = userLatitude, let lon = userLongitude {
             js += "if(window.focusOn)focusOn(\(lat),\(lon));"
@@ -239,6 +242,17 @@ private struct GlobeWebView: NSViewRepresentable {
         }
     }
 
+    private func rgbaColor(for constellation: SatConstellation, alpha: Double) -> String {
+        let (r, g, b): (Int, Int, Int)
+        switch constellation {
+        case .gps:     (r, g, b) = (0, 122, 255)
+        case .glonass: (r, g, b) = (255, 59, 48)
+        case .galileo: (r, g, b) = (255, 149, 0)
+        case .beidou:  (r, g, b) = (90, 200, 250)
+        }
+        return String(format: "rgba(%d,%d,%d,%.3f)", r, g, b, max(0, min(1, alpha)))
+    }
+
     // MARK: - HTML
 
     static let globeHTML = """
@@ -263,8 +277,13 @@ private struct GlobeWebView: NSViewRepresentable {
         .sat-dot.satellite {
             box-shadow: 0 0 6px currentColor;
         }
-        .sat-dot.trail {
-            box-shadow: 0 0 3px currentColor;
+        .sat-dot.live {
+            box-shadow: 0 0 12px currentColor, 0 0 4px currentColor;
+            animation: sat-pulse 1.4s ease-in-out infinite;
+        }
+        @keyframes sat-pulse {
+            0%, 100% { transform: scale(1); }
+            50%      { transform: scale(1.22); }
         }
         .sat-dot.celestial {
             box-shadow: 0 0 8px currentColor, 0 0 3px currentColor;
@@ -290,7 +309,7 @@ private struct GlobeWebView: NSViewRepresentable {
             .atmosphereAltitude(0.15)
             .showAtmosphere(true)
 
-            // Satellites + celestial + trails as HTML elements
+            // Satellites + celestial bodies as HTML elements
             .htmlElementsData([])
             .htmlLat('lat')
             .htmlLng('lng')
@@ -330,6 +349,14 @@ private struct GlobeWebView: NSViewRepresentable {
             .ringRepeatPeriod(1200)
             .ringAltitude(0.002)
 
+            // Per-pass trail polylines, WebGL-rendered
+            .pathsData([])
+            .pathPoints('coords')
+            .pathColor(d => d.color)
+            .pathStroke(d => d.stroke || 1.2)
+            .pathPointAlt(p => p[2])
+            .pathTransitionDuration(0)
+
             (document.getElementById('globe'));
 
         window.updateElements = function(data) {
@@ -338,6 +365,10 @@ private struct GlobeWebView: NSViewRepresentable {
 
         window.updateRings = function(data) {
             myGlobe.ringsData(data);
+        };
+
+        window.updatePaths = function(data) {
+            myGlobe.pathsData(data);
         };
 
         window.addEventListener('resize', () => {

@@ -3,7 +3,7 @@ import MapKit
 import CoreLocation
 
 /// Satellite ground-track map for the Sky View.
-/// Shows sub-satellite points, sun/moon projections, trail data, and user GPS position.
+/// Shows sub-satellite points, sun/moon projections, per-pass polylines, and the user's GPS position.
 struct SkyMapView: View {
     let satellites: [SatelliteInfo]
     let sunPosition: CelestialPosition?
@@ -12,7 +12,9 @@ struct SkyMapView: View {
     let userLongitude: Double?
     var showLabels: Bool = true
     var showTrails: Bool = false
-    var heatmapGrid: TrailGrid?
+    var passes: [SatPass] = []
+    var activePRNs: Set<String> = []
+    var now: Date = Date()
     var toggles: AnyView?
 
     @State private var cameraPosition: MapCameraPosition = .automatic
@@ -43,43 +45,6 @@ struct SkyMapView: View {
         }
     }
 
-    private struct TrailAnnotation: Identifiable {
-        let id: Int
-        let coordinate: CLLocationCoordinate2D
-        let density: Double
-        let avgSNR: Double
-    }
-
-    private static let maxTrailPoints = 600
-
-    private var trailAnnotations: [TrailAnnotation] {
-        guard showTrails,
-              let grid = heatmapGrid,
-              let lat = userLatitude,
-              let lon = userLongitude else { return [] }
-
-        // Keep top N by observation count, use absolute density for consistent dot visibility
-        let sorted = grid.cells
-            .filter { !$0.value.isEmpty }
-            .sorted { $0.value.count > $1.value.count }
-
-        return sorted.prefix(Self.maxTrailPoints).compactMap { entry in
-            let az = entry.key / TrailGrid.elBins
-            let el = entry.key % TrailGrid.elBins
-            guard let coord = SatelliteInfo(
-                prn: 0, constellation: .gps,
-                elevation: el, azimuth: az, snr: Int(entry.value.avgSNR)
-            ).subSatellitePoint(observerLat: lat, observerLon: lon) else { return nil }
-            let density = min(Double(entry.value.count) / 80.0, 1.0)
-            return TrailAnnotation(
-                id: entry.key,
-                coordinate: coord,
-                density: density,
-                avgSNR: entry.value.avgSNR
-            )
-        }
-    }
-
     private func celestialCoordinate(_ pos: CelestialPosition) -> CLLocationCoordinate2D? {
         guard let gps = gpsCoordinate, pos.altitude > 0 else { return nil }
         let angularDist = (90.0 - pos.altitude) / 90.0 * 25.0
@@ -98,15 +63,21 @@ struct SkyMapView: View {
 
     var body: some View {
         Map(position: $cameraPosition) {
-            // Trail points
-            ForEach(trailAnnotations) { trail in
-                Annotation("", coordinate: trail.coordinate, anchor: .center) {
-                    Circle()
-                        .fill(Color.blue.opacity(0.4))
-                        .frame(
-                            width: 3 + trail.density * 4,
-                            height: 3 + trail.density * 4
-                        )
+            // Pass polylines, oldest first so fresh passes layer on top.
+            if showTrails, let lat = userLatitude, let lon = userLongitude {
+                let ordered = passes.sorted { $0.endTime < $1.endTime }
+                ForEach(ordered) { pass in
+                    let isLive = activePRNs.contains(pass.prn)
+                    let tier = PassAgeTier.tier(endAge: now.timeIntervalSince(pass.endTime),
+                                                 isLive: isLive)
+                    let coords = pass.groundTrack(observerLat: lat, observerLon: lon,
+                                                   maxPoints: tier.maxPoints)
+                    if coords.count >= 2 {
+                        MapPolyline(coordinates: coords)
+                            .stroke(pass.constellation.color.opacity(tier.opacity),
+                                    style: StrokeStyle(lineWidth: tier.strokeWidth,
+                                                       lineCap: .round, lineJoin: .round))
+                    }
                 }
             }
 
@@ -120,20 +91,21 @@ struct SkyMapView: View {
                         Circle()
                             .fill(.blue)
                             .frame(width: 10, height: 10)
-                            .overlay(
-                                Circle()
-                                    .stroke(.white, lineWidth: 2)
-                            )
+                            .overlay(Circle().stroke(.white, lineWidth: 2))
                     }
                 }
             }
 
-            // Sub-satellite points
+            // Sub-satellite points (live)
             ForEach(satelliteAnnotations) { sat in
                 Annotation(showLabels ? sat.label : "", coordinate: sat.coordinate) {
                     Circle()
-                        .fill(sat.constellation.color.opacity(sat.snr != nil ? 0.8 : 0.3))
-                        .frame(width: sat.snr != nil ? 8 : 5, height: sat.snr != nil ? 8 : 5)
+                        .fill(sat.constellation.color.opacity(sat.snr != nil ? 0.85 : 0.3))
+                        .frame(width: sat.snr != nil ? 9 : 5, height: sat.snr != nil ? 9 : 5)
+                        .overlay(
+                            Circle()
+                                .stroke(.white.opacity(sat.snr != nil ? 0.6 : 0), lineWidth: 1)
+                        )
                 }
             }
 
@@ -143,10 +115,7 @@ struct SkyMapView: View {
                     Circle()
                         .fill(.yellow)
                         .frame(width: 12, height: 12)
-                        .overlay(
-                            Circle()
-                                .stroke(.orange, lineWidth: 1.5)
-                        )
+                        .overlay(Circle().stroke(.orange, lineWidth: 1.5))
                 }
             }
 
@@ -156,10 +125,7 @@ struct SkyMapView: View {
                     Circle()
                         .fill(.gray)
                         .frame(width: 10, height: 10)
-                        .overlay(
-                            Circle()
-                                .stroke(.white.opacity(0.5), lineWidth: 1)
-                        )
+                        .overlay(Circle().stroke(.white.opacity(0.5), lineWidth: 1))
                 }
             }
         }
@@ -172,7 +138,6 @@ struct SkyMapView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            // Legend
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(constellationsPresent, id: \.self) { c in
                     HStack(spacing: 4) {

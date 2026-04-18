@@ -3,7 +3,7 @@ import AppKit
 
 // MARK: - Model
 
-enum SatConstellation: String, CaseIterable, Hashable {
+enum SatConstellation: String, CaseIterable, Hashable, Codable {
     case gps = "GPS"
     case glonass = "GLONASS"
     case galileo = "Galileo"
@@ -47,120 +47,12 @@ struct SatelliteInfo: Identifiable, Equatable {
     let snr: Int?
 }
 
-// MARK: - Trail Renderer
+// MARK: - SNR colour helpers
 
-/// Accumulates satellite positions into a bitmap over time.
-/// Each tracked satellite leaves a dot colored by signal strength,
-/// building up an antenna performance heatmap over hours.
-/// Also tracks a horizon mask showing the minimum elevation seen per azimuth sector.
-class SkyTrail: ObservableObject {
-    @Published var trailImage: CGImage?
-    @Published var horizonMask: [Double?] = Array(repeating: nil, count: 72)
-    var startTime: Date?
-    let renderScale: CGFloat = 2
-
-    private var ctx: CGContext?
-    private var plotSize: CGSize = .zero
-    private var lastSampleTime: Date = .distantPast
-    private let sampleInterval: TimeInterval = 10
-    private let sectorCount = 72  // 5 degrees per sector
-
-    var maxRadius: CGFloat { min(plotSize.width, plotSize.height) / 2 - 24 }
-    var center: CGPoint { CGPoint(x: plotSize.width / 2, y: plotSize.height / 2) }
-
-    func configure(size: CGSize) {
-        guard size.width >= 10, size.height >= 10 else { return }
-        guard size != plotSize || ctx == nil else { return }
-        plotSize = size
-        let w = Int(size.width * renderScale)
-        let h = Int(size.height * renderScale)
-        guard w > 0, h > 0, w < 8192, h < 8192 else { return }
-        guard let newCtx = CGContext(
-            data: nil, width: w, height: h,
-            bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return }
-        // Flip so origin is top-left, matching SwiftUI Canvas
-        newCtx.translateBy(x: 0, y: CGFloat(h))
-        newCtx.scaleBy(x: renderScale, y: -renderScale)
-        ctx = newCtx
-        trailImage = nil
-    }
-
-    func sample(_ satellites: [SatelliteInfo]) {
-        guard let ctx else { return }
-        let now = Date()
-        guard now.timeIntervalSince(lastSampleTime) >= sampleInterval else { return }
-        lastSampleTime = now
-        if startTime == nil { startTime = now }
-
-        for sat in satellites {
-            guard let snr = sat.snr, snr > 0 else { continue }
-            let pos = polarPoint(elevation: sat.elevation, azimuth: sat.azimuth)
-            let (r, g, b) = Self.snrRGB(snr)
-            let alpha = 0.4 + min(Double(snr) / 50.0, 1.0) * 0.4
-            ctx.setFillColor(red: r, green: g, blue: b, alpha: CGFloat(alpha))
-            ctx.fillEllipse(in: CGRect(x: pos.x - 2, y: pos.y - 2, width: 4, height: 4))
-
-            // Update horizon mask — track minimum elevation with signal per sector
-            guard sat.elevation > 0 else { continue }
-            let sectorIndex = Int(Double(sat.azimuth) / (360.0 / Double(sectorCount))) % sectorCount
-            let currentMin = horizonMask[sectorIndex] ?? 90
-            if Double(sat.elevation) < currentMin {
-                horizonMask[sectorIndex] = Double(sat.elevation)
-            }
-        }
-
-        trailImage = ctx.makeImage()
-    }
-
-    func clear() {
-        ctx = nil
-        trailImage = nil
-        startTime = nil
-        lastSampleTime = .distantPast
-        horizonMask = Array(repeating: nil, count: sectorCount)
-        let size = plotSize
-        plotSize = .zero
-        configure(size: size)
-    }
-
-    /// Rebuild the bitmap from a persistent trail grid.
-    /// Plots each occupied grid cell as a dot with SNR-based colour and density-based alpha.
-    func renderFromGrid(_ grid: TrailGrid) {
-        guard let ctx else { return }
-        for (key, cell) in grid.cells {
-            guard !cell.isEmpty else { continue }
-            let az = key / TrailGrid.elBins
-            let el = key % TrailGrid.elBins
-            let pos = polarPoint(elevation: el, azimuth: az)
-            let snr = Int(cell.avgSNR)
-            let (r, g, b) = Self.snrRGB(snr)
-            let density = min(Double(cell.count) / 50.0, 1.0)
-            let alpha = 0.35 + density * 0.45
-            ctx.setFillColor(red: r, green: g, blue: b, alpha: CGFloat(alpha))
-            let dotSize = 3.0 + density * 3.0
-            ctx.fillEllipse(in: CGRect(
-                x: pos.x - dotSize / 2, y: pos.y - dotSize / 2,
-                width: dotSize, height: dotSize
-            ))
-        }
-        if startTime == nil { startTime = grid.startTime }
-        horizonMask = grid.horizonMask
-        trailImage = ctx.makeImage()
-    }
-
-    private func polarPoint(elevation: Int, azimuth: Int) -> CGPoint {
-        let r = Double(90 - elevation) / 90.0 * Double(maxRadius)
-        let rad = Double(azimuth) * .pi / 180.0
-        return CGPoint(
-            x: center.x + CGFloat(r * sin(rad)),
-            y: center.y - CGFloat(r * cos(rad))
-        )
-    }
-
-    /// SNR to RGB: red (weak) -> yellow -> green -> cyan (strong)
+/// SNR-to-colour helpers used by the signal bars and (indirectly) by legends.
+/// The bitmap heatmap was replaced by per-pass arc rendering; see SkyPlotCanvas.
+enum SkyTrail {
+    /// SNR to RGB: red (weak) -> yellow -> green -> cyan (strong).
     static func snrRGB(_ snr: Int) -> (CGFloat, CGFloat, CGFloat) {
         let t = min(Double(snr) / 50.0, 1.0)
         if t < 0.4 { return (1.0, CGFloat(t / 0.4), 0.0) }
@@ -188,15 +80,20 @@ enum SkyViewMode: String, CaseIterable {
 struct SkyView: View {
     @EnvironmentObject var serialManager: SerialManager
     @EnvironmentObject var trailStore: SkyTrailStore
-    @StateObject private var trail = SkyTrail()
-    @State private var plotSize: CGSize = .zero
     @State private var now = Date()
     @State private var viewMode: SkyViewMode = .polar
     @State private var showSatellites = true
     @State private var showLabels = true
     @State private var showTrails = true
+    @State private var timeWindow: TimeWindow = .h1
 
+    /// Drives the comet-head pulse and age-fade refresh.
     private let celestialTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+    private let liveTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    private var visiblePasses: [SatPass] {
+        trailStore.filtered(by: timeWindow, now: now)
+    }
 
     private var sunPos: CelestialPosition? {
         guard let lat = serialManager.gpsLatitude, let lon = serialManager.gpsLongitude else { return nil }
@@ -235,7 +132,7 @@ struct SkyView: View {
                       ? "Stop recording satellite positions"
                       : "Record satellite positions for heatmaps")
 
-                if !trailStore.grid.cells.isEmpty || trail.trailImage != nil {
+                if !trailStore.allPasses.isEmpty {
                     if let dur = trailStore.durationSummary {
                         Text(dur)
                             .font(.caption)
@@ -249,7 +146,6 @@ struct SkyView: View {
 
                     Button("Clear") {
                         trailStore.clear()
-                        trail.clear()
                     }
                     .font(.caption)
                     .buttonStyle(.borderless)
@@ -260,47 +156,35 @@ struct SkyView: View {
             .padding(.horizontal)
             .padding(.top, 8)
 
-            Picker("View", selection: $viewMode) {
-                ForEach(SkyViewMode.allCases, id: \.self) { mode in
-                    Text(mode.rawValue).tag(mode)
+            HStack(spacing: 8) {
+                Picker("View", selection: $viewMode) {
+                    ForEach(SkyViewMode.allCases, id: \.self) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                TimeWindowMenu(selection: $timeWindow)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
             .padding(.horizontal)
             .padding(.top, 4)
 
             if viewMode == .polar {
-                if serialManager.satellites.isEmpty && trail.trailImage == nil {
+                if serialManager.satellites.isEmpty && trailStore.allPasses.isEmpty {
                     emptyStateView
                 } else {
-                    // Polar plot outside ScrollView to avoid layout crash during resize
-                    GeometryReader { geo in
-                        ZStack {
-                            if showTrails, let cgImage = trail.trailImage {
-                                Image(decorative: cgImage, scale: trail.renderScale)
-                            }
-                            SkyPlotCanvas(
-                                satellites: showSatellites ? serialManager.satellites : [],
-                                sunPosition: sunPos,
-                                moonPosition: moonPos,
-                                moonPhase: Astronomy.moonPhase(date: now),
-                                horizonMask: showTrails ? trail.horizonMask : [],
-                                showLabels: showLabels
-                            )
-                        }
-                        .onAppear {
-                            plotSize = geo.size
-                            trail.configure(size: geo.size)
-                            if !trailStore.grid.cells.isEmpty {
-                                trail.renderFromGrid(trailStore.grid)
-                            }
-                        }
-                        .onChange(of: geo.size) { _, newSize in
-                            plotSize = newSize
-                            trail.configure(size: newSize)
-                        }
-                    }
+                    SkyPlotCanvas(
+                        satellites: showSatellites ? serialManager.satellites : [],
+                        passes: showTrails ? visiblePasses : [],
+                        activePRNs: trailStore.activePRNs,
+                        sunPosition: sunPos,
+                        moonPosition: moonPos,
+                        moonPhase: Astronomy.moonPhase(date: now),
+                        horizonMask: showTrails ? trailStore.horizonMask : [],
+                        now: now,
+                        showLabels: showLabels
+                    )
                     .aspectRatio(1, contentMode: .fit)
                     .padding(.horizontal)
                     .padding(.top, 4)
@@ -314,12 +198,6 @@ struct SkyView: View {
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
                         .padding(8)
                     }
-                    .onChange(of: serialManager.satellites) { _, sats in
-                        if plotSize.width > 0 {
-                            trail.configure(size: plotSize)
-                            trail.sample(sats)
-                        }
-                    }
                 }
             } else if viewMode == .map {
                 SkyMapView(
@@ -330,7 +208,9 @@ struct SkyView: View {
                     userLongitude: serialManager.gpsLongitude,
                     showLabels: showLabels,
                     showTrails: showTrails,
-                    heatmapGrid: trailStore.grid,
+                    passes: visiblePasses,
+                    activePRNs: trailStore.activePRNs,
+                    now: now,
                     toggles: AnyView(
                         HStack(spacing: 2) {
                             polarToggle("scope", isOn: $showSatellites, tip: "Satellites")
@@ -351,7 +231,9 @@ struct SkyView: View {
                     moonPosition: moonPos,
                     userLatitude: serialManager.gpsLatitude,
                     userLongitude: serialManager.gpsLongitude,
-                    heatmapGrid: trailStore.grid
+                    passes: visiblePasses,
+                    activePRNs: trailStore.activePRNs,
+                    now: now
                 )
                 .frame(minHeight: 350)
                 .padding(.horizontal)
@@ -412,6 +294,14 @@ struct SkyView: View {
             .padding(.bottom, 8)
         }
         .onReceive(celestialTimer) { now = $0 }
+        .onReceive(liveTimer) { _ in
+            // Refresh `now` every second while any satellite is being tracked
+            // so the comet-head and time filter stay live without wasting work when idle.
+            if !trailStore.activePRNs.isEmpty { now = Date() }
+        }
+        .onChange(of: serialManager.satellites) { _, sats in
+            trailStore.update(satellites: sats)
+        }
         .onAppear {
             now = Date()
             serialManager.requestSatelliteTracking()
@@ -468,10 +358,13 @@ struct SkyView: View {
 
 private struct SkyPlotCanvas: View {
     let satellites: [SatelliteInfo]
+    let passes: [SatPass]
+    let activePRNs: Set<String>
     let sunPosition: CelestialPosition?
     let moonPosition: CelestialPosition?
     let moonPhase: Double
     let horizonMask: [Double?]
+    let now: Date
     var showLabels: Bool = true
 
     var body: some View {
@@ -482,11 +375,53 @@ private struct SkyPlotCanvas: View {
 
             drawHorizonMask(context: &context, center: center, maxR: maxR)
             drawGrid(context: &context, center: center, maxR: maxR)
+            drawTrails(context: &context, center: center, maxR: maxR)
             drawGlowLayer(context: &context, center: center, maxR: maxR)
             drawSatellites(context: &context, center: center, maxR: maxR)
             drawSun(context: &context, center: center, maxR: maxR)
             drawMoon(context: &context, center: center, maxR: maxR)
         }
+    }
+
+    // MARK: - Trails
+
+    private func drawTrails(context: inout GraphicsContext, center: CGPoint, maxR: CGFloat) {
+        // Draw oldest first so fresh passes layer on top.
+        let ordered = passes.sorted { $0.endTime < $1.endTime }
+        for pass in ordered {
+            let isLive = activePRNs.contains(pass.prn)
+            let age = now.timeIntervalSince(pass.endTime)
+            let tier = PassAgeTier.tier(endAge: age, isLive: isLive)
+            let obs = pass.decimated(maxPoints: tier.maxPoints)
+            guard obs.count >= 2 else { continue }
+
+            var path = Path()
+            for (i, o) in obs.enumerated() {
+                let pt = polarPoint(az: Int(o.az), el: Int(o.el), center: center, maxR: maxR)
+                if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
+            }
+            let baseColor = pass.constellation.color.opacity(tier.opacity)
+            context.stroke(path, with: .color(baseColor),
+                           style: StrokeStyle(lineWidth: tier.strokeWidth, lineCap: .round, lineJoin: .round))
+
+            // Live comet-head: a glowing dot at the current position.
+            if isLive, let last = obs.last {
+                let pt = polarPoint(az: Int(last.az), el: Int(last.el), center: center, maxR: maxR)
+                let glowRect = CGRect(x: pt.x - 5, y: pt.y - 5, width: 10, height: 10)
+                context.drawLayer { ctx in
+                    ctx.addFilter(.blur(radius: 2.5))
+                    ctx.fill(Path(ellipseIn: glowRect),
+                             with: .color(pass.constellation.color.opacity(0.5)))
+                }
+            }
+        }
+    }
+
+    private func polarPoint(az: Int, el: Int, center: CGPoint, maxR: CGFloat) -> CGPoint {
+        let r = Double(90 - el) / 90.0 * Double(maxR)
+        let rad = Double(az) * .pi / 180.0
+        return CGPoint(x: center.x + CGFloat(r * sin(rad)),
+                       y: center.y - CGFloat(r * cos(rad)))
     }
 
     // MARK: - Horizon Mask
@@ -712,6 +647,45 @@ private struct SkyPlotCanvas: View {
         case 0.8..<0.95:  return "Wan Cr"
         default: return "Moon"
         }
+    }
+}
+
+// MARK: - Time Window Menu
+
+/// Compact menu picker for filtering pass trails by recency.
+private struct TimeWindowMenu: View {
+    @Binding var selection: TimeWindow
+
+    var body: some View {
+        Menu {
+            ForEach(TimeWindow.allCases) { w in
+                Button {
+                    selection = w
+                } label: {
+                    if w == selection {
+                        Label(w.rawValue, systemImage: "checkmark")
+                    } else {
+                        Text(w.rawValue)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "clock")
+                    .font(.system(size: 10))
+                Text(selection.rawValue)
+                    .font(.caption)
+                    .monospacedDigit()
+                    .frame(minWidth: 26)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Filter trails by time window (\(selection.description))")
     }
 }
 

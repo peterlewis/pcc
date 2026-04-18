@@ -205,7 +205,10 @@ A native macOS companion app for the [Precision Clock Mk IV](https://mitxela.com
 
 ### GPS & Satellites
 - Three satellite views — Polar plot, world Map, and interactive 3D Globe — with consistent toggles for satellites, labels, and trails
-- Sky trail recording: satellite observations accumulated to an aggregated 1° grid, persists across launches
+- Per-pass trail recording: each satellite's continuous arc is captured as a distinct pass, rendered through five age tiers (live → recent → today → week → archive) with live passes glowing and older ones fading
+- Time-window filter: scrub trails by recency — Live, 5m, 15m, 1h, 6h, 24h, 7d, 30d, or All — consistent across all three views
+- Crash-safe persistence: atomic per-observation writes, 30-day retention; brief signal drop-outs (< 5 min) rejoin the prior pass rather than splitting the trail
+- Horizon mask: sky obstructions inferred from the minimum observed elevation per 5° azimuth sector
 - GPS info: coordinates, Maidenhead grid locator, altitude, HDOP[^1], fix type, satellites used
 - Celestial data: sun rise/set, solar noon, golden hour, civil twilight; moon phase, illumination, altitude, azimuth
 - Signal analysis with diagnostics panel

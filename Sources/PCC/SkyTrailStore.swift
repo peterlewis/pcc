@@ -1,225 +1,321 @@
 import Foundation
 import AppKit
 
-// MARK: - Trail Grid Cell
+// MARK: - Active pass tracking
 
-struct TrailCell: Codable {
-    var count: Int = 0
-    var totalSNR: Int = 0
-    var maxSNR: Int = 0
-
-    var avgSNR: Double { count > 0 ? Double(totalSNR) / Double(count) : 0 }
-    var isEmpty: Bool { count == 0 }
+private struct ActivePass {
+    var pass: SatPass
+    var lastSeen: Date
+    var lastRecorded: Date
 }
 
-// MARK: - Trail Grid
+// MARK: - Summary statistics
 
-/// Aggregated satellite observation grid.
-/// Uses a sparse dictionary keyed by `azimuth * 91 + elevation`
-/// for 1° resolution across the full sky hemisphere.
-/// Storage stays compact (typically < 200 KB) regardless of recording duration.
-struct TrailGrid: Codable {
-    /// Sparse grid: key = azimuth (0–359) × 91 + elevation (0–90).
-    var cells: [Int: TrailCell] = [:]
+/// Aggregate stats derived from all recorded passes.
+struct SkyStats {
+    let totalPasses: Int
+    let passesToday: Int
+    let observations: Int
+    let coveragePercent: Double   // 0–100
+    let peakElevation: Int
+    let longestPassSeconds: Int
 
-    /// Minimum elevation observed per 5° azimuth sector (72 sectors).
-    var horizonMask: [Double?] = Array(repeating: nil, count: 72)
-
-    var startTime: Date?
-    var lastSampleTime: Date?
-    var totalSampleBatches: Int = 0
-
-    static let elBins = 91
-
-    /// Record one tracked satellite observation into the grid.
-    mutating func record(_ sat: SatelliteInfo) {
-        guard let snr = sat.snr, snr > 0, sat.elevation >= 0, sat.elevation <= 90 else { return }
-        let az = max(0, min(359, sat.azimuth))
-        let el = max(0, min(90, sat.elevation))
-        let key = az * Self.elBins + el
-
-        var cell = cells[key] ?? TrailCell()
-        cell.count += 1
-        cell.totalSNR += snr
-        if snr > cell.maxSNR { cell.maxSNR = snr }
-        cells[key] = cell
-
-        // Update horizon mask (5° sectors)
-        let sector = az / 5
-        if sector < 72 {
-            let current = horizonMask[sector] ?? 90
-            if Double(el) < current {
-                horizonMask[sector] = Double(el)
-            }
-        }
-    }
-
-    /// Total individual satellite observations across all cells.
-    var totalObservations: Int {
-        cells.values.reduce(0) { $0 + $1.count }
-    }
-
-    /// Return a coarsened version of the grid for map/globe rendering.
-    /// Groups cells into `step`-degree bins, merging counts and SNR values.
-    /// With step=5 the maximum output is 72×19 = 1,368 cells (vs 32,760 at 1°).
-    func downsampled(step: Int = 5) -> [(key: Int, cell: TrailCell, azimuth: Int, elevation: Int)] {
-        var coarse: [Int: TrailCell] = [:]
-        for (key, cell) in cells where !cell.isEmpty {
-            let az = (key / Self.elBins / step) * step
-            let el = (key % Self.elBins / step) * step
-            let coarseKey = az * 100 + el   // unique key for coarse grid
-            var merged = coarse[coarseKey] ?? TrailCell()
-            merged.count += cell.count
-            merged.totalSNR += cell.totalSNR
-            if cell.maxSNR > merged.maxSNR { merged.maxSNR = cell.maxSNR }
-            coarse[coarseKey] = merged
-        }
-        return coarse.map { key, cell in
-            (key: key, cell: cell, azimuth: key / 100, elevation: key % 100)
-        }
-    }
-
-    /// Convert occupied cells to 3D hemisphere coordinates for Chart3D heatmap rendering.
-    func heatmapPoints3D() -> [HeatmapPoint3D] {
-        cells.compactMap { key, cell in
-            guard !cell.isEmpty else { return nil }
-            let az = key / Self.elBins
-            let el = key % Self.elBins
-            let elevRad = Double(el) * .pi / 180
-            let azRad = Double(az) * .pi / 180
-            let r = cos(elevRad)
-            let density = min(Double(cell.count) / 80.0, 1.0)
-            return HeatmapPoint3D(
-                id: key,
-                x: r * sin(azRad),
-                y: sin(elevRad),
-                z: r * cos(azRad),
-                avgSNR: cell.avgSNR,
-                density: density
-            )
-        }
-    }
+    static let empty = SkyStats(totalPasses: 0, passesToday: 0, observations: 0,
+                                 coveragePercent: 0, peakElevation: 0, longestPassSeconds: 0)
 }
 
-// MARK: - 3D Heatmap Point
+// MARK: - Persistent store
 
-struct HeatmapPoint3D: Identifiable {
-    let id: Int
-    let x: Double
-    let y: Double
-    let z: Double
-    let avgSNR: Double
-    let density: Double
-}
-
-// MARK: - Persistent Store
-
-/// Persists satellite observation data to disk as an aggregated grid.
-/// The grid grows in cell count (up to 32 760 at 1° resolution) but not in cell size,
-/// so total storage stays well under 1 MB regardless of how long you record.
+/// Records satellite passes with full per-observation detail.
+/// Each satellite's continuous track is stored as one `SatPass`; observations
+/// are ~6 bytes each. Passes persist to per-day JSON directories with a
+/// configurable retention window.
 class SkyTrailStore: ObservableObject {
-    @Published private(set) var grid = TrailGrid()
-    @Published var isLogging = false
+    // MARK: Tunables
 
-    private let fileURL: URL
-    private var lastSampleTime: Date = .distantPast
-    private let sampleInterval: TimeInterval = 10
-    private var pendingSaves = 0
+    static let maxHistoryDays = 30
+    static let recordingInterval: TimeInterval = 6    // seconds between saved obs per PRN
+    static let passTimeout: TimeInterval = 90         // seconds without signal → close pass
+    static let passRejoinWindow: TimeInterval = 300   // same PRN reappearing within window resumes its prior pass
+    static let minObservations = 3                    // shorter passes are discarded
+    private static let isLoggingKey = "SkyTrailStore.isLogging"
 
-    /// Human-readable summary of stored data.
+    // MARK: Published state
+
+    @Published var isLogging: Bool = false {
+        didSet {
+            UserDefaults.standard.set(isLogging, forKey: Self.isLoggingKey)
+        }
+    }
+    @Published private(set) var passes: [SatPass] = []
+    /// Minimum elevation observed per 5° azimuth sector (72 sectors).
+    /// Incrementally maintained as observations arrive.
+    @Published private(set) var horizonMask: [Double?] = Array(repeating: nil, count: 72)
+
+    // MARK: Private state
+
+    private var active: [String: ActivePass] = [:]
+    private var timeoutTimer: Timer?
+    private let passesDir: URL
+
+    // MARK: Derived collections
+
+    /// Completed + currently-recording passes (newest first).
+    var allPasses: [SatPass] {
+        (passes + active.values.map(\.pass)).sorted { $0.startTime > $1.startTime }
+    }
+
+    /// PRNs of satellites currently being tracked.
+    var activePRNs: Set<String> { Set(active.keys) }
+
+    /// Passes whose endTime falls within the given window.
+    func filtered(by window: TimeWindow, now: Date = Date()) -> [SatPass] {
+        guard let cutoff = window.cutoff(from: now) else { return allPasses }
+        return allPasses.filter { $0.endTime >= cutoff }
+    }
+
+    // MARK: Summary stats
+
+    var stats: SkyStats {
+        let all = allPasses
+        if all.isEmpty { return .empty }
+        let now = Date()
+        let todayCutoff = now.addingTimeInterval(-86_400)
+        let occupiedSectors = horizonMask.lazy.compactMap({ $0 }).count
+        let peak = all.lazy.map(\.peakElevation).max() ?? 0
+        let longest = all.lazy.map(\.duration).max() ?? 0
+        let todayCount = all.lazy.filter { $0.endTime >= todayCutoff }.count
+        let obsCount = all.reduce(0) { $0 + $1.observations.count }
+        return SkyStats(
+            totalPasses: all.count,
+            passesToday: todayCount,
+            observations: obsCount,
+            coveragePercent: Double(occupiedSectors) / 72.0 * 100,
+            peakElevation: peak,
+            longestPassSeconds: Int(longest)
+        )
+    }
+
     var dataSummary: String {
-        let cells = grid.cells.count
-        let obs = grid.totalObservations
-        if obs == 0 { return "No data" }
-        if cells < 1000 {
-            return "\(cells) positions, \(formatCount(obs)) obs"
-        }
-        return "\(formatCount(cells)) positions, \(formatCount(obs)) obs"
+        let s = stats
+        if s.totalPasses == 0 { return "No data" }
+        let passStr = s.totalPasses == 1 ? "pass" : "passes"
+        return "\(s.totalPasses) \(passStr), \(formatCount(s.observations)) obs"
     }
 
-    /// Duration string for the recording period, or nil if no data.
     var durationSummary: String? {
-        guard let start = grid.startTime, let end = grid.lastSampleTime else { return nil }
-        let seconds = Int(end.timeIntervalSince(start))
+        guard let oldest = passes.map(\.startTime).min() else { return nil }
+        let seconds = Int(Date().timeIntervalSince(oldest))
         if seconds < 60 { return "< 1 min" }
-        let hours = seconds / 3600
-        let mins = (seconds % 3600) / 60
-        if hours >= 24 {
-            let days = hours / 24
-            let remH = hours % 24
-            return "\(days)d \(remH)h"
-        }
-        if hours > 0 { return "\(hours)h \(mins)m" }
-        return "\(mins)m"
+        let h = seconds / 3600, m = (seconds % 3600) / 60
+        if h >= 24 { let d = h / 24; return "\(d)d \(h % 24)h" }
+        if h > 0   { return "\(h)h \(m)m" }
+        return "\(m)m"
     }
+
+    // MARK: Lifecycle
 
     init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("Precision Clock Companion", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        fileURL = dir.appendingPathComponent("sky_trail.json")
-        isLogging = false   // Never auto-resume — NMEA output must be explicitly requested
-        load()
-
-        // Save on app quit
+        passesDir = appSupport
+            .appendingPathComponent("Precision Clock Companion", isDirectory: true)
+            .appendingPathComponent("passes", isDirectory: true)
+        try? FileManager.default.createDirectory(at: passesDir, withIntermediateDirectories: true)
+        // Respect the user's previous recording choice (default off for new users).
+        isLogging = UserDefaults.standard.bool(forKey: Self.isLoggingKey)
+        pruneOldPasses()
+        loadPasses()
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
-            self?.save()
+            self?.flushActivePasses()
         }
     }
 
-    /// Record a batch of satellite observations. Only records when logging is enabled.
-    func record(_ satellites: [SatelliteInfo]) {
+    // MARK: Recording
+
+    /// Ingest a batch of satellite observations. Updates/creates active passes
+    /// and incrementally maintains the horizon mask.
+    func update(satellites: [SatelliteInfo]) {
         guard isLogging else { return }
         let now = Date()
-        guard now.timeIntervalSince(lastSampleTime) >= sampleInterval else { return }
-        lastSampleTime = now
 
-        var updated = grid
-        if updated.startTime == nil { updated.startTime = now }
-        updated.lastSampleTime = now
-        updated.totalSampleBatches += 1
-
-        for sat in satellites {
-            updated.record(sat)
+        for sat in satellites where (sat.snr ?? 0) > 0 {
+            updateHorizonMask(az: sat.azimuth, el: sat.elevation)
+            appendObservation(for: sat, at: now)
         }
 
-        grid = updated
-        pendingSaves += 1
+        ensureTimeoutTimerRunning()
+        objectWillChange.send()
+    }
 
-        // Flush to disk every ~30 seconds
-        if pendingSaves >= 3 {
-            save()
+    private func updateHorizonMask(az: Int, el: Int) {
+        guard el > 1 else { return }
+        let sector = ((az % 360) + 360) % 360 / 5
+        guard sector >= 0, sector < 72 else { return }
+        let current = horizonMask[sector] ?? 90
+        if Double(el) < current {
+            horizonMask[sector] = Double(el)
         }
     }
 
-    /// Clear all stored data and remove the file.
+    private func appendObservation(for sat: SatelliteInfo, at now: Date) {
+        let prn = sat.id
+        let az = Int16(clamping: sat.azimuth)
+        let el = Int8(clamping: sat.elevation)
+        let snr = Int8(clamping: sat.snr ?? 0)
+
+        if var entry = active[prn] {
+            entry.lastSeen = now
+            if now.timeIntervalSince(entry.lastRecorded) >= Self.recordingInterval {
+                let tOffset = UInt16(clamping: Int(now.timeIntervalSince(entry.pass.startTime)))
+                entry.pass.observations.append(SatObservation(az: az, el: el, snr: snr, t: tOffset))
+                entry.lastRecorded = now
+                active[prn] = entry
+                savePass(entry.pass)   // durable write on every new observation
+            } else {
+                active[prn] = entry
+            }
+        } else if let idx = recentPassIndex(for: prn, at: now) {
+            // Drop-outs shorter than `passRejoinWindow` are treated as brief
+            // signal interruptions (obstruction, multipath null, unlock) rather
+            // than horizon events — resume the prior pass so the trail stays
+            // continuous across momentary losses.
+            var revived = passes.remove(at: idx)
+            let tOffset = UInt16(clamping: Int(now.timeIntervalSince(revived.startTime)))
+            revived.observations.append(SatObservation(az: az, el: el, snr: snr, t: tOffset))
+            active[prn] = ActivePass(pass: revived, lastSeen: now, lastRecorded: now)
+            savePass(revived)
+        } else {
+            let firstObs = SatObservation(az: az, el: el, snr: snr, t: 0)
+            let pass = SatPass(id: UUID(), prn: prn, constellation: sat.constellation,
+                               startTime: now, observations: [firstObs])
+            active[prn] = ActivePass(pass: pass, lastSeen: now, lastRecorded: now)
+            savePass(pass)            // persist from the first observation
+        }
+    }
+
+    /// Most-recent closed pass for this PRN that ended within `passRejoinWindow`.
+    /// `passes` is sorted newest-first, so `firstIndex` returns the most recent match.
+    private func recentPassIndex(for prn: String, at now: Date) -> Int? {
+        let cutoff = now.addingTimeInterval(-Self.passRejoinWindow)
+        return passes.firstIndex { $0.prn == prn && $0.endTime >= cutoff }
+    }
+
+    private func ensureTimeoutTimerRunning() {
+        guard timeoutTimer == nil else { return }
+        timeoutTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            self?.timeoutStalePasses()
+        }
+    }
+
+    private func timeoutStalePasses() {
+        let now = Date()
+        for prn in active.keys where now.timeIntervalSince(active[prn]!.lastSeen) >= Self.passTimeout {
+            closePass(prn)
+        }
+        if active.isEmpty {
+            timeoutTimer?.invalidate()
+            timeoutTimer = nil
+        }
+    }
+
+    private func closePass(_ prn: String) {
+        guard let entry = active.removeValue(forKey: prn) else { return }
+        // Pass was already persisted on each observation append. On close we
+        // either promote the in-memory copy or delete the file for trivially
+        // short passes that don't meet the min-obs threshold.
+        if entry.pass.observations.count >= Self.minObservations {
+            passes.append(entry.pass)
+            passes.sort { $0.startTime > $1.startTime }
+        } else {
+            deletePassFile(entry.pass)
+        }
+    }
+
+    private func flushActivePasses() {
+        Array(active.keys).forEach { closePass($0) }
+    }
+
+    // MARK: External control
+
     func clear() {
-        grid = TrailGrid()
-        pendingSaves = 0
-        try? FileManager.default.removeItem(at: fileURL)
+        flushActivePasses()
+        active.removeAll()
+        passes.removeAll()
+        horizonMask = Array(repeating: nil, count: 72)
+        timeoutTimer?.invalidate()
+        timeoutTimer = nil
+        try? FileManager.default.removeItem(at: passesDir)
+        try? FileManager.default.createDirectory(at: passesDir, withIntermediateDirectories: true)
     }
 
-    /// Flush pending changes to disk.
-    func save() {
-        guard pendingSaves > 0 else { return }
-        pendingSaves = 0
-        guard let data = try? JSONEncoder().encode(grid) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+    // MARK: Persistence
+
+    private func passFileURL(for pass: SatPass) -> URL {
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withFullDate, .withDashSeparatorInDate]
+        let dayKey = fmt.string(from: pass.startTime)
+        let dayDir = passesDir.appendingPathComponent(dayKey)
+        try? FileManager.default.createDirectory(at: dayDir, withIntermediateDirectories: true)
+        return dayDir.appendingPathComponent("\(pass.id).json")
     }
 
-    private func load() {
-        guard let data = try? Data(contentsOf: fileURL),
-              let loaded = try? JSONDecoder().decode(TrailGrid.self, from: data)
-        else { return }
-        grid = loaded
+    private func savePass(_ pass: SatPass) {
+        guard let data = try? JSONEncoder().encode(pass) else { return }
+        try? data.write(to: passFileURL(for: pass), options: .atomic)
     }
+
+    private func deletePassFile(_ pass: SatPass) {
+        try? FileManager.default.removeItem(at: passFileURL(for: pass))
+    }
+
+    private func loadPasses() {
+        let fm = FileManager.default
+        guard let dayDirs = try? fm.contentsOfDirectory(at: passesDir, includingPropertiesForKeys: nil) else { return }
+        var loaded: [SatPass] = []
+        for dayDir in dayDirs {
+            guard let files = try? fm.contentsOfDirectory(at: dayDir, includingPropertiesForKeys: nil) else { continue }
+            for file in files where file.pathExtension == "json" {
+                guard let data = try? Data(contentsOf: file),
+                      let pass = try? JSONDecoder().decode(SatPass.self, from: data) else { continue }
+                loaded.append(pass)
+            }
+        }
+        passes = loaded.sorted { $0.startTime > $1.startTime }
+
+        // Rebuild horizon mask from loaded observations.
+        var mask = [Double?](repeating: nil, count: 72)
+        for pass in passes {
+            for obs in pass.observations where obs.el > 1 {
+                let sector = ((Int(obs.az) % 360) + 360) % 360 / 5
+                guard sector >= 0, sector < 72 else { continue }
+                let current = mask[sector] ?? 90
+                if Double(obs.el) < current { mask[sector] = Double(obs.el) }
+            }
+        }
+        horizonMask = mask
+    }
+
+    private func pruneOldPasses() {
+        let cutoff = Date().addingTimeInterval(-Double(Self.maxHistoryDays) * 86_400)
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withFullDate, .withDashSeparatorInDate]
+        let fm = FileManager.default
+        guard let dayDirs = try? fm.contentsOfDirectory(at: passesDir, includingPropertiesForKeys: nil) else { return }
+        for dayDir in dayDirs {
+            if let date = fmt.date(from: dayDir.lastPathComponent), date < cutoff {
+                try? fm.removeItem(at: dayDir)
+            }
+        }
+    }
+
+    // MARK: Helpers
 
     private func formatCount(_ n: Int) -> String {
         if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
-        if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
+        if n >= 1_000     { return String(format: "%.1fK", Double(n) / 1_000) }
         return "\(n)"
     }
 }
