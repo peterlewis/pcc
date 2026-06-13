@@ -33,6 +33,17 @@ BIN=".build/release/PCC"
 BUNDLE=".build/release/PrecisionClockCompanion_PCC.bundle"
 APP="$OUTPUT/PCC.app"
 
+# Stage the provisioning profile to a tempfile BEFORE wiping the output dir.
+# The default output is the repo root, so `--profile PCC.app/Contents/…`
+# would otherwise have its source deleted by the `rm -rf "$APP"` below before
+# we copy it in. Staging first makes any --profile path safe.
+PROFILE_STAGED=""
+if [[ -n "$PROFILE" ]]; then
+    PROFILE_STAGED="$(mktemp -t pcc-provisionprofile)"
+    cp "$PROFILE" "$PROFILE_STAGED"
+    trap 'rm -f "$PROFILE_STAGED"' EXIT
+fi
+
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Info.plist "$APP/Contents/Info.plist"
@@ -65,8 +76,8 @@ cat > "$APP/Contents/Resources/PrecisionClockCompanion_PCC.bundle/Info.plist" <<
 </plist>
 EOF
 
-if [[ -n "$PROFILE" ]]; then
-    cp "$PROFILE" "$APP/Contents/embedded.provisionprofile"
+if [[ -n "$PROFILE_STAGED" ]]; then
+    cp "$PROFILE_STAGED" "$APP/Contents/embedded.provisionprofile"
 fi
 
 # Sign inside-out: the nested resource bundle first, then the app. The
