@@ -125,10 +125,12 @@ enum Astronomy {
         let epsilon = (23.439 - 0.0000004 * n) * .pi / 180
         let delta = asin(sin(epsilon) * sin(lambdaRad))
 
-        // Equation of time (minutes)
-        let B = (360.0 / 365.0 * (n + 10)) * .pi / 180
-        let eot = 229.18 * (0.000075 + 0.001868 * cos(B) - 0.032077 * sin(B)
-                             - 0.014615 * cos(2 * B) - 0.040849 * sin(2 * B))
+        // Equation of time (minutes), from the canonical `L − α` identity (see
+        // `equationOfTimeMinutes`). Recomputes the few sun intermediates from
+        // the same `n` (noon on the requested day) rather than the duplicated
+        // day-of-year Spencer series this used to inline, so the solar-noon and
+        // sunrise/sunset times stay consistent with the displayed "Eq.T".
+        let eot = equationOfTimeMinutes(n: n)
 
         let latRad = latitude * .pi / 180
 
@@ -174,12 +176,49 @@ enum Astronomy {
         )
     }
 
-    /// Equation of time in minutes (difference between solar time and clock time)
+    /// Equation of time in minutes: apparent solar time minus mean solar time.
+    /// Positive means the true sun is *ahead* of the mean sun (a sundial reads
+    /// later than the clock); it swings to roughly +16 min in early November
+    /// and −14 min in February, passing through ~0 near 1 September.
     static func equationOfTime(date: Date) -> Double {
-        let n = julianDate(from: date)
-        let B = (360.0 / 365.0 * (n + 10)) * .pi / 180
-        return 229.18 * (0.000075 + 0.001868 * cos(B) - 0.032077 * sin(B)
-                          - 0.014615 * cos(2 * B) - 0.040849 * sin(2 * B))
+        equationOfTimeMinutes(n: julianDate(from: date))
+    }
+
+    /// Canonical equation of time from the same solar intermediates the rest of
+    /// this file already computes: the sun's mean longitude `L` and its
+    /// apparent right ascension `α`. By definition the equation of time is the
+    /// hour-angle difference between the mean sun (which advances uniformly at
+    /// `L`) and the true sun (whose hour angle is `α`), i.e.
+    ///
+    ///     EoT = L − α   (degrees)  →  ×4 min/°  →  minutes
+    ///
+    /// The previous implementation fed *days since J2000* into a Spencer series
+    /// that was derived for *day-of-year*; the two agree only by coincidence
+    /// near the epoch and drift apart by up to ~6 minutes across the year (and
+    /// further every subsequent year as `n` grows). Computing it from `L − α`
+    /// is exact to the precision of the underlying sun model and never drifts.
+    ///
+    /// `L − α` is wrapped into (−180°, +180°] before scaling so the ±~4° annual
+    /// swing is never aliased by the 360° ambiguity between the two angles.
+    private static func equationOfTimeMinutes(n: Double) -> Double {
+        let L = (280.460 + 0.9856474 * n).truncatingRemainder(dividingBy: 360)
+        let g = (357.528 + 0.9856003 * n).truncatingRemainder(dividingBy: 360)
+        let gRad = g * .pi / 180
+        let lambda = L + 1.915 * sin(gRad) + 0.020 * sin(2 * gRad)
+        let lambdaRad = lambda * .pi / 180
+        let epsilon = (23.439 - 0.0000004 * n) * .pi / 180
+
+        // Apparent right ascension of the true sun, in degrees.
+        let alpha = atan2(cos(epsilon) * sin(lambdaRad), cos(lambdaRad)) * 180 / .pi
+
+        // Wrap (L − α) into (−180, +180] so the small real difference survives
+        // the modulo wraparound of the two independently-reduced angles.
+        var diff = (L - alpha).truncatingRemainder(dividingBy: 360)
+        if diff > 180 { diff -= 360 }
+        else if diff <= -180 { diff += 360 }
+
+        // 4 minutes of time per degree of hour angle (Earth turns 360° / 1440 min).
+        return 4 * diff
     }
 
     // MARK: - Lunar Position (simplified)
@@ -236,27 +275,61 @@ enum Astronomy {
     /// Approximate moon phase (0 = new, 0.5 = full, 1 = new again)
     static func moonPhase(date: Date) -> Double {
         let n = julianDate(from: date)
-        // Synodic month ≈ 29.53059 days
-        // Known new moon: 2000-01-06 18:14 UTC ≈ n = 6.26
-        let phase = ((n - 6.26) / 29.53059).truncatingRemainder(dividingBy: 1)
+        // Synodic month ≈ 29.53059 days.
+        // `n` here is days since the J2000.0 epoch (2000-01-01 12:00 UTC).
+        // The reference new moon 2000-01-06 18:14 UTC is 5.26 days after that
+        // epoch, so subtract 5.26 — not 6.26. The old 6.26 put the epoch a full
+        // day late and shifted every reported phase back by ~3.4%.
+        let phase = ((n - 5.26) / 29.53059).truncatingRemainder(dividingBy: 1)
         return phase < 0 ? phase + 1 : phase
     }
 
     // MARK: - Maidenhead Grid Locator
 
-    /// Convert lat/lon to 6-character Maidenhead grid locator (e.g. IO81wh)
+    /// Convert lat/lon to 6-character Maidenhead grid locator (e.g. IO81wh).
+    ///
+    /// Robustness: the grid is only defined for latitude in [−90, +90) and
+    /// longitude in [−180, +180). Two failure modes are guarded here:
+    ///
+    ///  - Non-finite input (NaN/±∞ from an upstream divide-by-zero) — `Int(NaN)`
+    ///    is a hard Swift trap, not a recoverable error, so we bail to a
+    ///    sentinel before any conversion.
+    ///  - The exact upper edges (+90 lat, +180 lon) — these fall one grid cell
+    ///    *past* the last valid field letter ('R'), so the old
+    ///    `UnicodeScalar(...)!` chain produced an out-of-band character (or, for
+    ///    the offending field index, could force-unwrap a scalar well outside
+    ///    A–R). We clamp the inputs just inside the top of the grid and clamp
+    ///    every derived index into its legal range, so the result is always a
+    ///    well-formed locator and the force-unwraps can never fail.
     static func maidenhead(latitude: Double, longitude: Double) -> String {
-        let lon = longitude + 180
-        let lat = latitude + 90
+        guard latitude.isFinite, longitude.isFinite else { return "----" }
 
-        let fieldLon = Character(UnicodeScalar(Int(lon / 20) + 65)!)
-        let fieldLat = Character(UnicodeScalar(Int(lat / 10) + 65)!)
+        // Clamp to the grid's domain. The upper bounds are nudged a hair inside
+        // (`nextDown`) because +90/+180 belong to the next, non-existent field.
+        let clampedLat = min(90.0.nextDown, max(-90.0, latitude))
+        let clampedLon = min(180.0.nextDown, max(-180.0, longitude))
 
-        let squareLon = Int(lon.truncatingRemainder(dividingBy: 20) / 2)
-        let squareLat = Int(lat.truncatingRemainder(dividingBy: 10))
+        let lon = clampedLon + 180   // 0 ..< 360
+        let lat = clampedLat + 90    // 0 ..< 180
 
-        let subLon = Character(UnicodeScalar(Int(lon.truncatingRemainder(dividingBy: 2) * 12) + 97)!)
-        let subLat = Character(UnicodeScalar(Int(lat.truncatingRemainder(dividingBy: 1) * 24) + 97)!)
+        // Build each character from a base scalar plus an index that is clamped
+        // into range as defence in depth — after the input clamp these clamps
+        // are no-ops, but they guarantee `UnicodeScalar(_:)` always succeeds.
+        func letter(base: Int, index: Int, span: Int) -> Character {
+            let scalar = base + min(span - 1, max(0, index))
+            // `scalar` is provably in printable-ASCII range, so the unwrap is
+            // safe; the `?? "?"` keeps the no-force-unwrap house rule literal.
+            return Character(UnicodeScalar(scalar) ?? UnicodeScalar(63))   // 63 = '?'
+        }
+
+        let fieldLon = letter(base: 65, index: Int(lon / 20), span: 18)        // A–R
+        let fieldLat = letter(base: 65, index: Int(lat / 10), span: 18)        // A–R
+
+        let squareLon = min(9, max(0, Int(lon.truncatingRemainder(dividingBy: 20) / 2)))
+        let squareLat = min(9, max(0, Int(lat.truncatingRemainder(dividingBy: 10))))
+
+        let subLon = letter(base: 97, index: Int(lon.truncatingRemainder(dividingBy: 2) * 12), span: 24)  // a–x
+        let subLat = letter(base: 97, index: Int(lat.truncatingRemainder(dividingBy: 1) * 24), span: 24)  // a–x
 
         return "\(fieldLon)\(fieldLat)\(squareLon)\(squareLat)\(subLon)\(subLat)"
     }

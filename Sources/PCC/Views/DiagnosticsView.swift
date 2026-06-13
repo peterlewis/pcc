@@ -91,39 +91,34 @@ struct DiagnosticsView: View {
         .onAppear { loadFromConfig() }
     }
 
-    private let diagKeys: [(key: String, label: String)] = [
-        ("MODE_DEBUG_BRIGHTNESS", "debugBrightness"),
-        ("MODE_DEBUG_RTC", "debugRTC"),
-        ("mode_satview", "satview"),
-        ("mode_vbat", "vbat"),
-        ("MODE_FIRMWARE_CRC", "firmwareCRC"),
-        ("MODE_DISPLAYTEST", "displayTest"),
-        ("MODE_TTFF", "ttff"),
-    ]
+    /// Single source of truth pairing each config key with the @State toggle
+    /// that backs it. Load, save, and send all iterate this table — keeping
+    /// three hand-maintained copies of the key list let them drift apart
+    /// (and previously they did exist in triplicate, with this table itself
+    /// declared but unused). A computed property because @State projections
+    /// ($foo) can't be referenced from a stored-property initializer.
+    private var diagKeys: [(key: String, state: Binding<Bool>)] {
+        [
+            ("MODE_DEBUG_BRIGHTNESS", $debugBrightness),
+            ("MODE_DEBUG_RTC", $debugRTC),
+            ("mode_satview", $satview),
+            ("mode_vbat", $vbat),
+            ("MODE_FIRMWARE_CRC", $firmwareCRC),
+            ("MODE_DISPLAYTEST", $displayTest),
+            ("MODE_TTFF", $ttff),
+        ]
+    }
 
     private func loadFromConfig() {
         guard configManager.isLoaded else { return }
-        if let v = configManager.bool(forKey: "MODE_DEBUG_BRIGHTNESS") { debugBrightness = v }
-        if let v = configManager.bool(forKey: "MODE_DEBUG_RTC") { debugRTC = v }
-        if let v = configManager.bool(forKey: "mode_satview") { satview = v }
-        if let v = configManager.bool(forKey: "mode_vbat") { vbat = v }
-        if let v = configManager.bool(forKey: "MODE_FIRMWARE_CRC") { firmwareCRC = v }
-        if let v = configManager.bool(forKey: "MODE_DISPLAYTEST") { displayTest = v }
-        if let v = configManager.bool(forKey: "MODE_TTFF") { ttff = v }
+        for (key, state) in diagKeys {
+            if let v = configManager.bool(forKey: key) { state.wrappedValue = v }
+        }
     }
 
     private func saveDiagnosticsToConfig() {
-        let states: [(String, Bool)] = [
-            ("MODE_DEBUG_BRIGHTNESS", debugBrightness),
-            ("MODE_DEBUG_RTC", debugRTC),
-            ("mode_satview", satview),
-            ("mode_vbat", vbat),
-            ("MODE_FIRMWARE_CRC", firmwareCRC),
-            ("MODE_DISPLAYTEST", displayTest),
-            ("MODE_TTFF", ttff),
-        ]
-        for (key, enabled) in states {
-            configManager.setValue(key, to: enabled ? "enabled" : "disabled")
+        for (key, state) in diagKeys {
+            configManager.setValue(key, to: state.wrappedValue ? "enabled" : "disabled")
         }
         if configManager.save() {
             savedToConfig = true
@@ -132,17 +127,8 @@ struct DiagnosticsView: View {
     }
 
     private func sendAllDiagnostics() {
-        let states: [(String, Bool)] = [
-            ("MODE_DEBUG_BRIGHTNESS", debugBrightness),
-            ("MODE_DEBUG_RTC", debugRTC),
-            ("mode_satview", satview),
-            ("mode_vbat", vbat),
-            ("MODE_FIRMWARE_CRC", firmwareCRC),
-            ("MODE_DISPLAYTEST", displayTest),
-            ("MODE_TTFF", ttff),
-        ]
-        for (key, enabled) in states {
-            serialManager.sendCommand("\(key) = \(enabled ? 1 : 0)")
+        for (key, state) in diagKeys {
+            serialManager.sendCommand("\(key) = \(state.wrappedValue ? 1 : 0)")
         }
     }
 }

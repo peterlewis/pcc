@@ -30,6 +30,15 @@ struct TimeServerView: View {
                     .labelsHidden()
                 }
 
+                // A failed bind (port in use, etc.) leaves the toggle
+                // snapping back to off — without this row that looks like a
+                // mute UI bug rather than a reported error.
+                if let error = ntpServer.lastError {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
                 if ntpServer.isRunning {
                     HStack {
                         Text("Queries served")
@@ -38,6 +47,20 @@ struct TimeServerView: View {
                         Spacer()
                         Text("\(ntpServer.queriesServed)")
                             .font(.system(.caption, design: .monospaced))
+                    }
+
+                    // Surfaced only once it happens: replies answered with
+                    // LI=3/stratum 16 because no fresh GPS fix was available.
+                    if ntpServer.unsyncRepliesServed > 0 {
+                        HStack {
+                            Text("Unsynchronized replies (no GPS)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text("\(ntpServer.unsyncRepliesServed)")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.orange)
+                        }
                     }
                 }
             } header: {
@@ -50,14 +73,17 @@ struct TimeServerView: View {
 
             // Time offset section
             Section("System Clock") {
-                if let gpsTime = serialManager.gpsUTCTime,
-                   let receivedAt = serialManager.gpsUTCTimeReceived {
+                // Read the fix through the single-snapshot API so utc and
+                // receivedAt always come from the same RMC sentence; the
+                // 1 Hz ticker keeps this re-rendering even though the
+                // snapshot itself isn't @Published.
+                if let ref = serialManager.gpsTimeReference {
                     HStack {
                         Text("GPS time (UTC)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text(formatUTC(gpsTime.addingTimeInterval(Date().timeIntervalSince(receivedAt))))
+                        Text(formatUTC(ref.utc.addingTimeInterval(Date().timeIntervalSince(ref.receivedAt))))
                             .font(.system(.caption, design: .monospaced))
                     }
                 }
@@ -81,7 +107,7 @@ struct TimeServerView: View {
                             .font(.system(.body, design: .monospaced))
                             .foregroundStyle(offsetColor(offset))
                     }
-                } else if serialManager.gpsUTCTime == nil {
+                } else if serialManager.gpsTimeReference == nil {
                     HStack {
                         Image(systemName: "exclamationmark.triangle")
                             .foregroundStyle(.orange)
@@ -190,9 +216,17 @@ struct TimeServerView: View {
             DispatchQueue.main.async {
                 if received >= 48 {
                     let stratum = response[1]
-                    let refID = String(bytes: response[12..<16], encoding: .ascii)?
-                        .trimmingCharacters(in: .controlCharacters) ?? "?"
-                    testResult = "OK \u{2014} Stratum \(stratum), ref \(refID)"
+                    let leap = response[0] >> 6
+                    // LI=3 / stratum 16 is the server's deliberate "I have
+                    // no GPS fix" reply — report it as such instead of a
+                    // baffling "Stratum 16, ref " with a zeroed refid.
+                    if leap == 3 || stratum == 0 || stratum >= 16 {
+                        testResult = "OK \u{2014} responding, but no GPS fix (unsynchronized)"
+                    } else {
+                        let refID = String(bytes: response[12..<16], encoding: .ascii)?
+                            .trimmingCharacters(in: .controlCharacters) ?? "?"
+                        testResult = "OK \u{2014} Stratum \(stratum), ref \(refID)"
+                    }
                 } else {
                     testResult = "No response"
                 }
@@ -236,11 +270,20 @@ struct TimeServerView: View {
         }
     }
 
-    private func formatUTC(_ date: Date) -> String {
+    /// Shared formatter: `formatUTC` runs twice per 1 Hz tick (GPS and
+    /// system rows), and DateFormatter construction is one of Foundation's
+    /// more expensive initialisers — cache it instead of rebuilding it on
+    /// every render. Safe as a static: it's only ever touched from the main
+    /// thread (SwiftUI body evaluation).
+    private static let utcFormatter: DateFormatter = {
         let fmt = DateFormatter()
         fmt.dateFormat = "HH:mm:ss.SS"
         fmt.timeZone = TimeZone(identifier: "UTC")
-        return fmt.string(from: date)
+        return fmt
+    }()
+
+    private func formatUTC(_ date: Date) -> String {
+        Self.utcFormatter.string(from: date)
     }
 
     private func formatOffset(_ offset: Double) -> String {

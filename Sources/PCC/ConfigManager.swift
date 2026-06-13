@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Combine
 
 /// Manages reading, parsing, and writing config.txt from the CLOCK USB volume.
@@ -41,13 +42,58 @@ class ConfigManager: ObservableObject {
         var originalText: String
     }
 
-    var clockMounted: Bool {
-        FileManager.default.fileExists(atPath: Self.configPath)
+    /// Published (not computed per-access) so views react when the volume
+    /// comes and goes; kept in sync by the workspace mount notifications.
+    @Published var clockMounted = false
+
+    /// Tokens for the NSWorkspace volume observers, removed in deinit.
+    private var volumeObservers: [NSObjectProtocol] = []
+
+    init() {
+        clockMounted = FileManager.default.fileExists(atPath: Self.configPath)
+
+        // load() runs once at launch, but every panel's Save is gated on
+        // clockMounted, not isLoaded. Re-loading whenever the CLOCK volume
+        // mounts makes that gate self-healing: launch without the clock,
+        // plug it in later, and the panels save against the freshly read
+        // device config instead of being refused (or, before save() grew
+        // its isLoaded guard, rewriting config.txt from one panel's keys).
+        let center = NSWorkspace.shared.notificationCenter
+        volumeObservers.append(center.addObserver(
+            forName: NSWorkspace.didMountNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.volumesDidChange()
+        })
+        volumeObservers.append(center.addObserver(
+            forName: NSWorkspace.didUnmountNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.volumesDidChange()
+        })
+    }
+
+    deinit {
+        let center = NSWorkspace.shared.notificationCenter
+        volumeObservers.forEach { center.removeObserver($0) }
+    }
+
+    /// Re-sync `clockMounted` after any volume mounts or unmounts. Keying off
+    /// the config path (rather than parsing the volume name out of the
+    /// notification's userInfo) also covers renamed or symlinked volumes.
+    private func volumesDidChange() {
+        let present = FileManager.default.fileExists(atPath: Self.configPath)
+        let appeared = present && !clockMounted
+        clockMounted = present
+        // Re-read on every (re)appearance — the user may have plugged in a
+        // different clock, or edited config.txt on another machine.
+        if appeared { load() }
     }
 
     // MARK: - Read
 
     func load() {
+        // Refresh the cached mount state so a direct call (e.g. at launch)
+        // can't act on a stale value from before a notification arrived.
+        clockMounted = FileManager.default.fileExists(atPath: Self.configPath)
         guard clockMounted else {
             error = "CLOCK volume not mounted"
             isLoaded = false
@@ -175,6 +221,17 @@ class ConfigManager: ObservableObject {
             error = "CLOCK volume not mounted"
             return false
         }
+        // Never write a config that was never successfully read: the panels'
+        // Save buttons gate on clockMounted (a live mount check), so without
+        // this a launch-without-clock → plug in → Save would rebuild
+        // config.txt from that one panel's keys alone, wiping every other
+        // device setting. The mount observer re-load()s when the volume
+        // appears, so a healthy clock passes this guard by the time the user
+        // can click Save.
+        guard isLoaded else {
+            error = "config.txt has not been read from the clock yet — refusing to overwrite it"
+            return false
+        }
         do {
             // Stash current on-disk config locally before overwriting
             let onDisk = try? String(contentsOfFile: Self.configPath, encoding: .utf8)
@@ -186,6 +243,10 @@ class ConfigManager: ObservableObject {
             hasPreviousConfig = true
             isDirty = false
             error = nil
+            // The on-disk file is now whatever we just wrote, so recompute
+            // the corruption flag from it — pasting a good config into the
+            // raw editor recovers from corruption without a re-load().
+            configCorrupted = !isConfigValid(rawText)
             return true
         } catch {
             self.error = error.localizedDescription
@@ -222,6 +283,12 @@ class ConfigManager: ObservableObject {
     func saveRaw(_ text: String) -> Bool {
         rawText = text
         parse(text)
+        // The raw editor supplies the complete file contents the user can
+        // see, so the partial-rewrite hazard save()'s isLoaded guard exists
+        // for doesn't apply — and this must keep working when load() failed
+        // (e.g. corrupted config.txt) because pasting a known-good config
+        // into the editor is the manual recovery path.
+        isLoaded = true
         return save()
     }
 
@@ -231,6 +298,18 @@ class ConfigManager: ObservableObject {
         let fm = FileManager.default
         let dir = Self.backupDir
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        // Skip the stash when nothing changed: load() stashes on every
+        // launch, so without this check ten no-edit launches would rotate
+        // every meaningful pre-edit backup out of the maxBackups window in
+        // favour of identical copies (and two stashes within the same second
+        // would silently overwrite each other — the timestamp below has
+        // one-second resolution).
+        if let newest = localBackups().last,
+           let existing = try? String(contentsOf: newest, encoding: .utf8),
+           existing == text {
+            return
+        }
 
         let timestamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")

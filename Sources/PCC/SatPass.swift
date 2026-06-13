@@ -17,12 +17,22 @@ struct SatObservation: Codable, Hashable {
 
 /// One continuous track of a single satellite from acquisition to loss.
 /// Observations are ordered by time; `startTime + observations.last.t == endTime`.
-struct SatPass: Codable, Identifiable, Hashable {
+struct SatPass: Identifiable, Hashable {
+    /// Schema version written into every persisted pass JSON. Bump this when
+    /// the encoded shape changes incompatibly so a future loader can branch
+    /// on it (or quarantine the file) instead of silently failing to decode
+    /// the same file on every launch forever.
+    static let currentVersion = 1
+
     let id: UUID
     let prn: String
     let constellation: SatConstellation
     let startTime: Date
     var observations: [SatObservation]
+    /// Schema version this pass was decoded from. Files written before the
+    /// field existed have no `version` key and decode as 1 (see the Codable
+    /// extension below).
+    var version: Int = Self.currentVersion
 
     // MARK: Derived properties
 
@@ -50,22 +60,47 @@ struct SatPass: Codable, Identifiable, Hashable {
 
     // MARK: Rendering helpers
 
-    /// Decimate to at most `maxPoints` observations, preserving first and last.
-    /// Returns the original array when already short enough.
-    func decimated(maxPoints: Int) -> [SatObservation] {
-        guard observations.count > maxPoints, maxPoints > 1 else { return observations }
-        let step = Double(observations.count - 1) / Double(maxPoints - 1)
-        var result: [SatObservation] = []
-        result.reserveCapacity(maxPoints)
-        for i in 0..<maxPoints {
-            let idx = min(observations.count - 1, Int(Double(i) * step))
-            result.append(observations[idx])
+    /// Maximum tolerated time gap between consecutive observations before the
+    /// trail is treated as discontinuous: ~3× the nominal recording cadence
+    /// (one observation per `SkyTrailStore.recordingInterval` seconds while a
+    /// satellite is tracked). Anything longer — 90 s signal timeouts bridged
+    /// by the 300 s rejoin window, App Nap stalls — means the satellite
+    /// genuinely moved while we weren't looking. Smoothing across such a gap
+    /// drags the moving average between two unrelated arcs, and drawing a
+    /// chord through it fabricates track that was never observed — the root
+    /// of the "spiral" artefacts on the globe/map (issue #8). Renderers draw
+    /// each contiguous run as its own polyline instead.
+    static let renderGapThreshold: TimeInterval = SkyTrailStore.recordingInterval * 3
+
+    /// Observations split into contiguous runs at recording gaps (see
+    /// `renderGapThreshold`). Each run is smoothed independently — the moving
+    /// average never blends samples from opposite sides of a gap — and is
+    /// rendered as its own polyline segment.
+    private func contiguousRuns() -> [[SatObservation]] {
+        guard let first = observations.first else { return [] }
+        var runs: [[SatObservation]] = []
+        var current: [SatObservation] = [first]
+        for obs in observations.dropFirst() {
+            // `t` offsets are monotonically non-decreasing within a pass.
+            if let prev = current.last,
+               Double(obs.t) - Double(prev.t) > Self.renderGapThreshold {
+                runs.append(current)
+                current = [obs]
+            } else {
+                current.append(obs)
+            }
         }
-        return result
+        runs.append(current)
+        return runs
     }
 
-    /// Sub-satellite ground track given the observer's fix.
-    /// Uses constellation-specific orbital altitude and spherical geometry.
+    /// Sub-satellite ground track given the observer's fix, split into
+    /// contiguous segments at recording gaps. Uses constellation-specific
+    /// orbital altitude and spherical geometry. Each point also carries the
+    /// smoothed elevation — callers that render trails as 3D arcs (the globe
+    /// view) use it to lift the trail off the sphere with the same formula as
+    /// the live satellite dot, so a high-arc pass actually arches over the
+    /// globe instead of skating flat across the surface.
     ///
     /// Smoothing: NMEA reports az/el as integer degrees, which causes 1° quantization
     /// jumps in the raw observations. The underlying orbit is smooth, so we apply a
@@ -74,41 +109,69 @@ struct SatPass: Codable, Identifiable, Hashable {
     /// twice — two moderate-window passes approximate a Gaussian kernel and
     /// suppress residual 1° ripples without flattening real curvature the way a
     /// single wide window would. The window size adapts to sample count so long
-    /// passes get more smoothing than short ones.
+    /// passes get more smoothing than short ones. Smoothing never crosses a
+    /// recording gap because each segment is smoothed on its own.
     /// Setting `smoothingWindow: 1` disables smoothing.
-    func groundTrack(observerLat: Double, observerLon: Double, maxPoints: Int = .max, smoothingWindow: Int = 0) -> [CLLocationCoordinate2D] {
-        groundTrackPoints(observerLat: observerLat, observerLon: observerLon,
-                          maxPoints: maxPoints, smoothingWindow: smoothingWindow)
-            .map(\.coord)
+    ///
+    /// Decimation happens AFTER smoothing so the full-resolution signal
+    /// drives the averages; callers asking for a coarse render (the age-tier
+    /// `maxPoints` budgets) still get evenly-spaced samples that all lie on
+    /// the smoothed curve. The budget is shared across segments in proportion
+    /// to their length. Segments that project to fewer than two points
+    /// (e.g. entirely at 0° elevation) are dropped — they can't draw a line.
+    func groundTrackSegments(observerLat: Double, observerLon: Double,
+                             maxPoints: Int = .max,
+                             smoothingWindow: Int = 0)
+    -> [[(coord: CLLocationCoordinate2D, elevation: Double)]] {
+        smoothedSegments(maxPoints: maxPoints, smoothingWindow: smoothingWindow)
+            .compactMap { segment in
+                let projected = segment.compactMap { (az, el) -> (coord: CLLocationCoordinate2D, elevation: Double)? in
+                    guard let coord = subSatellitePointD(
+                        azDeg: az, elDeg: el,
+                        constellation: constellation,
+                        observerLat: observerLat, observerLon: observerLon
+                    ) else { return nil }
+                    return (coord: coord, elevation: el)
+                }
+                return projected.count >= 2 ? projected : nil
+            }
     }
 
-    /// Like `groundTrack` but also returns the smoothed elevation at each point.
-    /// Callers that render trails as 3D arcs (e.g. the globe view) use the
-    /// elevation to lift the trail off the sphere using the same formula as
-    /// the live satellite dot, so a high-arc pass actually arches over the
-    /// globe instead of skating flat across the surface.
-    func groundTrackPoints(observerLat: Double, observerLon: Double,
-                           maxPoints: Int = .max,
-                           smoothingWindow: Int = 0)
-    -> [(coord: CLLocationCoordinate2D, elevation: Double)] {
-        let base: [(Double, Double)] = observations.map { (Double($0.az), Double($0.el)) }
-        let window = smoothingWindow > 0
-            ? smoothingWindow
-            : Self.adaptiveSmoothingWindow(for: base.count)
-        let pass1 = Self.smoothedAzEl(base, window: window)
-        // Second pass for a near-Gaussian result.
-        let pass2 = Self.smoothedAzEl(pass1, window: window)
-        // Decimate after smoothing so the full-resolution signal drives the
-        // averages; callers asking for a coarse render still get evenly-spaced
-        // samples from the smoothed curve.
-        let samples = Self.decimate(pass2, toAtMost: maxPoints)
-        return samples.compactMap { (az, el) in
-            guard let coord = subSatellitePointD(
-                azDeg: az, elDeg: el,
-                constellation: constellation,
-                observerLat: observerLat, observerLon: observerLon
-            ) else { return nil }
-            return (coord: coord, elevation: el)
+    /// Az/el track for the polar plot: split and smoothed exactly like
+    /// `groundTrackSegments`, minus the ground projection. Sharing the
+    /// smooth-then-decimate pipeline lets the polar canvas apply tier-based
+    /// decimation (`PassAgeTier.maxPoints`) without reintroducing the
+    /// "beads on a string" artefact that decimating the raw integer-quantised
+    /// observations produced.
+    func polarTrackSegments(maxPoints: Int = .max, smoothingWindow: Int = 0)
+    -> [[(az: Double, el: Double)]] {
+        smoothedSegments(maxPoints: maxPoints, smoothingWindow: smoothingWindow)
+            .filter { $0.count >= 2 }
+            .map { segment in segment.map { (az: $0.0, el: $0.1) } }
+    }
+
+    /// Shared trail pipeline: split at recording gaps → smooth each run
+    /// (twice, for a near-Gaussian kernel) → decimate each run to its
+    /// proportional share of the per-pass `maxPoints` budget.
+    private func smoothedSegments(maxPoints: Int, smoothingWindow: Int)
+    -> [[(Double, Double)]] {
+        let total = observations.count
+        guard total > 0 else { return [] }
+        return contiguousRuns().map { run in
+            let base: [(Double, Double)] = run.map { (Double($0.az), Double($0.el)) }
+            let window = smoothingWindow > 0
+                ? smoothingWindow
+                : Self.adaptiveSmoothingWindow(for: base.count)
+            let pass1 = Self.smoothedAzEl(base, window: window)
+            // Second pass for a near-Gaussian result.
+            let pass2 = Self.smoothedAzEl(pass1, window: window)
+            // Proportional slice of the per-pass point budget, floored at 2
+            // so even a short segment can still draw. (Budget math stays in
+            // Double to avoid Int overflow when maxPoints == .max.)
+            let budget = maxPoints == .max
+                ? Int.max
+                : max(2, Int(Double(maxPoints) * Double(run.count) / Double(total)))
+            return Self.decimate(pass2, toAtMost: budget)
         }
     }
 
@@ -150,8 +213,18 @@ struct SatPass: Codable, Identifiable, Hashable {
         var result: [(Double, Double)] = []
         result.reserveCapacity(n)
         for i in 0..<n {
-            let lo = max(0, i - half)
-            let hi = min(n - 1, i + half)
+            // Symmetric window that shrinks toward the ends: `k` is how far
+            // we can extend on BOTH sides without running off either edge.
+            // The previous asymmetric truncation (`lo = max(0, i - half)`)
+            // kept a full half-window on one side at the pass tips, dragging
+            // both endpoints toward the interior of the arc — a 0°-elevation
+            // tip rose ~3.5° and shifted ~2° in azimuth, ≈380 km of
+            // ground-track distortion at GNSS altitude (issue #8). Symmetric
+            // shrinkage leaves the endpoints exact and biases nothing; the
+            // cost is less smoothing right at the tips, which is fine.
+            let k = min(half, i, n - 1 - i)
+            let lo = i - k
+            let hi = i + k
             let denom = Double(hi - lo + 1)
             var azSum = 0.0, elSum = 0.0
             for j in lo...hi {
@@ -177,6 +250,40 @@ struct SatPass: Codable, Identifiable, Hashable {
             result.append(pts[idx])
         }
         return result
+    }
+}
+
+// MARK: - Persistence (Codable)
+
+/// Codable lives in an extension so the struct keeps its synthesized
+/// memberwise initializer (an `init(from:)` in the main declaration would
+/// suppress it). The hand-written implementation exists for one reason:
+/// `version` must decode as 1 when the key is absent, because every pass
+/// file written before the field existed has no `version` and must keep
+/// loading unchanged.
+extension SatPass: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case id, prn, constellation, startTime, observations, version
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        prn = try c.decode(String.self, forKey: .prn)
+        constellation = try c.decode(SatConstellation.self, forKey: .constellation)
+        startTime = try c.decode(Date.self, forKey: .startTime)
+        observations = try c.decode([SatObservation].self, forKey: .observations)
+        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(prn, forKey: .prn)
+        try c.encode(constellation, forKey: .constellation)
+        try c.encode(startTime, forKey: .startTime)
+        try c.encode(observations, forKey: .observations)
+        try c.encode(version, forKey: .version)
     }
 }
 

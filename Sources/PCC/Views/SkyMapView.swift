@@ -17,8 +17,8 @@ struct SkyMapView: View {
     /// When `false`, disables the Swift-side az/el moving-average filter so
     /// the rendered polyline passes through every raw NMEA observation
     /// (visible 1° integer-quantization staircase). Maps through to
-    /// `SatPass.groundTrack(smoothingWindow:)` — `1` disables smoothing,
-    /// `0` enables the adaptive window.
+    /// `SatPass.groundTrackSegments(smoothingWindow:)` — `1` disables
+    /// smoothing, `0` enables the adaptive window.
     var smoothTrails: Bool = true
     var toggles: AnyView?
 
@@ -58,7 +58,13 @@ struct SkyMapView: View {
         let userLatRad = gps.latitude * .pi / 180
         let userLonRad = gps.longitude * .pi / 180
 
-        let lat = asin(sin(userLatRad) * cos(distRad) + cos(userLatRad) * sin(distRad) * cos(azRad))
+        // Clamp the asin argument into [-1, 1]. Floating-point error in the
+        // spherical-triangle terms can nudge it a hair past ±1, and `asin` of
+        // an out-of-domain value is NaN — which propagates to a NaN MapKit
+        // coordinate and silently drops (or mis-places) the body. Mirrors the
+        // clamp in `subSatellitePointD`.
+        let sinLat = sin(userLatRad) * cos(distRad) + cos(userLatRad) * sin(distRad) * cos(azRad)
+        let lat = asin(max(-1, min(1, sinLat)))
         let lon = userLonRad + atan2(
             sin(azRad) * sin(distRad) * cos(userLatRad),
             cos(distRad) - sin(userLatRad) * sin(lat)
@@ -74,20 +80,29 @@ struct SkyMapView: View {
                 ForEach(ordered) { pass in
                     let isLive = activePRNs.contains(pass.prn)
                     let age = now.timeIntervalSince(pass.endTime)
-                    // No decimation — every rendered vertex is a real observation.
-                    // `smoothingWindow: 1` disables smoothing so the raw
-                    // NMEA 1° quantisation shows through; `0` asks for the
-                    // adaptive moving-average.
-                    let coords = pass.groundTrack(observerLat: lat, observerLon: lon,
-                                                   maxPoints: .max,
-                                                   smoothingWindow: smoothTrails ? 0 : 1)
-                    if coords.count >= 2 {
-                        let alpha = PassAgeTier.opacity(endAge: age, isLive: isLive)
-                        let stroke = PassAgeTier.strokeWidth(endAge: age, isLive: isLive)
-                        MapPolyline(coordinates: coords)
-                            .stroke(pass.constellation.color.opacity(alpha),
-                                    style: StrokeStyle(lineWidth: stroke,
-                                                       lineCap: .round, lineJoin: .round))
+                    // Age tier drives the per-pass point budget (older passes
+                    // decimated harder — issue #7) and the fade/taper styling.
+                    let tier = PassAgeTier.tier(endAge: age, isLive: isLive)
+                    let alpha = PassAgeTier.opacity(endAge: age, isLive: isLive)
+                    let stroke = PassAgeTier.strokeWidth(endAge: age, isLive: isLive)
+                    // Segmented ground track: split at recording gaps, each run
+                    // smoothed and decimated independently. Each segment is its
+                    // OWN MapPolyline — joining them across a gap drew a chord
+                    // through unobserved ground (the "spiral", issue #8).
+                    // `smoothingWindow: 1` disables smoothing so the raw NMEA 1°
+                    // quantisation shows through; `0` asks for the adaptive
+                    // moving-average.
+                    let segments = pass.groundTrackSegments(observerLat: lat, observerLon: lon,
+                                                            maxPoints: tier.maxPoints,
+                                                            smoothingWindow: smoothTrails ? 0 : 1)
+                    ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                        let coords = segment.map(\.coord)
+                        if coords.count >= 2 {
+                            MapPolyline(coordinates: coords)
+                                .stroke(pass.constellation.color.opacity(alpha),
+                                        style: StrokeStyle(lineWidth: stroke,
+                                                           lineCap: .round, lineJoin: .round))
+                        }
                     }
                 }
             }

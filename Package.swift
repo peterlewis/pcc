@@ -17,8 +17,14 @@ let package = Package(
             // textures so the 3D globe view works offline with a deterministic
             // version pin. See `THIRD_PARTY_LICENSES.md` at the repo root for
             // the MIT attributions.
+            //
+            // `timezone-names.json` is a vendored snapshot of the clock4
+            // repo's firmware timezone list so the timezone picker still
+            // works offline; TimezoneListLoader overlays the live GitHub
+            // copy whenever the network allows.
             resources: [
-                .copy("Resources/Globe")
+                .copy("Resources/Globe"),
+                .copy("Resources/timezone-names.json")
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5)

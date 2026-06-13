@@ -23,9 +23,11 @@ enum WeatherDisplayFormat: String, CaseIterable, Identifiable {
 }
 
 class AppSettings: ObservableObject {
-    @Published var lastSerialPort: String {
-        didSet { UserDefaults.standard.set(lastSerialPort, forKey: "lastSerialPort") }
-    }
+    // The "lastSerialPort" default is owned by SerialManager (written on
+    // connect, read by autoConnect and ConnectView straight from
+    // UserDefaults). A @Published mirror used to live here too, but nothing
+    // read it and SerialManager's direct writes never updated it — a stale
+    // second copy is worse than none.
     // Location used to come from UserDefaults here, but the app now sources
     // latitude/longitude exclusively from the clock's GPS fix (see
     // `SerialManager.gpsLatitude` / `gpsLongitude`). That avoids pulling in
@@ -103,7 +105,6 @@ class AppSettings: ObservableObject {
 
     init() {
         let d = UserDefaults.standard
-        self.lastSerialPort = d.string(forKey: "lastSerialPort") ?? ""
         self.temperatureUnit = TemperatureUnit(rawValue: d.string(forKey: "temperatureUnit") ?? "C") ?? .celsius
         self.windSpeedUnit = WindSpeedUnit(rawValue: d.string(forKey: "windSpeedUnit") ?? "mph") ?? .mph
         self.weatherPollInterval = {

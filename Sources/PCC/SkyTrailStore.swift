@@ -37,13 +37,34 @@ class SkyTrailStore: ObservableObject {
     static let passTimeout: TimeInterval = 90         // seconds without signal → close pass
     static let passRejoinWindow: TimeInterval = 300   // same PRN reappearing within window resumes its prior pass
     static let minObservations = 3                    // shorter passes are discarded
+    /// Hard cap on a single pass's duration. The persisted time offset is a
+    /// UInt16 (clamps at 65 535 s ≈ 18.2 h); a continuously-visible GEO/IGSO
+    /// satellite would hit that clamp and then pile every further observation
+    /// onto the same frozen timestamp — `endTime` stops being truthful and
+    /// the pass (and its file) never ends. Passes are force-closed and
+    /// chained at 12 h instead: comfortably under the clamp, far longer than
+    /// any real LEO/MEO pass.
+    static let maxPassDuration: TimeInterval = 43_200 // 12 h
+    /// Cadence of the batched dirty-pass flush (see `flushDirtyPasses`).
+    static let flushInterval: TimeInterval = 15
     private static let isLoggingKey = "SkyTrailStore.isLogging"
+    /// Subdirectory of `passesDir` where undecodable pass files are
+    /// quarantined (see `scanPasses`). Lives inside `passesDir` so `clear()`
+    /// wipes it too; the load scan and prune sweep both skip it.
+    private static let quarantineDirName = "unreadable"
 
     // MARK: Published state
 
     @Published var isLogging: Bool = false {
         didSet {
             UserDefaults.standard.set(isLogging, forKey: Self.isLoggingKey)
+            // Stopping recording is a flush point for the batched pass
+            // writes — the user's expectation when hitting Stop is that what
+            // they recorded is on disk. (Init-time assignment doesn't run
+            // didSet, so this never fires before the store is fully set up.)
+            if !isLogging {
+                flushDirtyPasses()
+            }
         }
     }
     /// How long completed passes are kept on disk. Changing this re-runs the
@@ -77,6 +98,12 @@ class SkyTrailStore: ObservableObject {
 
     private var active: [String: ActivePass] = [:]
     private var timeoutTimer: Timer?
+    /// Passes awaiting a batched disk write, keyed by id so repeated appends
+    /// to the same pass within a flush interval coalesce into one write
+    /// (see `markDirty`). The value is the latest full snapshot to persist.
+    private var dirtyPasses: [UUID: SatPass] = [:]
+    private var flushTimer: Timer?
+    private var pruneTimer: Timer?
     private let passesDir: URL
     /// Serial background queue used for per-observation pass writes. Keeps
     /// the main thread responsive during bursty NMEA updates (one write per
@@ -180,17 +207,38 @@ class SkyTrailStore: ObservableObject {
         try? FileManager.default.createDirectory(at: passesDir, withIntermediateDirectories: true)
         // Respect the user's previous recording choice (default off for new users).
         isLogging = UserDefaults.standard.bool(forKey: Self.isLoggingKey)
-        // Direct init-time assignment skips didSet — we run the prune once
-        // explicitly below after everything's in place.
+        // Direct init-time assignment skips didSet (we prune explicitly below).
         retention = RetentionWindow.current
-        pruneOldPasses()
-        loadPasses()
+        // Load history off the main thread, then prune. Order matters: the
+        // previous code pruned BEFORE loading, so the in-memory drop saw an
+        // empty array and sub-day-expired passes survived until the next
+        // sweep. Pruning in the load completion fixes that, and the periodic
+        // timer below keeps a long-lived menu-bar process from accumulating
+        // past its retention window between launches.
+        loadPasses { [weak self] in
+            self?.pruneOldPasses()
+        }
+        ensurePruneTimerRunning()
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
             self?.flushActivePasses()
+            // Synchronously drain pending writes so a clean quit loses none
+            // of the batched (not-yet-flushed) observations.
+            self?.flushDirtyPasses(wait: true)
         }
+    }
+
+    private func ensurePruneTimerRunning() {
+        guard pruneTimer == nil else { return }
+        let timer = Timer(timeInterval: 3_600, repeats: true) { [weak self] _ in
+            self?.pruneOldPasses()
+        }
+        // `.common` so the sweep still fires while a menu/drag holds the main
+        // run loop in event-tracking mode.
+        RunLoop.main.add(timer, forMode: .common)
+        pruneTimer = timer
     }
 
     // MARK: Recording
@@ -242,13 +290,26 @@ class SkyTrailStore: ObservableObject {
         let snr = Int8(clamping: sat.snr ?? 0)
 
         if var entry = active[prn] {
+            // Force-close and chain a fresh pass before this one reaches the
+            // UInt16 `t` clamp. Without it a continuously-visible GEO/IGSO
+            // satellite (or one kept alive indefinitely by the rejoin window)
+            // would, past ~18 h, pile every further observation onto a frozen
+            // maximum `t`: `endTime` would stop advancing, the time-window
+            // filter would drop a still-live pass, and its file would grow
+            // without bound. 12 h is far longer than any real LEO/MEO pass.
+            if now.timeIntervalSince(entry.pass.startTime) >= Self.maxPassDuration {
+                closePass(prn)
+                startNewPass(prn: prn, az: az, el: el, snr: snr,
+                             constellation: sat.constellation, at: now)
+                return
+            }
             entry.lastSeen = now
             if now.timeIntervalSince(entry.lastRecorded) >= Self.recordingInterval {
                 let tOffset = UInt16(clamping: Int(now.timeIntervalSince(entry.pass.startTime)))
                 entry.pass.observations.append(SatObservation(az: az, el: el, snr: snr, t: tOffset))
                 entry.lastRecorded = now
                 active[prn] = entry
-                savePass(entry.pass)   // durable write on every new observation
+                markDirty(entry.pass)   // batched durable write
             } else {
                 active[prn] = entry
             }
@@ -261,14 +322,21 @@ class SkyTrailStore: ObservableObject {
             let tOffset = UInt16(clamping: Int(now.timeIntervalSince(revived.startTime)))
             revived.observations.append(SatObservation(az: az, el: el, snr: snr, t: tOffset))
             active[prn] = ActivePass(pass: revived, lastSeen: now, lastRecorded: now)
-            savePass(revived)
+            markDirty(revived)
         } else {
-            let firstObs = SatObservation(az: az, el: el, snr: snr, t: 0)
-            let pass = SatPass(id: UUID(), prn: prn, constellation: sat.constellation,
-                               startTime: now, observations: [firstObs])
-            active[prn] = ActivePass(pass: pass, lastSeen: now, lastRecorded: now)
-            savePass(pass)            // persist from the first observation
+            startNewPass(prn: prn, az: az, el: el, snr: snr,
+                         constellation: sat.constellation, at: now)
         }
+    }
+
+    /// Begins a fresh active pass for `prn` with its first observation at t=0.
+    private func startNewPass(prn: String, az: Int16, el: Int8, snr: Int8,
+                              constellation: SatConstellation, at now: Date) {
+        let firstObs = SatObservation(az: az, el: el, snr: snr, t: 0)
+        let pass = SatPass(id: UUID(), prn: prn, constellation: constellation,
+                           startTime: now, observations: [firstObs])
+        active[prn] = ActivePass(pass: pass, lastSeen: now, lastRecorded: now)
+        markDirty(pass)            // persist from the first observation
     }
 
     /// Most-recent closed pass for this PRN that ended within `passRejoinWindow`.
@@ -327,12 +395,19 @@ class SkyTrailStore: ObservableObject {
         flushActivePasses()
         active.removeAll()
         passes.removeAll()
+        dirtyPasses.removeAll()          // discard pending writes — we're wiping the store
         horizonMask = Array(repeating: nil, count: 72)
         sectorHeatmap = Array(repeating: Array(repeating: nil, count: 18), count: 72)
         timeoutTimer?.invalidate()
         timeoutTimer = nil
-        try? FileManager.default.removeItem(at: passesDir)
-        try? FileManager.default.createDirectory(at: passesDir, withIntermediateDirectories: true)
+        flushTimer?.invalidate()
+        flushTimer = nil
+        // Serialize the wipe behind any in-flight writes so a pending async
+        // write/delete can't recreate a file under the freshly cleared dir.
+        saveQueue.sync {
+            try? FileManager.default.removeItem(at: passesDir)
+            try? FileManager.default.createDirectory(at: passesDir, withIntermediateDirectories: true)
+        }
     }
 
     // MARK: Persistence
@@ -346,46 +421,131 @@ class SkyTrailStore: ObservableObject {
         return dayDir.appendingPathComponent("\(pass.id).json")
     }
 
-    private func savePass(_ pass: SatPass) {
-        // Encode on the caller's thread (cheap — <1kB typical) but send the
-        // atomic disk write to a serial background queue so we don't stall
-        // the main run loop during bursty NMEA frames. The pass URL is
-        // resolved synchronously so it reflects the pass's current startTime
-        // rather than re-querying on the queue.
-        let url = passFileURL(for: pass)
-        guard let data = try? JSONEncoder().encode(pass) else { return }
-        saveQueue.async {
-            try? data.write(to: url, options: .atomic)
+    /// Marks a pass for persistence on the next batched flush rather than
+    /// writing it immediately. The previous design re-encoded and atomically
+    /// re-wrote a pass's ENTIRE file on every 6-second observation — for a
+    /// 12 h pass that's thousands of whole-file rewrites of steadily growing
+    /// data (hundreds-fold write amplification, and on a busy sky several
+    /// writes per second across all tracked PRNs). Batching coalesces all of
+    /// a pass's appends within `flushInterval` into a single write while
+    /// keeping whole-file atomicity — so crash safety is unchanged (`.atomic`
+    /// swaps the file in one rename; a torn write can never corrupt a pass).
+    /// The only exposure is that up to `flushInterval` of the most recent
+    /// observations are lost on a hard kill; a clean quit flushes synchronously
+    /// (see the terminate observer) and Stop flushes too.
+    private func markDirty(_ pass: SatPass) {
+        dirtyPasses[pass.id] = pass
+        ensureFlushTimerRunning()
+    }
+
+    private func ensureFlushTimerRunning() {
+        guard flushTimer == nil else { return }
+        let timer = Timer(timeInterval: Self.flushInterval, repeats: true) { [weak self] _ in
+            self?.flushDirtyPasses()
         }
+        // `.common` so flushing isn't starved while a menu/drag holds the main
+        // run loop in event-tracking mode.
+        RunLoop.main.add(timer, forMode: .common)
+        flushTimer = timer
+    }
+
+    /// Writes every pending pass to disk. Runs on the flush timer, when
+    /// recording stops, and at termination. Encoding is cheap and stays on
+    /// the caller's (main) thread; the atomic writes go to the serial save
+    /// queue. When `wait` is true (termination) we block on the queue so the
+    /// data is durable before the process exits.
+    private func flushDirtyPasses(wait: Bool = false) {
+        let batch = dirtyPasses
+        dirtyPasses.removeAll()
+        for (_, pass) in batch {
+            let url = passFileURL(for: pass)
+            guard let data = try? JSONEncoder().encode(pass) else { continue }
+            saveQueue.async {
+                try? data.write(to: url, options: .atomic)
+            }
+        }
+        // Stop the timer once nothing is pending and no pass is open — it
+        // restarts on the next `markDirty`.
+        if dirtyPasses.isEmpty && active.isEmpty {
+            flushTimer?.invalidate()
+            flushTimer = nil
+        }
+        if wait { saveQueue.sync {} }   // barrier: let queued writes complete
     }
 
     private func deletePassFile(_ pass: SatPass) {
+        // Drop any pending write first so a just-deleted (e.g. sub-minimum)
+        // pass can't be resurrected by the next flush.
+        dirtyPasses.removeValue(forKey: pass.id)
         let url = passFileURL(for: pass)
         saveQueue.async {
             try? FileManager.default.removeItem(at: url)
         }
     }
 
-    private func loadPasses() {
+    /// Loads persisted passes off the main thread (a deep history with long
+    /// retention can be thousands of files — decoding them synchronously in
+    /// `init` would stall first paint), then hops back to main to publish the
+    /// result and run `completion`. Any passes that arrived live during the
+    /// load window are merged in by id rather than clobbered.
+    private func loadPasses(completion: @escaping () -> Void) {
+        saveQueue.async { [weak self] in
+            guard let self else { return }
+            let (loaded, mask, heat) = self.scanPassesFromDisk()
+            DispatchQueue.main.async {
+                // Merge by id: a pass closed live during the load window is
+                // already in `self.passes`; keep whichever copy has more
+                // observations so we never drop freshly recorded data.
+                var byID: [UUID: SatPass] = [:]
+                for p in loaded { byID[p.id] = p }
+                for p in self.passes {
+                    if let existing = byID[p.id] {
+                        if p.observations.count > existing.observations.count { byID[p.id] = p }
+                    } else {
+                        byID[p.id] = p
+                    }
+                }
+                self.passes = byID.values.sorted { $0.startTime > $1.startTime }
+                self.mergeDerived(mask: mask, heat: heat)
+                completion()
+            }
+        }
+    }
+
+    /// Disk scan + decode, safe to run off-main: touches only FileManager,
+    /// the immutable `passesDir`, and static constants. Quarantines files it
+    /// can't decode (so a schema change doesn't make them re-scanned forever
+    /// or silently deleted), deletes sub-minimum stubs (a hard kill before a
+    /// pass closes can leave 1–2-observation files that would otherwise reload
+    /// as permanent ghost passes), and rebuilds the derived mask/heatmap.
+    private func scanPassesFromDisk() -> (passes: [SatPass], mask: [Double?], heat: [[Int?]]) {
         let fm = FileManager.default
-        guard let dayDirs = try? fm.contentsOfDirectory(at: passesDir, includingPropertiesForKeys: nil) else { return }
+        let emptyMask = [Double?](repeating: nil, count: 72)
+        let emptyHeat: [[Int?]] = Array(repeating: Array(repeating: nil, count: 18), count: 72)
+        guard let dayDirs = try? fm.contentsOfDirectory(at: passesDir, includingPropertiesForKeys: nil) else {
+            return ([], emptyMask, emptyHeat)
+        }
+        let quarantineDir = passesDir.appendingPathComponent(Self.quarantineDirName, isDirectory: true)
         var loaded: [SatPass] = []
-        for dayDir in dayDirs {
+        for dayDir in dayDirs where dayDir.lastPathComponent != Self.quarantineDirName {
             guard let files = try? fm.contentsOfDirectory(at: dayDir, includingPropertiesForKeys: nil) else { continue }
             for file in files where file.pathExtension == "json" {
-                guard let data = try? Data(contentsOf: file),
-                      let pass = try? JSONDecoder().decode(SatPass.self, from: data) else { continue }
+                guard let data = try? Data(contentsOf: file) else { continue }
+                guard let pass = try? JSONDecoder().decode(SatPass.self, from: data) else {
+                    quarantineFile(file, into: quarantineDir, fm: fm)
+                    continue
+                }
+                guard pass.observations.count >= Self.minObservations else {
+                    try? fm.removeItem(at: file)
+                    continue
+                }
                 loaded.append(pass)
             }
         }
-        passes = loaded.sorted { $0.startTime > $1.startTime }
 
-        // Rebuild horizon mask and sector heatmap from loaded observations in
-        // a single pass. Both are derived state — cheap to reconstruct — so
-        // there's no need to persist them separately alongside the raw passes.
-        var mask = [Double?](repeating: nil, count: 72)
-        var heat: [[Int?]] = Array(repeating: Array(repeating: nil, count: 18), count: 72)
-        for pass in passes {
+        var mask = emptyMask
+        var heat = emptyHeat
+        for pass in loaded {
             for obs in pass.observations {
                 let az = Int(obs.az)
                 let el = Int(obs.el)
@@ -403,8 +563,37 @@ class SkyTrailStore: ObservableObject {
                 }
             }
         }
-        horizonMask = mask
-        sectorHeatmap = heat
+        return (loaded.sorted { $0.startTime > $1.startTime }, mask, heat)
+    }
+
+    /// Moves an undecodable pass file into the quarantine subdirectory so it
+    /// stops being re-read on every launch, without destroying it (it may be
+    /// useful for diagnosing a schema regression).
+    private func quarantineFile(_ file: URL, into dir: URL, fm: FileManager) {
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dest = dir.appendingPathComponent(file.lastPathComponent)
+        try? fm.removeItem(at: dest)
+        try? fm.moveItem(at: file, to: dest)
+    }
+
+    /// Folds disk-derived mask/heatmap into whatever live observations have
+    /// already populated (min elevation per sector, max SNR per cell) so the
+    /// async load doesn't wipe data recorded during the load window.
+    private func mergeDerived(mask: [Double?], heat: [[Int?]]) {
+        for i in 0..<min(horizonMask.count, mask.count) {
+            if let m = mask[i] {
+                let current = horizonMask[i] ?? 90
+                if m < current { horizonMask[i] = m }
+            }
+        }
+        for a in 0..<min(sectorHeatmap.count, heat.count) {
+            for e in 0..<min(sectorHeatmap[a].count, heat[a].count) {
+                if let h = heat[a][e] {
+                    let current = sectorHeatmap[a][e] ?? 0
+                    if h > current { sectorHeatmap[a][e] = h }
+                }
+            }
+        }
     }
 
     /// Passes that a given retention window would delete right now. Used by
@@ -435,10 +624,18 @@ class SkyTrailStore: ObservableObject {
         // day entirely. Anything partial-day gets handled above.
         let fmt = ISO8601DateFormatter()
         fmt.formatOptions = [.withFullDate, .withDashSeparatorInDate]
-        let cutoffDay = Calendar(identifier: .gregorian).startOfDay(for: cutoff)
+        // Day directories are named with a UTC date (`passFileURL`'s ISO8601
+        // formatter defaults to UTC), so the cutoff day must be UTC too. The
+        // previous local-calendar `startOfDay` could, in a timezone offset
+        // from UTC, delete a whole day directory whose passes were still
+        // inside the retention window (over-deletion by up to the tz offset
+        // plus a pass duration).
+        var utcCal = Calendar(identifier: .gregorian)
+        utcCal.timeZone = TimeZone(secondsFromGMT: 0) ?? utcCal.timeZone
+        let cutoffDay = utcCal.startOfDay(for: cutoff)
         let fm = FileManager.default
         guard let dayDirs = try? fm.contentsOfDirectory(at: passesDir, includingPropertiesForKeys: nil) else { return }
-        for dayDir in dayDirs {
+        for dayDir in dayDirs where dayDir.lastPathComponent != Self.quarantineDirName {
             if let date = fmt.date(from: dayDir.lastPathComponent), date < cutoffDay {
                 try? fm.removeItem(at: dayDir)
             } else if let contents = try? fm.contentsOfDirectory(at: dayDir, includingPropertiesForKeys: nil),

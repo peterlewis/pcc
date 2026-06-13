@@ -49,8 +49,12 @@ struct ContentView: View {
     @EnvironmentObject var serialManager: SerialManager
     @EnvironmentObject var ntpServer: NTPServer
     @EnvironmentObject var trailStore: SkyTrailStore
-    @EnvironmentObject var settings: AppSettings
-    @State private var selectedItem: SidebarItem? = .dataSources
+    // Initial pane is Data Sources unless overridden via the argument domain
+    // (`open PCC.app --args -pccInitialPane Satellites`) — lets scripted runs
+    // and release verification land on a specific pane without UI driving.
+    @State private var selectedItem: SidebarItem? =
+        UserDefaults.standard.string(forKey: "pccInitialPane")
+            .flatMap(SidebarItem.init(rawValue:)) ?? .dataSources
 
     var body: some View {
         NavigationSplitView {
@@ -98,28 +102,10 @@ struct ContentView: View {
                 window.animator().setFrame(frame, display: true)
             }
         }
-        // Background satellite trail recording — runs regardless of active pane.
-        // `initial: true` fires on launch so the default-on recording registers
-        // its consumer without needing the user to visit the Sky panel.
-        .onChange(of: trailStore.isLogging, initial: true) { _, logging in
-            if logging {
-                serialManager.requestSatelliteTracking()
-                serialManager.requestNMEA(consumer: "Trail Logger")
-            } else {
-                serialManager.releaseSatelliteTracking()
-                serialManager.releaseNMEA(consumer: "Trail Logger")
-            }
-        }
-        .onChange(of: serialManager.satellites) { _, sats in
-            trailStore.update(satellites: sats)
-        }
-        // Keep the SerialManager's scroll timer in lockstep with the user's
-        // preference. `initial: true` pushes the stored value on launch so
-        // the very first scroll after relaunch honours it without waiting
-        // for the picker to be touched.
-        .onChange(of: settings.scrollInterval, initial: true) { _, v in
-            serialManager.setScrollInterval(v)
-        }
+        // Trail recording, satellite ingestion, and scroll-interval wiring
+        // are app-global concerns owned by AppDelegate — deliberately not
+        // wired here, so they survive window close/recreation (issue #9)
+        // and never double-register when a second window opens.
     }
 
     private var sidebarList: some View {

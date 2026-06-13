@@ -414,21 +414,28 @@ struct DataSourceEditView: View {
                 process.standardError = pipe
                 do {
                     try process.run()
-                    process.waitUntilExit()
-                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                    let output = String(data: data, encoding: .utf8) ?? ""
-                    let firstLine = output.trimmingCharacters(in: .whitespacesAndNewlines)
-                        .components(separatedBy: .newlines).first
-                    DispatchQueue.main.async {
-                        if let firstLine, !firstLine.isEmpty { testResult = firstLine }
-                        else { testError = "No output from command" }
-                        isTesting = false
-                    }
                 } catch {
+                    // A failed launch must still clear the spinner and tell
+                    // the user why, or the sheet wedges on "testing" forever.
                     DispatchQueue.main.async {
                         testError = error.localizedDescription
                         isTesting = false
                     }
+                    return
+                }
+                // Drain output BEFORE waiting for exit (same fix as
+                // DataSourceManager.fetchBash): waiting first deadlocks once
+                // the child fills the ~64 KiB pipe buffer, because the child
+                // blocks on write while we block on the child.
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                let output = String(data: data, encoding: .utf8) ?? ""
+                let firstLine = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .components(separatedBy: .newlines).first
+                DispatchQueue.main.async {
+                    if let firstLine, !firstLine.isEmpty { testResult = firstLine }
+                    else { testError = "No output from command" }
+                    isTesting = false
                 }
             }
         }

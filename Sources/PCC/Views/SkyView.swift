@@ -527,27 +527,41 @@ private struct SkyPlotCanvas: View {
         for pass in ordered {
             let isLive = activePRNs.contains(pass.prn)
             let age = now.timeIntervalSince(pass.endTime)
-            // Every real observation — previously decimated to `tier.maxPoints`
-            // which produced visible beading on the stroke at today/week tiers.
-            // The Canvas renderer handles even long passes fine at 6-second
-            // observation cadence.
-            let obs = pass.observations
-            guard obs.count >= 2 else { continue }
 
-            var path = Path()
-            for (i, o) in obs.enumerated() {
-                let pt = polarPoint(az: Int(o.az), el: Int(o.el), center: center, maxR: maxR)
-                if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
-            }
+            // Age tier drives BOTH the per-pass point budget (older passes are
+            // decimated harder to bound frame time as history accumulates —
+            // issue #7) and the fade/taper styling, so opacity, stroke, and
+            // the sample count all come from one source of truth.
+            let tier = PassAgeTier.tier(endAge: age, isLive: isLive)
+
+            // Segmented az/el track: the smoothing pipeline splits the pass at
+            // recording gaps and decimates each run to its share of the tier
+            // budget. Each segment must be stroked as its OWN polyline — joining
+            // them with `addLine` across a gap is exactly what fabricated the
+            // "spiral" chord through unobserved sky (issue #8).
+            let segments = pass.polarTrackSegments(maxPoints: tier.maxPoints)
+            guard !segments.isEmpty else { continue }
+
             let alpha = PassAgeTier.opacity(endAge: age, isLive: isLive)
             let stroke = PassAgeTier.strokeWidth(endAge: age, isLive: isLive)
             let baseColor = pass.constellation.color.opacity(alpha)
-            context.stroke(path, with: .color(baseColor),
-                           style: StrokeStyle(lineWidth: stroke, lineCap: .round, lineJoin: .round))
 
-            // Live comet-head: a glowing dot at the current position.
-            if isLive, let last = obs.last {
-                let pt = polarPoint(az: Int(last.az), el: Int(last.el), center: center, maxR: maxR)
+            for segment in segments {
+                guard segment.count >= 2 else { continue }
+                var path = Path()
+                for (i, p) in segment.enumerated() {
+                    let pt = polarPoint(azDeg: p.az, elDeg: p.el, center: center, maxR: maxR)
+                    if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
+                }
+                context.stroke(path, with: .color(baseColor),
+                               style: StrokeStyle(lineWidth: stroke, lineCap: .round, lineJoin: .round))
+            }
+
+            // Live comet-head: a glowing dot at the most recent observed
+            // position — the last point of the last segment (segments are
+            // time-ordered, so this is the freshest fix on the smoothed curve).
+            if isLive, let last = segments.last?.last {
+                let pt = polarPoint(azDeg: last.az, elDeg: last.el, center: center, maxR: maxR)
                 let glowRect = CGRect(x: pt.x - 5, y: pt.y - 5, width: 10, height: 10)
                 context.drawLayer { ctx in
                     ctx.addFilter(.blur(radius: 2.5))
@@ -558,9 +572,14 @@ private struct SkyPlotCanvas: View {
         }
     }
 
-    private func polarPoint(az: Int, el: Int, center: CGPoint, maxR: CGFloat) -> CGPoint {
-        let r = Double(90 - el) / 90.0 * Double(maxR)
-        let rad = Double(az) * .pi / 180.0
+    /// Project a smoothed az/el sample (in degrees) onto the polar canvas.
+    /// Azimuth 0° is up (north); elevation 90° is the centre. Kept in double
+    /// precision because the segmented track returns smoothed, non-integer
+    /// az/el — rounding to `Int` here would re-introduce the 1° staircase the
+    /// smoothing pass exists to remove.
+    private func polarPoint(azDeg: Double, elDeg: Double, center: CGPoint, maxR: CGFloat) -> CGPoint {
+        let r = (90.0 - elDeg) / 90.0 * Double(maxR)
+        let rad = azDeg * .pi / 180.0
         return CGPoint(x: center.x + CGFloat(r * sin(rad)),
                        y: center.y - CGFloat(r * cos(rad)))
     }

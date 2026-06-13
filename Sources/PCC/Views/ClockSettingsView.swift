@@ -16,16 +16,21 @@ struct ClockSettingsView: View {
     @State private var savedToConfig = false
 
     // Matrix frequency
-    @State private var matrixFrequency = "20000"
+    @State private var matrixFrequency = 20000
 
     // Accuracy tolerance
-    @State private var tolerance1ms = "1000"
-    @State private var tolerance10ms = "10000"
-    @State private var tolerance100ms = "100000"
+    @State private var tolerance1ms = 1000
+    @State private var tolerance10ms = 10000
+    @State private var tolerance100ms = 100000
 
-    // Fake GPS
-    @State private var fakeLatitude = ""
-    @State private var fakeLongitude = ""
+    // Fake GPS — 0,0 is the firmware's documented "disabled" position, so it
+    // doubles as the unset default.
+    @State private var fakeLatitude: Double = 0
+    @State private var fakeLongitude: Double = 0
+
+    // Corruption recovery
+    @State private var showRestoreConfirm = false
+    @State private var restoreError: String?
 
     private var canSave: Bool {
         configManager.clockMounted && settings.configWriteEnabled
@@ -119,7 +124,8 @@ struct ClockSettingsView: View {
 
             Section {
                 HStack {
-                    TextField("", text: $matrixFrequency)
+                    TextField("", value: clamped($matrixFrequency, to: 1_000...100_000),
+                              format: .number)
                         .frame(width: 100)
                     Text("Hz")
                         .foregroundStyle(.secondary)
@@ -129,7 +135,7 @@ struct ClockSettingsView: View {
                     }
                     .disabled(!serialManager.isConnected)
                     Button("Save") {
-                        configManager.setValue("MATRIX_FREQUENCY", to: matrixFrequency)
+                        configManager.setValue("MATRIX_FREQUENCY", to: String(matrixFrequency))
                         flashSaved()
                     }
                     .disabled(!canSave)
@@ -158,17 +164,20 @@ struct ClockSettingsView: View {
                     Divider()
                     GridRow {
                         Text("\u{00B1}1 ms")
-                        TextField("", text: $tolerance1ms)
+                        TextField("", value: clamped($tolerance1ms, to: 0...Int.max),
+                                  format: .number)
                             .frame(width: 100)
                     }
                     GridRow {
                         Text("\u{00B1}10 ms")
-                        TextField("", text: $tolerance10ms)
+                        TextField("", value: clamped($tolerance10ms, to: 0...Int.max),
+                                  format: .number)
                             .frame(width: 100)
                     }
                     GridRow {
                         Text("\u{00B1}100 ms")
-                        TextField("", text: $tolerance100ms)
+                        TextField("", value: clamped($tolerance100ms, to: 0...Int.max),
+                                  format: .number)
                             .frame(width: 100)
                     }
                 }
@@ -182,9 +191,9 @@ struct ClockSettingsView: View {
                     .disabled(!serialManager.isConnected)
                     Spacer()
                     Button("Save") {
-                        configManager.setValue("Tolerance_time_1ms", to: tolerance1ms)
-                        configManager.setValue("Tolerance_time_10ms", to: tolerance10ms)
-                        configManager.setValue("Tolerance_time_100ms", to: tolerance100ms)
+                        configManager.setValue("Tolerance_time_1ms", to: String(tolerance1ms))
+                        configManager.setValue("Tolerance_time_10ms", to: String(tolerance10ms))
+                        configManager.setValue("Tolerance_time_100ms", to: String(tolerance100ms))
                         flashSaved()
                     }
                     .disabled(!canSave)
@@ -197,31 +206,36 @@ struct ClockSettingsView: View {
                 HStack {
                     Text("Latitude")
                         .frame(width: 70, alignment: .leading)
-                    TextField("0.0", text: $fakeLatitude)
+                    // Up to 6 fraction digits (~0.1 m): the default .number
+                    // style rounds to 3, which would corrupt a pasted GPS
+                    // coordinate by ~100 m on commit.
+                    TextField("0.0", value: clamped($fakeLatitude, to: -90...90),
+                              format: .number.precision(.fractionLength(0...6)))
                 }
                 HStack {
                     Text("Longitude")
                         .frame(width: 70, alignment: .leading)
-                    TextField("0.0", text: $fakeLongitude)
+                    TextField("0.0", value: clamped($fakeLongitude, to: -180...180),
+                              format: .number.precision(.fractionLength(0...6)))
                 }
                 HStack {
                     Button("Send") {
                         serialManager.sendCommand("fake_latitude = \(fakeLatitude)")
                         serialManager.sendCommand("fake_longitude = \(fakeLongitude)")
                     }
-                    .disabled(fakeLatitude.isEmpty || fakeLongitude.isEmpty || !serialManager.isConnected)
+                    .disabled(!serialManager.isConnected)
 
                     Button("Disable") {
-                        fakeLatitude = "0"
-                        fakeLongitude = "0"
+                        fakeLatitude = 0
+                        fakeLongitude = 0
                         serialManager.sendCommand("fake_latitude = 0")
                         serialManager.sendCommand("fake_longitude = 0")
                     }
                     .disabled(!serialManager.isConnected)
                     Spacer()
                     Button("Save") {
-                        configManager.setValue("fake_latitude", to: fakeLatitude.isEmpty ? "0" : fakeLatitude)
-                        configManager.setValue("fake_longitude", to: fakeLongitude.isEmpty ? "0" : fakeLongitude)
+                        configManager.setValue("fake_latitude", to: String(fakeLatitude))
+                        configManager.setValue("fake_longitude", to: String(fakeLongitude))
                         flashSaved()
                     }
                     .disabled(!canSave)
@@ -241,8 +255,31 @@ struct ClockSettingsView: View {
                 }
             }
 
-            // TODO: Restore from backup UI — disabled pending testing
-            // if configManager.configCorrupted { ... }
+            if configManager.configCorrupted {
+                Section {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.yellow)
+                        Text(configManager.error ?? "config.txt appears corrupted")
+                            .font(.caption)
+                        Spacer()
+                        Button("Restore from Backup\u{2026}") {
+                            showRestoreConfirm = true
+                        }
+                        .disabled(!canSave)
+                    }
+                    if let restoreError {
+                        Text(restoreError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                    Text("Replaces config.txt on the clock with the most recent local backup.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Recovery")
+                }
+            }
 
             Section {
                 Toggle("Enable config.txt writing", isOn: $settings.configWriteEnabled)
@@ -302,18 +339,55 @@ struct ClockSettingsView: View {
         }
         .formStyle(.grouped)
         .onAppear { loadFromConfig() }
+        .alert("Restore config.txt?", isPresented: $showRestoreConfirm) {
+            Button("Restore", role: .destructive) { restoreFromBackup() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This overwrites config.txt on the clock with the most recent local backup from ~/Library/Application Support/PCC/config-backups/.")
+        }
+    }
+
+    /// Recovery path for a corrupted config.txt: restorePrevious() writes the
+    /// newest valid local backup back to the clock and re-adopts it as the
+    /// loaded config (clearing `configCorrupted`), so afterwards the panels
+    /// can be re-seeded from it like any normal load.
+    private func restoreFromBackup() {
+        if configManager.restorePrevious() {
+            restoreError = nil
+            loadFromConfig()
+        } else {
+            // restorePrevious() sets configManager.error for write failures
+            // but returns bare false when no usable backup exists.
+            restoreError = configManager.error ?? "No valid local backup found."
+        }
     }
 
     private func loadFromConfig() {
         guard configManager.isLoaded else { return }
         timezoneOverride = configManager.value(forKey: "ZONE_OVERRIDE") ?? ""
-        matrixFrequency = configManager.value(forKey: "MATRIX_FREQUENCY") ?? "20000"
-        tolerance1ms = configManager.value(forKey: "Tolerance_time_1ms") ?? "1000"
-        tolerance10ms = configManager.value(forKey: "Tolerance_time_10ms") ?? "10000"
-        tolerance100ms = configManager.value(forKey: "Tolerance_time_100ms") ?? "100000"
-        fakeLatitude = configManager.value(forKey: "fake_latitude") ?? ""
-        fakeLongitude = configManager.value(forKey: "fake_longitude") ?? ""
+        // Unparseable on-device values fall back to the firmware defaults —
+        // the same ones used before anything is loaded.
+        matrixFrequency = configManager.value(forKey: "MATRIX_FREQUENCY").flatMap(Int.init) ?? 20000
+        tolerance1ms = configManager.value(forKey: "Tolerance_time_1ms").flatMap(Int.init) ?? 1000
+        tolerance10ms = configManager.value(forKey: "Tolerance_time_10ms").flatMap(Int.init) ?? 10000
+        tolerance100ms = configManager.value(forKey: "Tolerance_time_100ms").flatMap(Int.init) ?? 100000
+        fakeLatitude = configManager.value(forKey: "fake_latitude").flatMap(Double.init) ?? 0
+        fakeLongitude = configManager.value(forKey: "fake_longitude").flatMap(Double.init) ?? 0
         configEditorText = configManager.rawText
+    }
+
+    // MARK: - Clamped numeric bindings
+
+    /// Mirrors the clamping-binding pattern BrightnessView uses for its
+    /// ADC/DAC fields: `TextField(value:format:)` rejects non-numeric input
+    /// outright, and the binding clamps out-of-range commits — so nonsense
+    /// like "MATRIX_FREQUENCY = abc" or a latitude of 999 can no longer reach
+    /// the serial port or be written into config.txt.
+    private func clamped<V: Comparable>(_ value: Binding<V>, to range: ClosedRange<V>) -> Binding<V> {
+        Binding(
+            get: { value.wrappedValue },
+            set: { value.wrappedValue = min(range.upperBound, max(range.lowerBound, $0)) }
+        )
     }
 
     private func flashSaved() {

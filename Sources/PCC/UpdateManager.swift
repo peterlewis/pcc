@@ -41,6 +41,15 @@ struct ReleaseInfo {
     let tzVersion: String
 }
 
+/// Install-time failure with a user-facing message. UpdateManager surfaces
+/// errors to the UI via `localizedDescription`, so the message IS the UI
+/// string — each one carries the remediation, not just the diagnosis.
+private struct InstallError: LocalizedError {
+    let message: String
+    init(_ message: String) { self.message = message }
+    var errorDescription: String? { message }
+}
+
 class UpdateManager: ObservableObject {
     @Published var latestRelease: ReleaseInfo?
     @Published var installedFWT: FirmwareInfo?
@@ -159,41 +168,46 @@ class UpdateManager: ObservableObject {
                 unzip.standardError = nil
                 try unzip.run()
                 unzip.waitUntilExit()
+                // A damaged archive still "extracts" whatever it can; unzip
+                // only reports the breakage via its exit status. Ignoring it
+                // used to let a truncated download fall through to the copy
+                // step and install half a release with a green "Done.".
+                guard unzip.terminationStatus == 0 else {
+                    throw InstallError("Extracting the release archive failed (unzip exit code \(unzip.terminationStatus)). The download may be corrupt — try again.")
+                }
 
+                // Extraction/copy design note: the fixed-name scheme below
+                // IS the zip-slip protection. Only flash/{fwt,fwd,tzrules,
+                // tzmap}.bin are ever read out of the extraction directory,
+                // each addressed by an exact path we construct ourselves —
+                // no filename from inside the archive is ever enumerated or
+                // trusted. Don't "simplify" this into copying the whole
+                // extracted folder onto the clock.
                 let flashDir = tmpDir.appendingPathComponent("flash")
                 let clockVol = URL(fileURLWithPath: Self.clockVolume)
+
+                // Validate everything BEFORE writing anything. fwt/fwd are
+                // two halves of one firmware build (and tzrules/tzmap of one
+                // tzdb build): the old "skip whatever's missing" loop could
+                // overwrite one half, leave the other stale, and still
+                // report success — a mismatched pair is worse for the clock
+                // than not installing at all.
+                if firmware { try Self.validateFirmwarePair(in: flashDir) }
+                if timezone { try Self.validateTimezonePair(in: flashDir) }
 
                 if firmware {
                     await MainActor.run { self.installProgress = "Copying firmware (this may be slow)..." }
                     for file in ["fwt.bin", "fwd.bin"] {
-                        let src = flashDir.appendingPathComponent(file)
-                        let dst = clockVol.appendingPathComponent(file)
-                        guard FileManager.default.fileExists(atPath: src.path) else { continue }
-                        do {
-                            if FileManager.default.fileExists(atPath: dst.path) {
-                                try FileManager.default.removeItem(at: dst)
-                            }
-                            try FileManager.default.copyItem(at: src, to: dst)
-                        } catch {
-                            throw error
-                        }
+                        try Self.copyVerified(flashDir.appendingPathComponent(file),
+                                              to: clockVol.appendingPathComponent(file))
                     }
                 }
 
                 if timezone {
                     await MainActor.run { self.installProgress = "Copying timezone data (this may be slow)..." }
                     for file in ["tzrules.bin", "tzmap.bin"] {
-                        let src = flashDir.appendingPathComponent(file)
-                        let dst = clockVol.appendingPathComponent(file)
-                        guard FileManager.default.fileExists(atPath: src.path) else { continue }
-                        do {
-                            if FileManager.default.fileExists(atPath: dst.path) {
-                                try FileManager.default.removeItem(at: dst)
-                            }
-                            try FileManager.default.copyItem(at: src, to: dst)
-                        } catch {
-                            throw error
-                        }
+                        try Self.copyVerified(flashDir.appendingPathComponent(file),
+                                              to: clockVol.appendingPathComponent(file))
                     }
                 }
 
@@ -215,7 +229,14 @@ class UpdateManager: ObservableObject {
                         ? "Done. Clock ejected — reconnect to apply."
                         : "Done. Eject or reconnect the clock to apply."
                     self.isInstalling = false
-                    self.readInstalledVersions()
+                    // The eject usually just unmounted the volume: re-check
+                    // before reading versions so we don't parse a dead path
+                    // while `clockMounted` (and the live Install buttons)
+                    // stay stale-true until the next manual refresh.
+                    self.checkClockMounted()
+                    if self.clockMounted {
+                        self.readInstalledVersions()
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -224,6 +245,51 @@ class UpdateManager: ObservableObject {
                     self.installProgress = ""
                 }
             }
+        }
+    }
+
+    /// Pre-flight for a firmware install: both halves must be present in the
+    /// extracted archive AND parse as firmware (the "Build … Version …" tail
+    /// FirmwareInfo reads must be intact) before we overwrite EITHER on the
+    /// clock. Throws with a message naming the offending file.
+    private static func validateFirmwarePair(in flashDir: URL) throws {
+        for name in ["fwt.bin", "fwd.bin"] {
+            let url = flashDir.appendingPathComponent(name)
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                throw InstallError("Release archive is missing flash/\(name) — firmware not installed.")
+            }
+            guard FirmwareInfo.read(from: url) != nil else {
+                throw InstallError("flash/\(name) in the release archive doesn't parse as firmware (no build/version tail) — the download may be corrupt. Firmware not installed.")
+            }
+        }
+    }
+
+    /// Same all-or-nothing pre-flight for the timezone pair. tzrules/tzmap
+    /// carry no parseable version tail, so presence is the strongest check
+    /// available before copying.
+    private static func validateTimezonePair(in flashDir: URL) throws {
+        for name in ["tzrules.bin", "tzmap.bin"] {
+            let url = flashDir.appendingPathComponent(name)
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                throw InstallError("Release archive is missing flash/\(name) — timezone data not installed.")
+            }
+        }
+    }
+
+    /// Copy one file onto the clock and read it straight back to confirm
+    /// the bytes actually landed. The CLOCK volume is a microcontroller
+    /// emulating USB mass storage, and writes there can fail silently —
+    /// `copyItem` returning is no guarantee the flash holds the image.
+    /// `contentsEqual` does a full byte-compare of source vs destination.
+    /// The mismatch message matters: with a half-written firmware image the
+    /// one thing the user must NOT do is power-cycle the clock.
+    private static func copyVerified(_ src: URL, to dst: URL) throws {
+        if FileManager.default.fileExists(atPath: dst.path) {
+            try FileManager.default.removeItem(at: dst)
+        }
+        try FileManager.default.copyItem(at: src, to: dst)
+        guard FileManager.default.contentsEqual(atPath: src.path, andPath: dst.path) else {
+            throw InstallError("Verification failed: \(dst.lastPathComponent) on the clock doesn't match the downloaded copy. Do not power-cycle the clock — retry the install.")
         }
     }
 

@@ -1,6 +1,15 @@
 import Foundation
 import ORSSerial
 import AppKit
+import os
+
+/// A GPS time fix paired with the local receipt timestamp, snapshotted
+/// together so a reader can never see a fresh fix with a stale receipt
+/// time (or vice versa).
+struct GPSTimeReference {
+    let utc: Date
+    let receivedAt: Date
+}
 
 enum DisplayMode: String {
     case none = "None"
@@ -50,12 +59,26 @@ class SerialManager: NSObject, ObservableObject {
     @Published var firstFixTime: Date?
     @Published var gpsUTCTime: Date?  // Parsed from RMC (date + time)
     var gpsUTCTimeReceived: Date?     // System time when RMC was received
+    /// Lock-guarded pair behind `gpsTimeReference`. The two properties above
+    /// feed the UI on the main thread; the NTP packet path reads GPS time
+    /// off-main, and reading two independent properties from there could
+    /// tear — a fresh fix paired with a stale receipt time is worth up to
+    /// ~1 s of served-time error (on top of being a data race).
+    private let gpsTimeLock = OSAllocatedUnfairLock<GPSTimeReference?>(initialState: nil)
+    /// Thread-safe snapshot of the latest GPS fix. Safe from any queue —
+    /// the NTP packet path reads this off-main.
+    var gpsTimeReference: GPSTimeReference? { gpsTimeLock.withLock { $0 } }
     private(set) var satelliteTrackingEnabled = false
     private var satelliteTrackingCount = 0
     @Published private(set) var nmeaActive = false
     @Published private(set) var nmeaConsumers: [String] = []
     private var nmeaConsumerCount = 0
-    private var gsvBuffer: [String: [SatelliteInfo]] = [:]
+    /// Per-(talker, signal) GSV accumulation, stamped with the time of the
+    /// last write. A key is only reset when *its* msgNum == 1 arrives again,
+    /// which never happens once a talker goes quiet — so without the
+    /// timestamp, a constellation that stops broadcasting would be merged
+    /// into `satellites` forever. Stale entries are dropped at merge time.
+    private var gsvBuffer: [String: (satellites: [SatelliteInfo], updatedAt: Date)] = [:]
     private var satelliteUpdateTimer: Timer?
 
     private let portManager = ORSSerialPortManager.shared()
@@ -67,10 +90,17 @@ class SerialManager: NSObject, ObservableObject {
         refreshPorts()
 
         let nc = NotificationCenter.default
+        // Use the constants imported from ORSSerial, NOT string literals of
+        // their names: the constants' runtime VALUES differ from their names
+        // (ORSSerialPortsWereConnectedNotification is defined as
+        // "ORSSerialPortWasConnectedNotification" — note Were vs Was — in
+        // ORSSerialPortManager.m). A hand-typed literal of the constant
+        // *name* subscribes to a notification that is never posted, silently
+        // breaking hotplug detection.
         nc.addObserver(self, selector: #selector(serialPortsChanged),
-                       name: .init("ORSSerialPortsWereConnectedNotification"), object: nil)
+                       name: .ORSSerialPortsWereConnected, object: nil)
         nc.addObserver(self, selector: #selector(serialPortsChanged),
-                       name: .init("ORSSerialPortsWereDisconnectedNotification"), object: nil)
+                       name: .ORSSerialPortsWereDisconnected, object: nil)
         nc.addObserver(self, selector: #selector(appWillTerminate),
                        name: NSApplication.willTerminateNotification, object: nil)
 
@@ -124,6 +154,11 @@ class SerialManager: NSObject, ObservableObject {
     }
 
     func connect(to port: ORSSerialPort) {
+        // Already connected to this exact port — nothing to do. Without this
+        // guard, the disconnect() below would schedule a delayed close of the
+        // very port we are about to reopen.
+        if port === connectedPort && port.isOpen { return }
+
         if let current = connectedPort, current.isOpen {
             disconnect()
         }
@@ -133,6 +168,8 @@ class SerialManager: NSObject, ObservableObject {
         port.open()
         connectedPort = port
         lastConnectedPath = port.path
+        // This write site is the sole owner of the "lastSerialPort" default;
+        // other code (autoConnect, ConnectView) only reads the key.
         UserDefaults.standard.set(port.path, forKey: "lastSerialPort")
     }
 
@@ -152,7 +189,13 @@ class SerialManager: NSObject, ObservableObject {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             port.close()
-            self?.connectedPort = nil
+            // Only clear if nothing reconnected during the 0.2 s grace
+            // period — connect(to:) may have already installed a new (or
+            // re-opened) port, and clobbering it here would strand a live
+            // connection with `connectedPort == nil`.
+            if self?.connectedPort === port {
+                self?.connectedPort = nil
+            }
         }
     }
 
@@ -218,9 +261,11 @@ class SerialManager: NSObject, ObservableObject {
     }
 
     /// Factory for the marquee timer — one body, used both for a fresh scroll
-    /// and for the live-reload restart.
+    /// and for the live-reload restart. Registered in `.common` run-loop mode:
+    /// `.default`-mode timers pause while the status-bar menu is open or a
+    /// window is being dragged, which would visibly freeze the marquee.
     private func scheduledScrollTimer() -> Timer {
-        Timer.scheduledTimer(withTimeInterval: scrollInterval, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: scrollInterval, repeats: true) { [weak self] _ in
             guard let self else { return }
             self.scrollPosition += 1
             if self.scrollPosition >= self.scrollWrapPosition {
@@ -228,6 +273,8 @@ class SerialManager: NSObject, ObservableObject {
             }
             self.sendScrollFrame()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        return timer
     }
 
     func stopScrolling() {
@@ -365,6 +412,15 @@ extension SerialManager: ORSSerialPortDelegate {
             }
             serialLineBuffer.removeSubrange(serialLineBuffer.startIndex...newlineIndex)
         }
+
+        // Cap the residual buffer. The `cu.usbmodem` port filter matches ANY
+        // USB CDC device, not just the clock — a device that streams bytes
+        // without ever sending a newline would otherwise grow this buffer
+        // without bound. Real NMEA/clock lines are well under 100 bytes, so
+        // anything past 64 KiB with no line break is garbage; drop it.
+        if serialLineBuffer.count > 64 * 1024 {
+            serialLineBuffer.removeAll(keepingCapacity: false)
+        }
     }
 
     // MARK: - GSV Parser
@@ -389,34 +445,50 @@ extension SerialManager: ORSSerialPortDelegate {
         let bufferKey = "\(talkerId)_\(signalId)"
 
         if msgNum == 1 {
-            gsvBuffer[bufferKey] = []
+            gsvBuffer[bufferKey] = (satellites: [], updatedAt: Date())
         }
 
         // Each satellite is 4 fields: PRN, elevation, azimuth, SNR
+        var parsed: [SatelliteInfo] = []
         var i = 4
         while i + 3 < fields.count {
             if let prn = Int(fields[i]),
                let elev = Int(fields[i + 1]),
                let azim = Int(fields[i + 2]) {
                 let snr = fields[i + 3].isEmpty ? nil : Int(fields[i + 3])
-                let sat = SatelliteInfo(prn: prn, constellation: constellation,
-                                        elevation: elev, azimuth: azim, snr: snr)
-                gsvBuffer[bufferKey, default: []].append(sat)
+                parsed.append(SatelliteInfo(prn: prn, constellation: constellation,
+                                            elevation: elev, azimuth: azim, snr: snr))
             }
             i += 4
         }
+
+        // Stamp the entry on every page of the set (not just page 1) so an
+        // actively broadcasting talker is always considered live, even when
+        // a page carries zero parseable satellites.
+        var entry = gsvBuffer[bufferKey] ?? (satellites: [], updatedAt: Date())
+        entry.satellites.append(contentsOf: parsed)
+        entry.updatedAt = Date()
+        gsvBuffer[bufferKey] = entry
 
         if msgNum == numMsg {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.satelliteUpdateTimer?.invalidate()
-                self.satelliteUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: false) { [weak self] _ in
+                let timer = Timer(timeInterval: 0.1, repeats: false) { [weak self] _ in
                     guard let self else { return }
-                    // Merge all buffer entries, dedup by satellite ID
-                    // preferring entries with SNR data
+                    // Merge all live buffer entries, dedup by satellite ID
+                    // preferring entries with SNR data. Entries not written
+                    // for ~5 s belong to constellations that stopped
+                    // broadcasting — remove them, or their satellites would
+                    // be re-merged (and shown) forever.
+                    let cutoff = Date().addingTimeInterval(-5.0)
                     var merged: [String: SatelliteInfo] = [:]
-                    for (_, sats) in self.gsvBuffer {
-                        for sat in sats {
+                    for (key, entry) in self.gsvBuffer {
+                        guard entry.updatedAt >= cutoff else {
+                            self.gsvBuffer.removeValue(forKey: key)
+                            continue
+                        }
+                        for sat in entry.satellites {
                             if let existing = merged[sat.id] {
                                 if existing.snr == nil && sat.snr != nil {
                                     merged[sat.id] = sat
@@ -426,8 +498,17 @@ extension SerialManager: ORSSerialPortDelegate {
                             }
                         }
                     }
-                    self.satellites = Array(merged.values)
+                    // Sort before publishing: `merged.values` is in
+                    // dictionary order, which shuffles between otherwise
+                    // identical updates and makes Equatable-based onChange
+                    // observers fire for content that hasn't changed.
+                    self.satellites = merged.values.sorted { $0.id < $1.id }
                 }
+                // `.common` mode so the debounce doesn't stall while the
+                // status-bar menu is open or a window is being dragged
+                // (`.default`-mode timers pause during those run-loop modes).
+                RunLoop.main.add(timer, forMode: .common)
+                self.satelliteUpdateTimer = timer
             }
         }
     }
@@ -487,7 +568,13 @@ extension SerialManager: ORSSerialPortDelegate {
         let fields = stripped.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
 
         guard fields.count >= 10, fields[0].hasSuffix("RMC") else { return }
-        guard fields[2] == "A" else { return }  // A = active/valid
+        guard fields[2] == "A" else {  // A = active/valid
+            // Status "V" (void) means the receiver has lost its fix. Clear
+            // the snapshot so the NTP server can detect GPS loss instead of
+            // serving an ever-staler time reference.
+            gpsTimeLock.withLock { $0 = nil }
+            return
+        }
 
         // Parse time HHMMSS.ss and date DDMMYY
         guard fields[1].count >= 6, fields[9].count == 6 else { return }
@@ -515,6 +602,12 @@ extension SerialManager: ORSSerialPortDelegate {
         guard let utcDate = Calendar(identifier: .gregorian).date(from: comps) else { return }
 
         let receivedAt = Date()
+        // Snapshot the pair atomically for off-main readers (the NTP packet
+        // path) — and do it here, synchronously, so `receivedAt` is paired
+        // with `utcDate` at the moment of receipt rather than after a hop
+        // through the main queue.
+        gpsTimeLock.withLock { $0 = GPSTimeReference(utc: utcDate, receivedAt: receivedAt) }
+        // The @Published mirrors stay main-thread-only for the UI.
         DispatchQueue.main.async { [weak self] in
             self?.gpsUTCTime = utcDate
             self?.gpsUTCTimeReceived = receivedAt

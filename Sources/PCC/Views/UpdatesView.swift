@@ -2,7 +2,11 @@ import SwiftUI
 
 struct UpdatesView: View {
     @EnvironmentObject var serialManager: SerialManager
-    @StateObject private var updateManager = UpdateManager()
+    // App-level instance (owned by AppDelegate): a per-visit @StateObject
+    // here meant switching panes mid-install hid all progress and a return
+    // visit created a fresh manager that would happily start a second
+    // concurrent install against the same /Volumes/CLOCK files.
+    @EnvironmentObject var updateManager: UpdateManager
 
     var body: some View {
         Form {

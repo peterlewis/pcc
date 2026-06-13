@@ -13,6 +13,10 @@ struct ConnectView: View {
     @State private var selectedPortPath = ""
     @State private var portProcesses: [PortProcess] = []
     @State private var hasCheckedPort = false
+    /// Non-nil when the lsof diagnostic itself failed to run — shown instead
+    /// of the (misleading) "no processes" message, so the Diagnose button
+    /// never appears to silently do nothing.
+    @State private var diagnosticError: String?
     @State private var showKillConfirmation = false
     @State private var processToKill: PortProcess?
 
@@ -88,7 +92,11 @@ struct ConnectView: View {
 
             if hasCheckedPort {
                 Section("Port Diagnostics") {
-                    if portProcesses.isEmpty {
+                    if let diagnosticError {
+                        Text(diagnosticError)
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                    } else if portProcesses.isEmpty {
                         Text("No processes are using this port.")
                             .foregroundStyle(.secondary)
                     } else {
@@ -150,12 +158,24 @@ struct ConnectView: View {
 
             do {
                 try proc.run()
-                proc.waitUntilExit()
             } catch {
+                // Surface the failure — silently returning would leave the
+                // Diagnose button appearing to do nothing at all.
+                DispatchQueue.main.async {
+                    self.portProcesses = []
+                    self.diagnosticError = "Couldn't run lsof: \(error.localizedDescription)"
+                    self.hasCheckedPort = true
+                }
                 return
             }
 
+            // Drain stdout BEFORE waiting for exit. If lsof writes more than
+            // the pipe buffer holds, it blocks on write while waitUntilExit()
+            // blocks on it exiting — a deadlock. Reading to EOF first can't
+            // hang: EOF arrives once the child exits and the pipe drains.
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            proc.waitUntilExit()
+
             let output = String(data: data, encoding: .utf8) ?? ""
             let lines = output.components(separatedBy: "\n").dropFirst()
 
@@ -167,6 +187,7 @@ struct ConnectView: View {
 
             DispatchQueue.main.async {
                 self.portProcesses = found
+                self.diagnosticError = nil
                 self.hasCheckedPort = true
             }
         }

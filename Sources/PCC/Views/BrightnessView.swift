@@ -84,7 +84,11 @@ struct BrightnessView: View {
         guard let data = UserDefaults.standard.data(forKey: "customBrightnessPresets"),
               let presets = try? JSONDecoder().decode([CustomBrightnessPreset].self, from: data)
         else { return }
-        customPresets = presets
+        // The curve UI hard-codes exactly five points (ForEach(0..<5),
+        // curvePoints[i], the BS1–BS5 config keys), so a hand-edited or
+        // corrupted defaults entry with any other count would crash on
+        // subscript the moment it loads. Drop such presets instead.
+        customPresets = presets.filter { $0.points.count == 5 }
     }
 
     private func saveCustomPresets() {
@@ -246,6 +250,12 @@ struct BrightnessView: View {
                                 ForEach(customPresets) { preset in
                                     Menu(preset.name) {
                                         Button("Load") {
+                                            // Defence in depth alongside the
+                                            // filter in loadCustomPresets():
+                                            // the curve UI subscripts indices
+                                            // 0..4, so never adopt a curve
+                                            // with any other point count.
+                                            guard preset.points.count == 5 else { return }
                                             curvePoints = preset.points
                                         }
                                         Divider()

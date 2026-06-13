@@ -26,6 +26,13 @@ class WeatherManager: ObservableObject {
     private var timer: Timer?
     private let service = WeatherKit.WeatherService.shared
 
+    /// Last successful WeatherKit snapshot. Unit/format changes re-render
+    /// this locally (see `reformatFromCache`) instead of re-fetching — the
+    /// weather hasn't changed just because the user now prefers °F, and the
+    /// old fetch-on-every-setting-change behaviour fired network requests
+    /// even while the feature was switched off.
+    private var lastWeather: CurrentWeather?
+
     /// Coordinates last sent to the geocoder — used to avoid re-geocoding on
     /// every poll when the GPS hasn't moved meaningfully. Empty until the
     /// first resolve.
@@ -69,6 +76,12 @@ class WeatherManager: ObservableObject {
     }
 
     func fetchNow() {
+        // Network fetches only run while the feature is on. Unit/format
+        // changes go through `reformatFromCache()` instead of here, and this
+        // guard keeps any other caller from quietly burning WeatherKit quota
+        // for a display that's switched off.
+        guard isEnabled else { return }
+
         // Location comes from the clock's own GPS fix — we never hit macOS
         // Location Services. No fix, no fetch; we surface the reason via
         // `lastError` so the weather UI can say something useful.
@@ -84,6 +97,7 @@ class WeatherManager: ObservableObject {
                 let weather = try await service.weather(for: location, including: .current)
                 let display = formatForClock(weather)
                 await MainActor.run {
+                    self.lastWeather = weather
                     self.temperature = self.formatTemp(weather.temperature)
                     self.condition = self.mapCondition(weather.condition)
                     self.windSpeed = self.formatWind(weather.wind.speed)
@@ -96,11 +110,47 @@ class WeatherManager: ObservableObject {
                 }
             } catch {
                 await MainActor.run {
-                    self.lastError = error.localizedDescription
+                    self.lastError = Self.describeWeatherError(error)
                 }
             }
         }
         resolveLocationName(lat: lat, lon: lon)
+    }
+
+    /// Re-render the cached snapshot with the current unit/format settings
+    /// and push it to the clock — no network involved. Called when the user
+    /// flips temperature/wind units or the display format; a no-op until the
+    /// first successful fetch populates the cache. `lastFetchTime` is left
+    /// alone on purpose: the underlying data is no fresher than it was.
+    func reformatFromCache() {
+        guard let weather = lastWeather else { return }
+        let display = formatForClock(weather)
+        temperature = formatTemp(weather.temperature)
+        condition = mapCondition(weather.condition)
+        windSpeed = formatWind(weather.wind.speed)
+        humidity = "\(Int(weather.humidity * 100))%"
+        displayString = display
+        sendToDisplay(display)
+    }
+
+    /// Translate a WeatherKit failure into something a human can act on.
+    /// Auth failures surface as opaque daemon internals — "The operation
+    /// couldn't be completed. (WDSJWTAuthenticatorServiceListener.Errors
+    /// error 2.)" — which read like a crash rather than what they are: the
+    /// build isn't signed with the WeatherKit entitlement, or the developer
+    /// membership behind it has lapsed. Recognise those and lead with the
+    /// fix, keeping the raw description as a parenthetical detail so the
+    /// exact error stays searchable.
+    private static func describeWeatherError(_ error: Error) -> String {
+        let raw = error.localizedDescription
+        let nsError = error as NSError
+        let haystack = "\(nsError.domain) \(raw)"
+        let authMarkers = ["WDSJWTAuthenticator", "JWTAuthenticator", "WeatherDaemon"]
+        if authMarkers.contains(where: { haystack.contains($0) }) {
+            return "WeatherKit authentication failed — the app must be signed with the "
+                 + "WeatherKit entitlement and an active Apple Developer membership. (\(raw))"
+        }
+        return raw
     }
 
     /// Reverse-geocode the current GPS fix into a readable place name, caching

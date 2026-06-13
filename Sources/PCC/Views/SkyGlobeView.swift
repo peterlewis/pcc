@@ -183,7 +183,7 @@ private struct GlobeWebView: NSViewRepresentable {
     let activePRNs: Set<String>
     let now: Date
     let showLabels: Bool
-    /// Passed through to `SatPass.groundTrackPoints` — when `false`, disables
+    /// Passed through to `SatPass.groundTrackSegments` — when `false`, disables
     /// the Swift-side az/el moving-average filter so the rendered polyline
     /// passes through every raw NMEA observation (visible 1° staircase).
     let smoothTrails: Bool
@@ -228,7 +228,13 @@ private struct GlobeWebView: NSViewRepresentable {
                                    forURLScheme: GlobeResourceHandler.scheme)
 
         let webView = WKWebView(frame: .zero, configuration: config)
-        webView.setValue(false, forKey: "drawsBackground")
+        // NB: do NOT poke `setValue(false, forKey: "drawsBackground")` here.
+        // `drawsBackground` is private WKWebView KVC and on macOS 26.x raises
+        // an uncatchable `NSUndefinedKeyException` at layout time, crashing the
+        // app. It also had no visible effect — the loaded page paints an opaque
+        // black body, so the web view never shows through anyway. If genuine
+        // transparency is ever needed, use the public `underPageBackgroundColor`
+        // instead of private KVC.
 
         // Relative refs (`./globe.gl.min.js`, `./earth-day.jpg`, …) in the
         // bundled HTML resolve against this document URL, so they all go
@@ -307,30 +313,38 @@ private struct GlobeWebView: NSViewRepresentable {
         // without any additional multiplier — one source of truth for fade.
         let trailStrokeScale = 1.7
 
+        // Live satellite dots require a real observer fix. The sub-satellite
+        // projection is observer-relative, so without a fix we'd previously
+        // fall back to (0,0) and scatter every tracked satellite into the Gulf
+        // of Guinea off west Africa. Gate the whole loop on a non-nil fix —
+        // mirroring how trails, rings, and celestials below already do — so no
+        // dots appear until we actually know where the observer is.
         var satData: [[String: Any]] = []
-        for sat in satellites where (sat.snr ?? 0) > 0 {
-            guard let coord = sat.subSatellitePoint(
-                observerLat: userLatitude ?? 0,
-                observerLon: userLongitude ?? 0
-            ) else { continue }
-            let isLive = activePRNs.contains(sat.id)
-            let dotAlpha: Double = isLive ? 0.92 : 0.72  // Translucent, not solid.
-            satData.append([
-                "lat": coord.latitude,
-                "lng": coord.longitude,
-                "alt": satAltitude(forElevation: Double(sat.elevation)),
-                "color": sat.constellation.hex,
-                "fill": sat.constellation.rgba(alpha: dotAlpha),
-                "size": isLive ? 9 : 7,
-                "name": sat.id,
-                "label": showLabels ? sat.id : "",
-                "type": isLive ? "live" : "satellite"
-            ])
+        if let observerLat = userLatitude, let observerLon = userLongitude {
+            for sat in satellites where (sat.snr ?? 0) > 0 {
+                guard let coord = sat.subSatellitePoint(
+                    observerLat: observerLat,
+                    observerLon: observerLon
+                ) else { continue }
+                let isLive = activePRNs.contains(sat.id)
+                let dotAlpha: Double = isLive ? 0.92 : 0.72  // Translucent, not solid.
+                satData.append([
+                    "lat": coord.latitude,
+                    "lng": coord.longitude,
+                    "alt": satAltitude(forElevation: Double(sat.elevation)),
+                    "color": sat.constellation.hex,
+                    "fill": sat.constellation.rgba(alpha: dotAlpha),
+                    "size": isLive ? 9 : 7,
+                    "name": sat.id,
+                    "label": showLabels ? sat.id : "",
+                    "type": isLive ? "live" : "satellite"
+                ])
+            }
         }
 
-        // Trail paths — one polyline per pass. Per-point altitude matches the
-        // live-satellite formula so a recorded arc rises with observed
-        // elevation instead of skating flat across the sphere.
+        // Trail paths — one polyline per pass SEGMENT. Per-point altitude
+        // matches the live-satellite formula so a recorded arc rises with
+        // observed elevation instead of skating flat across the sphere.
         var pathData: [[String: Any]] = []
 
         if let lat = userLatitude, let lon = userLongitude {
@@ -338,30 +352,35 @@ private struct GlobeWebView: NSViewRepresentable {
             for pass in ordered {
                 let isLive = activePRNs.contains(pass.prn)
                 let endAge = now.timeIntervalSince(pass.endTime)
-                // Render every real observation — no decimation. Earlier
-                // versions passed `tier.maxPoints` here; globe.gl's path
-                // smoothing then interpolated phantom vertices between the
-                // sparse survivors, which looked like fake "points" along
-                // the line. Feeding every real fix keeps segments short
-                // enough that the spline has no room to wobble, and every
-                // visible vertex corresponds to an actual NMEA observation.
-                let samples = pass.groundTrackPoints(observerLat: lat, observerLon: lon,
-                                                     maxPoints: .max,
-                                                     smoothingWindow: smoothTrails ? 0 : 1)
-                guard samples.count >= 2 else { continue }
-                let points: [[Double]] = samples.map { sample in
-                    [sample.coord.latitude,
-                     sample.coord.longitude,
-                     satAltitude(forElevation: sample.elevation)]
-                }
+                // Age tier drives both the per-pass point budget (older passes
+                // decimated harder to bound frame time — issue #7) and the
+                // fade/taper styling.
+                let tier = PassAgeTier.tier(endAge: endAge, isLive: isLive)
                 let alpha = PassAgeTier.opacity(endAge: endAge, isLive: isLive)
                 let stroke = Double(PassAgeTier.strokeWidth(endAge: endAge, isLive: isLive))
                     * trailStrokeScale
-                pathData.append([
-                    "coords": points,
-                    "color": pass.constellation.rgba(alpha: alpha),
-                    "stroke": stroke
-                ])
+                // Segmented ground track: the pass is split at recording gaps
+                // and each run is smoothed and decimated to its share of the
+                // tier budget. Each segment is pushed as its OWN path entry —
+                // concatenating them into one polyline let globe.gl draw a
+                // great-circle chord across the gap through unobserved sky,
+                // which is the "spiral" artefact (issue #8).
+                let segments = pass.groundTrackSegments(observerLat: lat, observerLon: lon,
+                                                        maxPoints: tier.maxPoints,
+                                                        smoothingWindow: smoothTrails ? 0 : 1)
+                for segment in segments {
+                    guard segment.count >= 2 else { continue }
+                    let points: [[Double]] = segment.map { sample in
+                        [sample.coord.latitude,
+                         sample.coord.longitude,
+                         satAltitude(forElevation: sample.elevation)]
+                    }
+                    pathData.append([
+                        "coords": points,
+                        "color": pass.constellation.rgba(alpha: alpha),
+                        "stroke": stroke
+                    ])
+                }
             }
         }
 
@@ -460,7 +479,14 @@ private struct GlobeWebView: NSViewRepresentable {
         let latRad = observerLat * .pi / 180
         let lonRad = observerLon * .pi / 180
 
-        let lat = asin(sin(latRad) * cos(distRad) + cos(latRad) * sin(distRad) * cos(azRad))
+        // Clamp the asin argument into [-1, 1]. Floating-point error can push
+        // it a hair past ±1, and `asin` then returns NaN. On the globe that NaN
+        // flows into the `celestialData` dictionary and reaches
+        // `JSONSerialization.data(withJSONObject:)`, which throws
+        // `NSInvalidArgumentException` — an Objective-C exception Swift cannot
+        // catch, so it crashes the app outright. Mirrors `subSatellitePointD`.
+        let sinLat = sin(latRad) * cos(distRad) + cos(latRad) * sin(distRad) * cos(azRad)
+        let lat = asin(max(-1, min(1, sinLat)))
         let lon = lonRad + atan2(
             sin(azRad) * sin(distRad) * cos(latRad),
             cos(distRad) - sin(latRad) * sin(lat)
@@ -471,8 +497,9 @@ private struct GlobeWebView: NSViewRepresentable {
 
 // MARK: - Bundle resource scheme handler
 
-/// Serves files under `Bundle.module`'s `Globe/` directory via a custom URL
-/// scheme so the WKWebView can load them with a real HTTP-style response.
+/// Serves files under the resource bundle's `Globe/` directory (resolved
+/// via `Bundle.pccResources`) through a custom URL scheme so the WKWebView
+/// can load them with a real HTTP-style response.
 ///
 /// Why a scheme handler and not `loadFileURL`: three.js's `TextureLoader`
 /// sets `image.crossOrigin = 'anonymous'` on every load, which turns the
@@ -510,7 +537,7 @@ private final class GlobeResourceHandler: NSObject, WKURLSchemeHandler {
         if relative.hasPrefix("/") { relative.removeFirst() }
         if relative.isEmpty { relative = "index.html" }
 
-        let globeDir = Bundle.module.bundleURL
+        let globeDir = Bundle.pccResources.bundleURL
             .appendingPathComponent("Globe")
             .standardizedFileURL
         let fileURL = globeDir

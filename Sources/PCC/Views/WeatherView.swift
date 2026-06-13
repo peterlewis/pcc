@@ -137,9 +137,12 @@ struct WeatherView: View {
             }
         }
         .formStyle(.grouped)
-        .onChange(of: settings.weatherDisplayFormat) { _, _ in weatherManager.fetchNow() }
-        .onChange(of: settings.temperatureUnit) { _, _ in weatherManager.fetchNow() }
-        .onChange(of: settings.windSpeedUnit) { _, _ in weatherManager.fetchNow() }
+        // Unit/format flips re-render the cached snapshot locally — the
+        // weather itself hasn't changed, so a network fetch would be wasted
+        // (and used to fire even with the feature disabled).
+        .onChange(of: settings.weatherDisplayFormat) { _, _ in weatherManager.reformatFromCache() }
+        .onChange(of: settings.temperatureUnit) { _, _ in weatherManager.reformatFromCache() }
+        .onChange(of: settings.windSpeedUnit) { _, _ in weatherManager.reformatFromCache() }
         // Force a refresh when the panel appears so the user doesn't stare at
         // a stale "Waiting for GPS fix" message until the next poll tick (up
         // to 120s away by default). If the fix has since arrived, this picks

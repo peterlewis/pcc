@@ -147,6 +147,9 @@ class DataSourceManager: NSObject, ObservableObject {
         dataSources.removeAll { $0.id == id }
         lastValues.removeValue(forKey: id)
         lastErrors.removeValue(forKey: id)
+        // Remove the source's Keychain item too, or the deleted source's
+        // token would linger in the Keychain forever.
+        try? KeychainHelper.delete(forKey: Self.headersKeychainKey(for: id))
         save()
         if isActive { restartRotation() }
     }
@@ -172,9 +175,14 @@ class DataSourceManager: NSObject, ObservableObject {
         guard let source = dataSources.first(where: { $0.id == id }) else { return }
         stopPolling(for: id)
         fetchValue(for: id)
-        let timer = Timer.scheduledTimer(withTimeInterval: source.pollInterval, repeats: true) { [weak self] _ in
+        // Registered in .common (not scheduledTimer's .default-only) so
+        // polling keeps firing while the status-bar menu is open or a modal
+        // runs — .default-mode timers are suspended during menu/event
+        // tracking, freezing updates exactly when the user is looking.
+        let timer = Timer(timeInterval: source.pollInterval, repeats: true) { [weak self] _ in
             self?.fetchValue(for: id)
         }
+        RunLoop.main.add(timer, forMode: .common)
         pollTimers[id] = timer
     }
 
@@ -201,13 +209,17 @@ class DataSourceManager: NSObject, ObservableObject {
         displayCurrentSource()
 
         guard sources.count > 1 else { return }
-        rotationTimer = Timer.scheduledTimer(withTimeInterval: rotationInterval, repeats: true) { [weak self] _ in
+        // .common mode for the same reason as the poll timers above: rotation
+        // must not stall while the menu is being tracked.
+        let timer = Timer(timeInterval: rotationInterval, repeats: true) { [weak self] _ in
             guard let self else { return }
             let sources = self.enabledSources
             guard !sources.isEmpty else { return }
             self.currentSourceIndex = (self.currentSourceIndex + 1) % sources.count
             self.displayCurrentSource()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        rotationTimer = timer
     }
 
     private func displayCurrentSource() {
@@ -321,31 +333,36 @@ class DataSourceManager: NSObject, ObservableObject {
             }
 
             // Fire a watchdog on a background queue — if the process is
-            // still running when the timeout elapses, terminate it. The
-            // sequence (SIGTERM, then SIGKILL after 1 s) matches what
-            // `timeout(1)` does and avoids zombies if the child ignores
-            // SIGTERM.
+            // still running when the timeout elapses, terminate it. This
+            // stays within the Process API (SIGTERM via `terminate()`)
+            // rather than a raw `kill(pid, SIGKILL)`: between an isRunning
+            // check and a raw kill the PID can be recycled, SIGKILLing an
+            // unrelated process. No SIGKILL escalation is needed — with
+            // output drained below the hung-pipe failure mode is gone, and
+            // a child that ignores SIGTERM is the same wedge `timeout(1)`
+            // accepts by default.
             let watchdog = DispatchWorkItem {
-                guard process.isRunning else { return }
-                process.terminate()
-                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1) {
-                    if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-                }
+                if process.isRunning { process.terminate() }
             }
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout,
                                                             execute: watchdog)
 
+            // Drain output BEFORE waiting for exit. A pipe buffers ~64 KiB:
+            // a child emitting more blocks on write while waitUntilExit()
+            // blocks on the child — a deadlock the watchdog then "resolved"
+            // by killing a command that was actually succeeding.
+            // readDataToEndOfFile() consumes as the child writes and
+            // returns at EOF, after which the wait completes immediately.
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
             watchdog.cancel()
-
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
             let output = String(data: data, encoding: .utf8) ?? ""
             let firstLine = output.trimmingCharacters(in: .whitespacesAndNewlines)
                 .components(separatedBy: .newlines).first
 
             // If we timed out, surface that rather than handing a stale /
             // empty tail to the display. `terminationReason == .uncaughtSignal`
-            // covers both SIGTERM and SIGKILL paths.
+            // is the watchdog's SIGTERM (bash doesn't trap it by default).
             if process.terminationReason == .uncaughtSignal {
                 DispatchQueue.main.async {
                     self?.lastErrors[source.id] = "Command timed out after \(Int(timeout))s"
@@ -390,8 +407,47 @@ class DataSourceManager: NSObject, ObservableObject {
 
     // MARK: Persistence
 
+    // Headers are the one secret-bearing field (their whole point is
+    // `Authorization: Bearer ...`), so they live in the Keychain — one item
+    // per source, keyed by the source's UUID — while everything non-secret
+    // stays in the UserDefaults blob. The `DataSource.headers` property is
+    // unchanged for callers; only where it persists differs.
+    private static func headersKeychainKey(for id: UUID) -> String {
+        "dataSource-headers-\(id.uuidString)"
+    }
+
+    /// Decodes one array element, swallowing its failure instead of failing
+    /// the whole array. Persistence here must be element-wise tolerant: an
+    /// all-or-nothing `[DataSource]` decode means one future incompatible
+    /// field turns load() into `[]`, and the next save() then permanently
+    /// wipes every source the user configured.
+    ///
+    /// Convention for future stored properties on `DataSource`: make them
+    /// optional, or default them via `decodeIfPresent`, so blobs written by
+    /// older versions keep decoding.
+    private struct TolerantElement<T: Decodable>: Decodable {
+        let value: T?
+        init(from decoder: Decoder) {
+            value = try? T(from: decoder)
+        }
+    }
+
     private func save() {
-        if let data = try? JSONEncoder().encode(dataSources) {
+        var sanitized = dataSources
+        for i in sanitized.indices {
+            do {
+                // Empty headers delete the Keychain item, so a cleared field
+                // doesn't leave a stale token behind.
+                try KeychainHelper.set(sanitized[i].headers,
+                                       forKey: Self.headersKeychainKey(for: sanitized[i].id))
+                sanitized[i].headers = ""
+            } catch {
+                // Keychain write failed: keep the plaintext copy in the blob
+                // rather than stripping it — degrading to the old plaintext
+                // behaviour beats silently losing the user's tokens.
+            }
+        }
+        if let data = try? JSONEncoder().encode(sanitized) {
             UserDefaults.standard.set(data, forKey: "dataSources")
         }
         UserDefaults.standard.set(isActive, forKey: "dataSourcesActive")
@@ -400,7 +456,24 @@ class DataSourceManager: NSObject, ObservableObject {
 
     private func load() {
         if let data = UserDefaults.standard.data(forKey: "dataSources"),
-           let sources = try? JSONDecoder().decode([DataSource].self, from: data) {
+           let decoded = try? JSONDecoder().decode([TolerantElement<DataSource>].self, from: data) {
+            var sources = decoded.compactMap(\.value)
+            for i in sources.indices {
+                let key = Self.headersKeychainKey(for: sources[i].id)
+                do {
+                    if let secret = try KeychainHelper.get(forKey: key) {
+                        sources[i].headers = secret
+                    } else if !sources[i].headers.isEmpty {
+                        // Pre-Keychain blob: headers are still plaintext in
+                        // UserDefaults. Migrate them into the Keychain now;
+                        // the next save() strips them from the defaults copy.
+                        try KeychainHelper.set(sources[i].headers, forKey: key)
+                    }
+                } catch {
+                    // Keychain unavailable: fall back to whatever the blob
+                    // carried (possibly empty) so the source still works.
+                }
+            }
             dataSources = sources
         }
         isActive = UserDefaults.standard.bool(forKey: "dataSourcesActive")
