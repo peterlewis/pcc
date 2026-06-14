@@ -287,6 +287,109 @@ extension SatPass: Codable {
     }
 }
 
+// MARK: - Compact binary persistence
+
+/// PCC's on-disk pass format. JSON inflated each 6-byte observation to ~37
+/// bytes (~6×, measured across the real archive); this packs the native
+/// layout so files are ~6× smaller and decode without a JSON tokenizer.
+/// Validated lossless round-tripping the entire recorded archive. Layout,
+/// all multi-byte integers little-endian, assembled byte-by-byte so reads
+/// are alignment-safe at any offset:
+///
+///   "PCCp" | binaryVersion:UInt8 | constellation:UInt8 | id:16B |
+///   startTime:Float64(seconds since 1970) | prnLen:UInt8 | prn:UTF8 |
+///   obsCount:UInt32 | obsCount×(az:Int16, el:Int8, snr:Int8, t:UInt16)
+extension SatPass {
+    static let binaryMagic: [UInt8] = [0x50, 0x43, 0x43, 0x70]   // "PCCp"
+    static let binaryVersion: UInt8 = 1
+
+    func binaryEncoded() -> Data {
+        var d = Data()
+        d.reserveCapacity(31 + prn.utf8.count + observations.count * 6)
+        d.append(contentsOf: Self.binaryMagic)
+        d.append(Self.binaryVersion)
+        d.append(constellation.binaryCode)
+        withUnsafeBytes(of: id.uuid) { d.append(contentsOf: $0) }   // uuid_t: 16×UInt8, align 1
+        let ts = startTime.timeIntervalSince1970.bitPattern          // UInt64
+        for k in 0..<8 { d.append(UInt8(truncatingIfNeeded: ts >> (8 * k))) }
+        let prnBytes = Array(prn.utf8.prefix(255))
+        d.append(UInt8(prnBytes.count))
+        d.append(contentsOf: prnBytes)
+        let count = UInt32(observations.count)
+        for k in 0..<4 { d.append(UInt8(truncatingIfNeeded: count >> (8 * k))) }
+        for o in observations {
+            let az = UInt16(bitPattern: o.az)
+            d.append(UInt8(truncatingIfNeeded: az))
+            d.append(UInt8(truncatingIfNeeded: az >> 8))
+            d.append(UInt8(bitPattern: o.el))
+            d.append(UInt8(bitPattern: o.snr))
+            d.append(UInt8(truncatingIfNeeded: o.t))
+            d.append(UInt8(truncatingIfNeeded: o.t >> 8))
+        }
+        return d
+    }
+
+    /// Decodes the binary format. Returns nil on bad magic/version or any
+    /// short read, so a truncated or foreign file is quarantined rather than
+    /// crashing the load.
+    init?(binary data: Data) {
+        let b = [UInt8](data)
+        guard b.count >= 31,
+              Array(b[0..<4]) == Self.binaryMagic,
+              b[4] == Self.binaryVersion,
+              let con = SatConstellation(binaryCode: b[5]) else { return nil }
+        var i = 6
+        let uuid = b[i..<i+16].withUnsafeBytes { UUID(uuid: $0.load(as: uuid_t.self)) }
+        i += 16
+        var tsBits: UInt64 = 0
+        for k in 0..<8 { tsBits |= UInt64(b[i + k]) << (8 * k) }
+        i += 8
+        let prnLen = Int(b[i]); i += 1
+        guard i + prnLen <= b.count else { return nil }
+        let prnStr = String(decoding: b[i..<i+prnLen], as: UTF8.self); i += prnLen
+        guard i + 4 <= b.count else { return nil }
+        var n: UInt32 = 0
+        for k in 0..<4 { n |= UInt32(b[i + k]) << (8 * k) }
+        i += 4
+        let count = Int(n)
+        guard i + count * 6 <= b.count else { return nil }
+        var obs = [SatObservation](); obs.reserveCapacity(count)
+        for _ in 0..<count {
+            let az = Int16(bitPattern: UInt16(b[i]) | (UInt16(b[i + 1]) << 8))
+            let el = Int8(bitPattern: b[i + 2])
+            let snr = Int8(bitPattern: b[i + 3])
+            let t = UInt16(b[i + 4]) | (UInt16(b[i + 5]) << 8)
+            obs.append(SatObservation(az: az, el: el, snr: snr, t: t))
+            i += 6
+        }
+        self.init(id: uuid, prn: prnStr, constellation: con,
+                  startTime: Date(timeIntervalSince1970: Double(bitPattern: tsBits)),
+                  observations: obs)
+    }
+}
+
+extension SatConstellation {
+    /// Stable on-disk code for the binary format — fixed mapping, NOT
+    /// `allCases` order (which could shift if a constellation is added).
+    var binaryCode: UInt8 {
+        switch self {
+        case .gps: 0
+        case .glonass: 1
+        case .galileo: 2
+        case .beidou: 3
+        }
+    }
+    init?(binaryCode: UInt8) {
+        switch binaryCode {
+        case 0: self = .gps
+        case 1: self = .glonass
+        case 2: self = .galileo
+        case 3: self = .beidou
+        default: return nil
+        }
+    }
+}
+
 // MARK: - Age-based render tier
 
 /// A pass's age determines how prominently it's rendered. The *tier* is still
@@ -316,37 +419,33 @@ enum PassAgeTier {
         }
     }
 
-    /// Cap on observations rendered per pass — lower for old passes to
-    /// keep frame time bounded as history accumulates.
-    var maxPoints: Int {
-        switch self {
-        case .live:    return 400
-        case .recent:  return 150
-        case .today:   return 75
-        case .week:    return 40
-        case .archive: return 25
-        }
-    }
+    /// Per-pass point budget. Full resolution (`.max`) by design: capping
+    /// points thinned dense passes into sparse dotted strings and lost the
+    /// overlapping-sweep look. Per-frame cost is bounded elsewhere instead —
+    /// the `PassGeometryCache` smooths/projects each pass once, and the static
+    /// render layers draw history once — so every observation can be drawn
+    /// without per-frame cost. How much history is on screen at once is the
+    /// user's call via the time-window filter (the real LOD knob), not a
+    /// per-arc thinning that degrades every view.
+    var maxPoints: Int { .max }
 
     // MARK: Continuous render curves
 
-    /// Smooth opacity fade driven by the pass's end-age. Live passes get a
-    /// fixed bright alpha; everything else decays along a stretched
-    /// exponential in √(hours) so the first few hours fade quickly and older
-    /// passes settle onto a visible floor rather than vanishing.
+    /// Smooth opacity fade driven by the pass's end-age. Live passes get the
+    /// brightest alpha; everything else decays along a stretched exponential
+    /// in √(hours). Tuned for a wider, steeper range than before so age reads
+    /// clearly even across a few hours — the previous 0.03–0.35 band barely
+    /// separated a 1 h-old arc from a 6 h-old one, so on a short capture the
+    /// fade was invisible. A fast early drop with a long gentle tail keeps
+    /// week-old passes faintly present rather than vanishing.
     ///
-    /// Hand-picked waypoints (non-live):
-    /// - just ended  ≈ 0.35
-    /// - 1 h ago     ≈ 0.28
-    /// - 6 h         ≈ 0.20
-    /// - 24 h        ≈ 0.12
-    /// - 7 d         ≈ 0.04
-    /// - 30 d+       ≈ 0.03 (floor)
+    /// Waypoints (non-live): just ended ≈ 0.58 → 1 h ≈ 0.39 → 6 h ≈ 0.23 →
+    /// 24 h ≈ 0.12 → 7 d ≈ 0.06 (floor).
     static func opacity(endAge: TimeInterval, isLive: Bool) -> Double {
-        if isLive { return 0.45 }
+        if isLive { return 0.75 }
         let ageHours = max(0, endAge) / 3600
-        let decay = 0.32 * exp(-sqrt(ageHours / 16))
-        return 0.03 + decay
+        let decay = 0.52 * exp(-sqrt(ageHours) / 2.2)
+        return 0.06 + decay
     }
 
     /// Smooth stroke-width taper along the same age axis. Uses a gentler

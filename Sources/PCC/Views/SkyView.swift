@@ -107,6 +107,15 @@ struct SkyView: View {
     @State private var now = Date()
     @State private var showClearConfirm = false
     @State private var showInsights = false
+    // Owned here so it survives this view's frequent re-creation; passed down
+    // to all three renderers so a closed pass's geometry is computed once
+    // rather than re-smoothed/re-projected on every 1 Hz tick.
+    @StateObject private var geometryCache = PassGeometryCache()
+    // Pauses the per-second view refresh when the app isn't frontmost.
+    // Recording continues in the background via the AppDelegate sink
+    // regardless; this only stops the *rendering* churn that, at full
+    // resolution, could pin the main thread during a background layout cascade.
+    @Environment(\.scenePhase) private var scenePhase
 
     // Sky-view toggles live in `AppSettings` so they persist across relaunch.
     // The view exposes them through lightweight computed `Binding`s below —
@@ -272,6 +281,7 @@ struct SkyView: View {
                     emptyStateView
                 } else {
                     SkyPlotCanvas(
+                        geometryCache: geometryCache,
                         satellites: settings.skyShowSatellites ? serialManager.satellites : [],
                         passes: visiblePasses,
                         activePRNs: trailStore.activePRNs,
@@ -297,6 +307,7 @@ struct SkyView: View {
                         sectorHeatmap: settings.skyShowSectorHeatmap
                             ? trailStore.sectorHeatmap
                             : Array(repeating: Array(repeating: nil, count: 18), count: 72),
+                        timeWindow: timeWindow,
                         now: now,
                         showLabels: settings.skyShowLabels
                     )
@@ -323,6 +334,7 @@ struct SkyView: View {
                 }
             } else if viewMode == .map {
                 SkyMapView(
+                    geometryCache: geometryCache,
                     satellites: settings.skyShowSatellites ? serialManager.satellites : [],
                     sunPosition: settings.skyShowCelestials ? sunPos : nil,
                     moonPosition: settings.skyShowCelestials ? moonPos : nil,
@@ -350,6 +362,7 @@ struct SkyView: View {
                 .padding(.top, 4)
             } else {
                 SkyGlobeView(
+                    geometryCache: geometryCache,
                     satellites: serialManager.satellites,
                     sunPosition: sunPos,
                     moonPosition: moonPos,
@@ -418,15 +431,20 @@ struct SkyView: View {
             .padding(.horizontal)
             .padding(.bottom, 8)
         }
-        .onReceive(celestialTimer) { now = $0 }
+        .onReceive(celestialTimer) { if scenePhase == .active { now = $0 } }
         .onReceive(liveTimer) { _ in
-            // Refresh `now` every second while any satellite is being tracked
-            // so the comet-head and time filter stay live without wasting work when idle.
-            if !trailStore.activePRNs.isEmpty { now = Date() }
+            // Refresh `now` every second while any satellite is being tracked —
+            // but only while frontmost. Backgrounded, this would drive the
+            // full-resolution redraw every second behind the user's back (a
+            // contributor to the background hang); it resumes on refocus.
+            guard scenePhase == .active, !trailStore.activePRNs.isEmpty else { return }
+            now = Date()
         }
-        .onChange(of: serialManager.satellites) { _, sats in
-            trailStore.update(satellites: sats)
-        }
+        // NOTE: satellite ingestion lives in AppDelegate's window-independent
+        // Combine sink (so recording survives window close — issue #9). It is
+        // deliberately NOT wired here too; doing both ran update() twice per
+        // tick while this pane was open, double-counting and doubling the
+        // store's objectWillChange churn.
         .onAppear {
             now = Date()
             serialManager.requestSatelliteTracking()
@@ -487,6 +505,7 @@ struct SkyView: View {
 // MARK: - Polar Plot Canvas
 
 private struct SkyPlotCanvas: View {
+    let geometryCache: PassGeometryCache
     let satellites: [SatelliteInfo]
     let passes: [SatPass]
     let activePRNs: Set<String>
@@ -496,8 +515,247 @@ private struct SkyPlotCanvas: View {
     let horizonMask: [Double?]
     /// 72 az × 18 el grid of peak SNR per 5°×5° sky cell, nil when unseen.
     let sectorHeatmap: [[Int?]]
+    /// The active recency filter. Folded into `contentVersion` so changing the
+    /// window forces the static layer to redraw even in the rare case where the
+    /// new window's closed-pass count/observation totals coincide with the old.
+    let timeWindow: TimeWindow
     let now: Date
     var showLabels: Bool = true
+
+    // The polar plot draws on the window background, which flips with the
+    // system appearance. The heatmap colormap and trail-fade alphas were both
+    // tuned against a dark/space backdrop, so the draw helpers read this to
+    // lift them into a legible band on a white background (see drawTrails and
+    // snrHeatColor). Threaded into both child layers so their shared draw
+    // helpers can branch on it.
+    @Environment(\.colorScheme) private var colorScheme
+    // When the app isn't frontmost, skip the expensive heatmap/trail/glow
+    // strokes — at full resolution, re-stroking the whole history on every
+    // store mutation during a background layout cascade is what wedged the
+    // UI. Grid + live satellites stay; the trails return on refocus.
+    @Environment(\.scenePhase) private var scenePhase
+
+    /// Closed passes (not currently recording). Their geometry is immutable, so
+    /// they belong in the cached static layer; only the age-fade changes, and
+    /// that is bucketed to once a minute below.
+    private var closedPasses: [SatPass] {
+        passes.filter { !activePRNs.contains($0.prn) }
+    }
+    /// Live passes (currently recording). These grow every tick, carry the
+    /// comet head, and so are drawn fresh each second by the live layer.
+    private var livePasses: [SatPass] {
+        passes.filter { activePRNs.contains($0.prn) }
+    }
+
+    /// `now` snapped down to the start of the current minute. The static
+    /// layer's closed-pass age-fade is computed against this instead of the
+    /// live `now`, so the fade only steps once a MINUTE — imperceptible, and it
+    /// keeps `contentVersion` (which folds in the same bucket) stable between
+    /// minute boundaries so the cached layer isn't redrawn on every 1 Hz tick.
+    private var staticNow: Date {
+        Date(timeIntervalSince1970: (now.timeIntervalSince1970 / 60).rounded(.down) * 60)
+    }
+
+    /// Cheap change-detector for the static layer. It folds in everything that
+    /// can alter the cached pixels — how many closed passes there are, their
+    /// combined observation counts (so a pass closing or a window re-trim is
+    /// caught), the active set, the appearance, and a once-a-minute age bucket
+    /// for the fade — WITHOUT touching the heavy `passes`/`sectorHeatmap`
+    /// arrays element-by-element. `StaticPolarLayer`'s custom `==` compares
+    /// only this Int, so when the parent body re-runs every second SwiftUI sees
+    /// an unchanged version and skips re-stroking the whole history.
+    private var staticContentVersion: Int {
+        let closed = closedPasses
+        var hasher = Hasher()
+        hasher.combine(closed.count)
+        hasher.combine(closed.reduce(0) { $0 + $1.observations.count })
+        // The active set decides which passes are closed-vs-live; a change here
+        // moves a pass between layers, which the counts above may not reflect.
+        hasher.combine(activePRNs)
+        // The recency filter: a new window can change which closed passes show.
+        hasher.combine(timeWindow)
+        // Minute bucket: refreshes the age-fade of closed trails once a minute.
+        // This is the ONLY term that ticks on its own (every 60 s); the rest
+        // change only on real data/UI events, so between minute boundaries the
+        // version is stable and the cached layer is skipped on every 1 Hz tick.
+        hasher.combine(Int(now.timeIntervalSince1970 / 60))
+        hasher.combine(colorScheme)
+        // Heatmap is part of the static layer but the full grid is too heavy to
+        // hash every frame; fold a cheap fingerprint (filled-cell count + a
+        // coarse SNR sum) so a heatmap update still bumps the version.
+        hasher.combine(heatmapFingerprint)
+        return hasher.finalize()
+    }
+
+    /// Coarse fingerprint of the sector heatmap: count of filled cells plus the
+    /// sum of their SNRs. Cheap relative to a deep hash and changes whenever the
+    /// field is repainted (new cell observed or a peak SNR rises).
+    private var heatmapFingerprint: Int {
+        var filled = 0
+        var snrSum = 0
+        for row in sectorHeatmap {
+            for cell in row {
+                if let v = cell { filled += 1; snrSum += v }
+            }
+        }
+        return filled &* 31 &+ snrSum
+    }
+
+    var body: some View {
+        // Both layers share one coordinate space: each computes `center`/`maxR`
+        // from the same `size`, and they overlay in a ZStack at the same frame,
+        // so the cheap live layer registers exactly on top of the cached one.
+        ZStack {
+            StaticPolarLayer(
+                geometryCache: geometryCache,
+                closedPasses: closedPasses,
+                horizonMask: horizonMask,
+                sectorHeatmap: sectorHeatmap,
+                staticNow: staticNow,
+                colorScheme: colorScheme,
+                active: scenePhase == .active,
+                contentVersion: staticContentVersion
+            )
+            .equatable()
+
+            LivePolarLayer(
+                geometryCache: geometryCache,
+                satellites: satellites,
+                livePasses: livePasses,
+                sunPosition: sunPosition,
+                moonPosition: moonPosition,
+                moonPhase: moonPhase,
+                now: now,
+                showLabels: showLabels,
+                colorScheme: colorScheme,
+                active: scenePhase == .active
+            )
+        }
+    }
+}
+
+// MARK: - Polar drawing primitives (shared by both layers)
+
+/// Project a smoothed az/el sample (in degrees) onto the polar canvas.
+/// Azimuth 0° is up (north); elevation 90° is the centre. Kept in double
+/// precision because the segmented track returns smoothed, non-integer
+/// az/el — rounding to `Int` here would re-introduce the 1° staircase the
+/// smoothing pass exists to remove.
+///
+/// Free function (not a method) so the static and live layers — which both
+/// stroke trails — call the same projection without inheriting each other's
+/// state. Both layers derive `center`/`maxR` identically, so points land in
+/// the same place in either layer.
+private func polarPosition(azDeg: Double, elDeg: Double, center: CGPoint, maxR: CGFloat) -> CGPoint {
+    let r = (90.0 - elDeg) / 90.0 * Double(maxR)
+    let rad = azDeg * .pi / 180.0
+    return CGPoint(x: center.x + CGFloat(r * sin(rad)),
+                   y: center.y - CGFloat(r * cos(rad)))
+}
+
+/// Stroke one pass's smoothed, segmented az/el track. Shared verbatim between
+/// the static (closed passes) and live layers so the look — colour, age-fade
+/// remap, per-segment polylines, stroke taper — is identical regardless of
+/// which layer draws it. `now` is the live clock for live passes and the
+/// minute-bucketed clock for closed ones, which is the only difference between
+/// the two callers. Returns the freshest point on the smoothed curve (last
+/// point of the last segment) so a live caller can place the comet head there.
+@discardableResult
+@MainActor
+private func drawPassTrail(_ pass: SatPass, isLive: Bool,
+                           context: inout GraphicsContext,
+                           center: CGPoint, maxR: CGFloat,
+                           now: Date, colorScheme: ColorScheme,
+                           geometryCache: PassGeometryCache) -> (az: Double, el: Double)? {
+    let age = now.timeIntervalSince(pass.endTime)
+
+    // Age tier drives BOTH the per-pass point budget (older passes are
+    // decimated harder to bound frame time as history accumulates —
+    // issue #7) and the fade/taper styling, so opacity, stroke, and
+    // the sample count all come from one source of truth.
+    let tier = PassAgeTier.tier(endAge: age, isLive: isLive)
+
+    // Segmented az/el track: the smoothing pipeline splits the pass at
+    // recording gaps and decimates each run to its share of the tier
+    // budget. Each segment must be stroked as its OWN polyline — joining
+    // them with `addLine` across a gap is exactly what fabricated the
+    // "spiral" chord through unobserved sky (issue #8).
+    let segments = geometryCache.polarSegments(for: pass, maxPoints: tier.maxPoints,
+                                               smoothingWindow: 0)
+    guard !segments.isEmpty else { return nil }
+
+    // `PassAgeTier.opacity` is tuned for a dark backdrop (floor ~0.06,
+    // live ~0.75). On a WHITE light-mode background those low alphas
+    // wash out, so older tracks vanish entirely. Remap locally into a
+    // higher, light-legible band — lifting the floor so week-old arcs
+    // stay readable while still compressing toward a strong top end —
+    // rather than editing the shared tier (each renderer's background
+    // differs). Dark mode keeps the original curve untouched.
+    let rawAlpha = PassAgeTier.opacity(endAge: age, isLive: isLive)
+    let alpha: Double
+    if colorScheme == .light {
+        // Source span runs ~0.06 (7 d floor) → ~0.81 (live). Normalise
+        // across it, then expand into ~0.38…~0.9 so the dimmest arc is
+        // still clearly visible on white and the freshest stays strong.
+        let lo = 0.06, hi = 0.81
+        let t = min(1.0, max(0.0, (rawAlpha - lo) / (hi - lo)))
+        alpha = 0.38 + (0.90 - 0.38) * t
+    } else {
+        alpha = rawAlpha
+    }
+    let stroke = PassAgeTier.strokeWidth(endAge: age, isLive: isLive)
+    let baseColor = pass.constellation.color.opacity(alpha)
+
+    for segment in segments {
+        guard segment.count >= 2 else { continue }
+        var path = Path()
+        for (i, p) in segment.enumerated() {
+            let pt = polarPosition(azDeg: p.az, elDeg: p.el, center: center, maxR: maxR)
+            if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
+        }
+        context.stroke(path, with: .color(baseColor),
+                       style: StrokeStyle(lineWidth: stroke, lineCap: .round, lineJoin: .round))
+    }
+
+    return segments.last?.last
+}
+
+// MARK: - Static Polar Layer
+
+/// The cached, slow-changing half of the polar plot: the sector heatmap, the
+/// horizon mask, the grid, and the CLOSED-pass trails (whose geometry is
+/// immutable). It is wrapped in `.equatable()` by the parent and its custom
+/// `==` compares ONLY `contentVersion`, so when the parent body re-evaluates
+/// every second (the live `now` tick), SwiftUI finds this view value-equal and
+/// SKIPS re-running its `Canvas` closure entirely. The heavy `closedPasses` /
+/// `sectorHeatmap` arrays are still passed in for drawing — they're simply
+/// excluded from the equality check, which is what makes the skip safe and
+/// cheap. Result: the full-resolution history is stroked only when it actually
+/// changes (a pass closes, the window changes, the heatmap repaints, the
+/// appearance flips, or ~once a minute for the age-fade), not on every tick.
+private struct StaticPolarLayer: View, Equatable {
+    let geometryCache: PassGeometryCache
+    let closedPasses: [SatPass]
+    let horizonMask: [Double?]
+    let sectorHeatmap: [[Int?]]
+    /// `now` bucketed to the minute (see `SkyPlotCanvas.staticNow`) — drives
+    /// the closed-pass age-fade at a once-a-minute cadence.
+    let staticNow: Date
+    let colorScheme: ColorScheme
+    /// Whether the app is frontmost; mirrors the parent's `scenePhase` gate so
+    /// the heavy heatmap/trail strokes are skipped while backgrounded.
+    let active: Bool
+    /// The ONLY field `==` compares. Everything that can change the cached
+    /// pixels is folded into this Int by the parent.
+    let contentVersion: Int
+
+    /// Custom equality is the crux of the whole refactor: by comparing only the
+    /// cheap `contentVersion` and deliberately ignoring the heavy arrays
+    /// (`closedPasses`, `sectorHeatmap`, `horizonMask`), an unchanged version
+    /// makes SwiftUI treat the layer as unchanged and skip the Canvas redraw.
+    static func == (lhs: StaticPolarLayer, rhs: StaticPolarLayer) -> Bool {
+        lhs.contentVersion == rhs.contentVersion
+    }
 
     var body: some View {
         Canvas { context, size in
@@ -505,83 +763,34 @@ private struct SkyPlotCanvas: View {
             let maxR = min(size.width, size.height) / 2 - 24
             guard maxR > 10 else { return }
 
-            // Heatmap goes below everything so the red horizon-mask tint,
-            // grid lines, and trails all sit visibly on top of the coloured
-            // cells.
-            drawSectorHeatmap(context: &context, center: center, maxR: maxR)
+            // Heavy layers (full-resolution trail strokes + the blurred heatmap
+            // field) draw only when frontmost — see the `active` note above.
+            // Heatmap goes below everything so the grid lines and trails sit on
+            // top of the coloured cells.
+            if active {
+                drawSectorHeatmap(context: &context, center: center, maxR: maxR)
+            }
             drawHorizonMask(context: &context, center: center, maxR: maxR)
             drawGrid(context: &context, center: center, maxR: maxR)
-            drawTrails(context: &context, center: center, maxR: maxR)
-            drawGlowLayer(context: &context, center: center, maxR: maxR)
-            drawSatellites(context: &context, center: center, maxR: maxR)
-            drawSun(context: &context, center: center, maxR: maxR)
-            drawMoon(context: &context, center: center, maxR: maxR)
+            if active {
+                drawClosedTrails(context: &context, center: center, maxR: maxR)
+            }
         }
     }
 
     // MARK: - Trails
 
-    private func drawTrails(context: inout GraphicsContext, center: CGPoint, maxR: CGFloat) {
-        // Draw oldest first so fresh passes layer on top.
-        let ordered = passes.sorted { $0.endTime < $1.endTime }
+    private func drawClosedTrails(context: inout GraphicsContext, center: CGPoint, maxR: CGFloat) {
+        // Draw oldest first so fresher passes layer on top. Closed passes carry
+        // no comet head (that's a live-only marker), so the shared helper's
+        // returned head point is ignored here.
+        let ordered = closedPasses.sorted { $0.endTime < $1.endTime }
         for pass in ordered {
-            let isLive = activePRNs.contains(pass.prn)
-            let age = now.timeIntervalSince(pass.endTime)
-
-            // Age tier drives BOTH the per-pass point budget (older passes are
-            // decimated harder to bound frame time as history accumulates —
-            // issue #7) and the fade/taper styling, so opacity, stroke, and
-            // the sample count all come from one source of truth.
-            let tier = PassAgeTier.tier(endAge: age, isLive: isLive)
-
-            // Segmented az/el track: the smoothing pipeline splits the pass at
-            // recording gaps and decimates each run to its share of the tier
-            // budget. Each segment must be stroked as its OWN polyline — joining
-            // them with `addLine` across a gap is exactly what fabricated the
-            // "spiral" chord through unobserved sky (issue #8).
-            let segments = pass.polarTrackSegments(maxPoints: tier.maxPoints)
-            guard !segments.isEmpty else { continue }
-
-            let alpha = PassAgeTier.opacity(endAge: age, isLive: isLive)
-            let stroke = PassAgeTier.strokeWidth(endAge: age, isLive: isLive)
-            let baseColor = pass.constellation.color.opacity(alpha)
-
-            for segment in segments {
-                guard segment.count >= 2 else { continue }
-                var path = Path()
-                for (i, p) in segment.enumerated() {
-                    let pt = polarPoint(azDeg: p.az, elDeg: p.el, center: center, maxR: maxR)
-                    if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
-                }
-                context.stroke(path, with: .color(baseColor),
-                               style: StrokeStyle(lineWidth: stroke, lineCap: .round, lineJoin: .round))
-            }
-
-            // Live comet-head: a glowing dot at the most recent observed
-            // position — the last point of the last segment (segments are
-            // time-ordered, so this is the freshest fix on the smoothed curve).
-            if isLive, let last = segments.last?.last {
-                let pt = polarPoint(azDeg: last.az, elDeg: last.el, center: center, maxR: maxR)
-                let glowRect = CGRect(x: pt.x - 5, y: pt.y - 5, width: 10, height: 10)
-                context.drawLayer { ctx in
-                    ctx.addFilter(.blur(radius: 2.5))
-                    ctx.fill(Path(ellipseIn: glowRect),
-                             with: .color(pass.constellation.color.opacity(0.5)))
-                }
-            }
+            drawPassTrail(pass, isLive: false, context: &context,
+                          center: center, maxR: maxR,
+                          now: staticNow, colorScheme: colorScheme,
+                          geometryCache: geometryCache)
         }
-    }
-
-    /// Project a smoothed az/el sample (in degrees) onto the polar canvas.
-    /// Azimuth 0° is up (north); elevation 90° is the centre. Kept in double
-    /// precision because the segmented track returns smoothed, non-integer
-    /// az/el — rounding to `Int` here would re-introduce the 1° staircase the
-    /// smoothing pass exists to remove.
-    private func polarPoint(azDeg: Double, elDeg: Double, center: CGPoint, maxR: CGFloat) -> CGPoint {
-        let r = (90.0 - elDeg) / 90.0 * Double(maxR)
-        let rad = azDeg * .pi / 180.0
-        return CGPoint(x: center.x + CGFloat(r * sin(rad)),
-                       y: center.y - CGFloat(r * cos(rad)))
     }
 
     // MARK: - Horizon Mask
@@ -653,79 +862,123 @@ private struct SkyPlotCanvas: View {
         let sectorWidthDeg = 360.0 / Double(azBins)       // 5°
         let elStepDeg = 90.0 / Double(elBins)             // 5°
 
-        for azBin in 0..<azBins {
-            for elBin in 0..<elBins {
-                guard let snr = sectorHeatmap[azBin][elBin] else { continue }
+        // Render the whole field into one layer so we can (1) hold its overall
+        // weight well below the trails — the heatmap is context, the arcs are
+        // the subject — and (2) blur the layer as a unit. The blur is the main
+        // softening lever: it dissolves the hard cell-to-cell seams that made
+        // the field read as chunky tiles into a smooth gradient, while a small
+        // per-wedge overlap (below) stops faint hairline gaps appearing between
+        // neighbours once blurred.
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 3))
+            layer.opacity = (colorScheme == .light) ? 0.85 : 0.6
 
-                // Elevation → radius: 0° at outer edge, 90° at center.
-                let elLo = Double(elBin) * elStepDeg
-                let elHi = elLo + elStepDeg
-                let rOuter = (90.0 - elLo) / 90.0 * Double(maxR)
-                let rInner = (90.0 - elHi) / 90.0 * Double(maxR)
+            for azBin in 0..<azBins {
+                for elBin in 0..<elBins {
+                    guard let snr = sectorHeatmap[azBin][elBin] else { continue }
 
-                // Azimuth → angle: 0° north, clockwise. Two radian endpoints.
-                let azStart = Double(azBin) * sectorWidthDeg * .pi / 180.0
-                let azEnd = (Double(azBin) + 1) * sectorWidthDeg * .pi / 180.0
+                    // Elevation → radius: 0° at outer edge, 90° at center.
+                    // Overlap neighbours by half a step on each side so the
+                    // blurred wedges blend instead of leaving seams between
+                    // adjacent cells.
+                    let elLo = Double(elBin) * elStepDeg
+                    let elHi = elLo + elStepDeg
+                    let rOuter = (90.0 - elLo) / 90.0 * Double(maxR) + 1.0
+                    let rInner = max(0, (90.0 - elHi) / 90.0 * Double(maxR) - 1.0)
 
-                // Build wedge: outer arc clockwise, then inner arc counter-
-                // clockwise. Sampled at 3 intermediate angles because the
-                // radial lines alone make a straight chord that looks jagged
-                // at the outer edge.
-                var path = Path()
-                let steps = 4
-                for i in 0...steps {
-                    let t = Double(i) / Double(steps)
-                    let a = azStart + (azEnd - azStart) * t
-                    let pt = CGPoint(
-                        x: center.x + CGFloat(rOuter * sin(a)),
-                        y: center.y - CGFloat(rOuter * cos(a))
-                    )
-                    if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
+                    // Azimuth → angle: 0° north, clockwise. Widen each wedge by
+                    // a fraction of a sector on both sides for the same reason.
+                    let azPad = sectorWidthDeg * 0.18 * .pi / 180.0
+                    let azStart = Double(azBin) * sectorWidthDeg * .pi / 180.0 - azPad
+                    let azEnd = (Double(azBin) + 1) * sectorWidthDeg * .pi / 180.0 + azPad
+
+                    // Build wedge: outer arc clockwise, then inner arc counter-
+                    // clockwise. Sampled at intermediate angles because the
+                    // radial lines alone make a straight chord that looks jagged
+                    // at the outer edge.
+                    var path = Path()
+                    let steps = 4
+                    for i in 0...steps {
+                        let t = Double(i) / Double(steps)
+                        let a = azStart + (azEnd - azStart) * t
+                        let pt = CGPoint(
+                            x: center.x + CGFloat(rOuter * sin(a)),
+                            y: center.y - CGFloat(rOuter * cos(a))
+                        )
+                        if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
+                    }
+                    for i in stride(from: steps, through: 0, by: -1) {
+                        let t = Double(i) / Double(steps)
+                        let a = azStart + (azEnd - azStart) * t
+                        let pt = CGPoint(
+                            x: center.x + CGFloat(rInner * sin(a)),
+                            y: center.y - CGFloat(rInner * cos(a))
+                        )
+                        path.addLine(to: pt)
+                    }
+                    path.closeSubpath()
+
+                    layer.fill(path, with: .color(snrHeatColor(snr: snr)))
                 }
-                for i in stride(from: steps, through: 0, by: -1) {
-                    let t = Double(i) / Double(steps)
-                    let a = azStart + (azEnd - azStart) * t
-                    let pt = CGPoint(
-                        x: center.x + CGFloat(rInner * sin(a)),
-                        y: center.y - CGFloat(rInner * cos(a))
-                    )
-                    path.addLine(to: pt)
-                }
-                path.closeSubpath()
-
-                context.fill(path, with: .color(snrHeatColor(snr: snr)))
             }
         }
     }
 
-    /// SNR → heatmap colour. Matches u-center's blue→purple→red ramp
-    /// roughly: low SNR is a cool cyan/blue, mid is purple, strong signal is
-    /// warm magenta/red. Opacity is capped so bright cells don't swamp the
-    /// satellite dots and trails overlaid on top.
+    /// SNR → heatmap colour, with a ramp per appearance because the polar plot
+    /// sits on the window background and the same colours can't read on both.
+    ///
+    /// Dark mode keeps the original u-center-style ramp: navy → purple → warm
+    /// red, which only separates from a near-black backdrop. On a WHITE
+    /// background that low end is invisible (dark purple on white reads as a
+    /// flat smudge and the low alpha makes it vanish), so light mode uses a
+    /// distinct ramp of mid-saturation colours — teal → amber → crimson — that
+    /// all sit clearly darker than white, plus a higher alpha floor so even the
+    /// weakest observed cell shows. Overall layer weight is held down by the
+    /// caller's `drawLayer` opacity so neither ramp swamps the trails on top.
     private func snrHeatColor(snr: Int) -> Color {
         // Clamp into the 10–50 dBHz band that matters for GPS.
         let lo = 10.0, hi = 50.0
         let t = min(1.0, max(0.0, (Double(snr) - lo) / (hi - lo)))
 
-        // Two-stop ramp through purple: navy → purple → warm red.
-        // Values picked to echo the u-center colour wheel without being a
-        // direct lift.
-        let r, g, b: Double
-        if t < 0.5 {
-            let u = t / 0.5
-            r = 0.10 + (0.55 - 0.10) * u
-            g = 0.20 + (0.10 - 0.20) * u
-            b = 0.55 + (0.75 - 0.55) * u
+        let r, g, b, alpha: Double
+        if colorScheme == .light {
+            // Teal (weak) → amber (mid) → crimson (strong). Every stop is a
+            // saturated mid-tone that contrasts against white, so low SNR is
+            // legible rather than a pale lavender wash. Alpha starts higher and
+            // climbs so the gradient is visible across the whole range on white.
+            // Cohesive cool ramp: soft blue (weak) → violet (mid) → rose
+            // (strong). One harmonious hue arc rather than the previous
+            // teal/amber/crimson clash, every stop clearly darker than white.
+            if t < 0.5 {
+                let u = t / 0.5
+                r = 0.35 + (0.58 - 0.35) * u
+                g = 0.55 + (0.42 - 0.55) * u
+                b = 0.80 + (0.70 - 0.80) * u
+            } else {
+                let u = (t - 0.5) / 0.5
+                r = 0.58 + (0.82 - 0.58) * u
+                g = 0.42 + (0.32 - 0.42) * u
+                b = 0.70 + (0.52 - 0.70) * u
+            }
+            alpha = 0.42 + 0.32 * t
         } else {
-            let u = (t - 0.5) / 0.5
-            r = 0.55 + (0.95 - 0.55) * u
-            g = 0.10 + (0.25 - 0.10) * u
-            b = 0.75 + (0.30 - 0.75) * u
+            // Two-stop ramp through purple: navy → purple → warm red. Values
+            // picked to echo the u-center colour wheel without being a direct
+            // lift. Reads only against the dark backdrop.
+            if t < 0.5 {
+                let u = t / 0.5
+                r = 0.10 + (0.55 - 0.10) * u
+                g = 0.20 + (0.10 - 0.20) * u
+                b = 0.55 + (0.75 - 0.55) * u
+            } else {
+                let u = (t - 0.5) / 0.5
+                r = 0.55 + (0.95 - 0.55) * u
+                g = 0.10 + (0.25 - 0.10) * u
+                b = 0.75 + (0.30 - 0.75) * u
+            }
+            alpha = 0.25 + 0.25 * t
         }
 
-        // Opacity ramps up a bit with SNR so weaker cells are visible but
-        // strong cells really stand out.
-        let alpha = 0.25 + 0.25 * t
         return Color(red: r, green: g, blue: b, opacity: alpha)
     }
 
@@ -771,6 +1024,73 @@ private struct SkyPlotCanvas: View {
                 Text("\(elev)\u{00B0}").font(.system(size: 8)).foregroundColor(.secondary.opacity(0.4)),
                 at: CGPoint(x: center.x + 2, y: center.y - r - 7), anchor: .leading
             )
+        }
+    }
+}
+
+// MARK: - Live Polar Layer
+
+/// The cheap, fast-changing half of the polar plot, drawn ON TOP of the cached
+/// static layer every tick. It holds only the handful of items that genuinely
+/// move with the live `now`: the LIVE-pass trails (which grow each second) and
+/// their comet-head glow, the current satellite dots and their glow, and the
+/// sun and moon. There is deliberately no `Equatable`/`.equatable()` here — its
+/// per-frame cost is a tiny fraction of the static history, so re-running it at
+/// 1 Hz is fine. It shares the exact coordinate maths (`center`/`maxR` from the
+/// same `size`) with the static layer, so the two register pixel-for-pixel.
+private struct LivePolarLayer: View {
+    let geometryCache: PassGeometryCache
+    let satellites: [SatelliteInfo]
+    let livePasses: [SatPass]
+    let sunPosition: CelestialPosition?
+    let moonPosition: CelestialPosition?
+    let moonPhase: Double
+    let now: Date
+    var showLabels: Bool = true
+    let colorScheme: ColorScheme
+    /// Whether the app is frontmost; mirrors the parent's `scenePhase` gate so
+    /// the live trails + glow are skipped while backgrounded (the satellite
+    /// dots, sun, and moon stay, matching the original behaviour).
+    let active: Bool
+
+    var body: some View {
+        Canvas { context, size in
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            let maxR = min(size.width, size.height) / 2 - 24
+            guard maxR > 10 else { return }
+
+            if active {
+                drawLiveTrails(context: &context, center: center, maxR: maxR)
+                drawGlowLayer(context: &context, center: center, maxR: maxR)
+            }
+            drawSatellites(context: &context, center: center, maxR: maxR)
+            drawSun(context: &context, center: center, maxR: maxR)
+            drawMoon(context: &context, center: center, maxR: maxR)
+        }
+    }
+
+    // MARK: - Trails
+
+    private func drawLiveTrails(context: inout GraphicsContext, center: CGPoint, maxR: CGFloat) {
+        // Draw oldest first so fresher passes layer on top. Each live pass also
+        // gets a glowing comet-head at its freshest fix — the last point of the
+        // last segment (segments are time-ordered, so this is the newest sample
+        // on the smoothed curve), returned by the shared trail helper.
+        let ordered = livePasses.sorted { $0.endTime < $1.endTime }
+        for pass in ordered {
+            let head = drawPassTrail(pass, isLive: true, context: &context,
+                                     center: center, maxR: maxR,
+                                     now: now, colorScheme: colorScheme,
+                                     geometryCache: geometryCache)
+            if let last = head {
+                let pt = polarPosition(azDeg: last.az, elDeg: last.el, center: center, maxR: maxR)
+                let glowRect = CGRect(x: pt.x - 5, y: pt.y - 5, width: 10, height: 10)
+                context.drawLayer { ctx in
+                    ctx.addFilter(.blur(radius: 2.5))
+                    ctx.fill(Path(ellipseIn: glowRect),
+                             with: .color(pass.constellation.color.opacity(0.5)))
+                }
+            }
         }
     }
 

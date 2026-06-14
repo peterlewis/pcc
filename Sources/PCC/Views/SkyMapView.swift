@@ -5,6 +5,8 @@ import CoreLocation
 /// Satellite ground-track map for the Sky View.
 /// Shows sub-satellite points, sun/moon projections, per-pass polylines, and the user's GPS position.
 struct SkyMapView: View {
+    let geometryCache: PassGeometryCache
+    @Environment(\.colorScheme) private var colorScheme
     let satellites: [SatelliteInfo]
     let sunPosition: CelestialPosition?
     let moonPosition: CelestialPosition?
@@ -83,7 +85,19 @@ struct SkyMapView: View {
                     // Age tier drives the per-pass point budget (older passes
                     // decimated harder — issue #7) and the fade/taper styling.
                     let tier = PassAgeTier.tier(endAge: age, isLive: isLive)
-                    let alpha = PassAgeTier.opacity(endAge: age, isLive: isLive)
+                    // `PassAgeTier.opacity` is tuned for the black globe (floor
+                    // ~0.06); on the always-lighter map basemap those faint old
+                    // tracks vanish, which is why the map looked starved next to
+                    // the globe. Remap the [0.06, 0.75] age curve into a higher,
+                    // map-legible band (~[0.45, 0.95]) so older ground tracks stay
+                    // visible while fresh/live ones still read as strong. The age
+                    // ordering — and thus the fade — is preserved, just lifted.
+                    let baseAlpha = PassAgeTier.opacity(endAge: age, isLive: isLive)
+                    // Lift the space-tuned fade into a map-legible band. The
+                    // light basemap is far brighter than the dark one, so it
+                    // needs a higher floor or old tracks still wash out.
+                    let floor = colorScheme == .light ? 0.62 : 0.45
+                    let alpha = min(0.96, floor + (baseAlpha - 0.06) / 0.69 * (0.95 - floor))
                     let stroke = PassAgeTier.strokeWidth(endAge: age, isLive: isLive)
                     // Segmented ground track: split at recording gaps, each run
                     // smoothed and decimated independently. Each segment is its
@@ -92,9 +106,9 @@ struct SkyMapView: View {
                     // `smoothingWindow: 1` disables smoothing so the raw NMEA 1°
                     // quantisation shows through; `0` asks for the adaptive
                     // moving-average.
-                    let segments = pass.groundTrackSegments(observerLat: lat, observerLon: lon,
-                                                            maxPoints: tier.maxPoints,
-                                                            smoothingWindow: smoothTrails ? 0 : 1)
+                    let segments = geometryCache.groundSegments(for: pass, observerLat: lat, observerLon: lon,
+                                                                maxPoints: tier.maxPoints,
+                                                                smoothingWindow: smoothTrails ? 0 : 1)
                     ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
                         let coords = segment.map(\.coord)
                         if coords.count >= 2 {

@@ -104,6 +104,7 @@ final class GlobeClockSettings: ObservableObject {
 /// locally — the globe works offline with a pinned version of every
 /// third-party asset. Licensing: see `THIRD_PARTY_LICENSES.md`.
 struct SkyGlobeView: View {
+    let geometryCache: PassGeometryCache
     let satellites: [SatelliteInfo]
     let sunPosition: CelestialPosition?
     let moonPosition: CelestialPosition?
@@ -126,6 +127,7 @@ struct SkyGlobeView: View {
 
     var body: some View {
         GlobeWebView(
+            geometryCache: geometryCache,
             satellites: settings.skyShowSatellites ? satellites : [],
             sunPosition: settings.skyShowCelestials ? sunPosition : nil,
             moonPosition: settings.skyShowCelestials ? moonPosition : nil,
@@ -174,6 +176,7 @@ struct SkyGlobeView: View {
 // MARK: - WebView Wrapper
 
 private struct GlobeWebView: NSViewRepresentable {
+    let geometryCache: PassGeometryCache
     let satellites: [SatelliteInfo]
     let sunPosition: CelestialPosition?
     let moonPosition: CelestialPosition?
@@ -252,7 +255,13 @@ private struct GlobeWebView: NSViewRepresentable {
         // Keep the coordinator's settings ref fresh in case the SwiftUI
         // identity changes across updates (cheap and avoids stale closures).
         context.coordinator.clockSettings = clockSettings
-        let js = buildUpdateJS()
+        // The coordinator is passed in because the path-update step is now
+        // INCREMENTAL: it diffs the current paths against what was last sent
+        // (state that must persist across updates, so it lives on the
+        // coordinator) and emits only a delta. Everything else in the JS
+        // string is still recomputed wholesale each tick — those updates are
+        // cheap; only the path re-tessellation was expensive.
+        let js = buildUpdateJS(coordinator: context.coordinator)
         context.coordinator.pendingJS = js
         context.coordinator.sendIfReady()
     }
@@ -264,6 +273,28 @@ private struct GlobeWebView: NSViewRepresentable {
         weak var clockSettings: GlobeClockSettings?
         var isReady = false
         var pendingJS: String?
+
+        // MARK: Incremental path-diff state
+        //
+        // These persist across SwiftUI updates so each tick can compute a
+        // delta against the last send instead of reshipping every polyline.
+        //
+        // `sentPathVersions` maps a path's stable id
+        // (`"<passUUID>#<segmentIndex>"`) to the content-version string that
+        // was last sent for it. A path is re-sent (upserted) only when its id
+        // is new or its version differs; ids present last time but absent now
+        // are removed. When neither set has anything, no path update is sent
+        // at all — the steady-state win that stops the per-second
+        // re-tessellation of unchanged tracks.
+        var sentPathVersions: [String: String] = [:]
+
+        // Signature of the GLOBAL inputs that, when changed, invalidate every
+        // path at once (the visible pass set's time-window trim, the
+        // smoothTrails toggle, and the quantized observer position — all of
+        // which can change every path's coordinates). A mismatch forces a
+        // full `replaceAll` rather than a per-path diff. `nil` until the first
+        // send so the first update always rebuilds from scratch.
+        var lastGlobalSignature: String?
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             switch message.name {
@@ -306,12 +337,17 @@ private struct GlobeWebView: NSViewRepresentable {
 
     // MARK: - Data → JS
 
-    private func buildUpdateJS() -> String {
-        // Globe trails get a modest stroke boost so WebGL-smoothed lines read
-        // at a similar visual weight to the Canvas-rasterised polar plot.
-        // Opacity comes directly from `PassAgeTier.opacity(endAge:isLive:)`
-        // without any additional multiplier — one source of truth for fade.
-        let trailStrokeScale = 1.7
+    private func buildUpdateJS(coordinator: Coordinator) -> String {
+        // Globe trails get a substantial stroke boost so the WebGL fat-line
+        // tubes read as solid, overlapping ribbons rather than a string of
+        // beads. The previous 1.7× left the tube too thin to bridge the
+        // angular gap between adjacent (now full-resolution) observations, so
+        // the joins pinched into discrete dots; 3.2× makes each tube fat
+        // enough to fuse into a continuous sweep. The matching `pathResolution`
+        // bump in index.html does the rest. Opacity still comes directly from
+        // `PassAgeTier.opacity(endAge:isLive:)` with no extra multiplier — one
+        // source of truth for fade.
+        let trailStrokeScale = 2.2
 
         // Live satellite dots require a real observer fix. The sub-satellite
         // projection is observer-relative, so without a fix we'd previously
@@ -345,7 +381,13 @@ private struct GlobeWebView: NSViewRepresentable {
         // Trail paths — one polyline per pass SEGMENT. Per-point altitude
         // matches the live-satellite formula so a recorded arc rises with
         // observed elevation instead of skating flat across the sphere.
-        var pathData: [[String: Any]] = []
+        //
+        // Each entry carries a STABLE id and a content VERSION alongside its
+        // dict so the diff downstream can decide what actually needs
+        // re-sending. The id and version are NOT shipped as path style — the
+        // id rides in the dict purely as the JS Map key; the version stays
+        // Swift-side in `sentPathVersions`.
+        var pathEntries: [(id: String, version: String, dict: [String: Any])] = []
 
         if let lat = userLatitude, let lon = userLongitude {
             let ordered = passes.sorted { $0.endTime < $1.endTime }
@@ -359,27 +401,75 @@ private struct GlobeWebView: NSViewRepresentable {
                 let alpha = PassAgeTier.opacity(endAge: endAge, isLive: isLive)
                 let stroke = Double(PassAgeTier.strokeWidth(endAge: endAge, isLive: isLive))
                     * trailStrokeScale
+
+                // Content version. A path's dict changes iff its coords,
+                // color, or stroke change, so the version must move iff one of
+                // those would:
+                //   - observation count covers live growth (more points) and
+                //     a window trim handing back a shorter same-id pass.
+                //   - opacity and stroke are CONTINUOUS functions of age (the
+                //     look depends on that — they are deliberately not
+                //     quantized into the rendered dict). But a continuous value
+                //     drifts every tick, which alone would defeat the identity
+                //     diff. So we quantize ONLY here, finely: ~0.005 in opacity
+                //     and ~0.05 in stroke. An imperceptible per-second drift (a
+                //     6 h-old pass moves ~0.0001/s in opacity) stays on the same
+                //     step and is NOT re-sent, while genuine fade still crosses
+                //     a step every few minutes and re-sends — visually smooth,
+                //     incrementally stable.
+                let opacityQ = Int((alpha * 200).rounded())
+                let strokeQ = Int((stroke * 20).rounded())
+                let version = "\(pass.observations.count):\(opacityQ):\(strokeQ)"
+
+                // Age-based desaturation (FIX #4). Alpha alone separates ages
+                // poorly against the dense, bright globe, so we ALSO cool/mute
+                // the hue with age: newest/live keeps full constellation
+                // saturation, oldest fades toward a desaturated cool-grey.
+                //
+                // The desaturation amount is derived from `opacityQ` — the SAME
+                // quantized age signal already in the version string above — not
+                // from the raw `alpha`. That is the key to keeping the
+                // incremental delta system honest: the rendered colour is now a
+                // pure function of `opacityQ`, so it is byte-identical whenever
+                // `opacityQ` is, and it changes ONLY when `opacityQ` changes —
+                // which already bumps the version and triggers that path's
+                // re-send. No new continuously-varying colour dimension is
+                // introduced, so no extra version component is needed.
+                let trailColor = desaturatedTrailColor(
+                    for: pass.constellation,
+                    opacityQ: opacityQ,
+                    alpha: alpha
+                )
+
                 // Segmented ground track: the pass is split at recording gaps
                 // and each run is smoothed and decimated to its share of the
                 // tier budget. Each segment is pushed as its OWN path entry —
                 // concatenating them into one polyline let globe.gl draw a
                 // great-circle chord across the gap through unobserved sky,
                 // which is the "spiral" artefact (issue #8).
-                let segments = pass.groundTrackSegments(observerLat: lat, observerLon: lon,
-                                                        maxPoints: tier.maxPoints,
-                                                        smoothingWindow: smoothTrails ? 0 : 1)
-                for segment in segments {
+                let segments = geometryCache.groundSegments(for: pass, observerLat: lat, observerLon: lon,
+                                                            maxPoints: tier.maxPoints,
+                                                            smoothingWindow: smoothTrails ? 0 : 1)
+                for (segmentIndex, segment) in segments.enumerated() {
                     guard segment.count >= 2 else { continue }
+                    // Stable across ticks: same pass + same segment ordinal →
+                    // same id, so an unchanged segment keeps its WebGL geometry.
+                    let id = "\(pass.id.uuidString)#\(segmentIndex)"
                     let points: [[Double]] = segment.map { sample in
                         [sample.coord.latitude,
                          sample.coord.longitude,
                          satAltitude(forElevation: sample.elevation)]
                     }
-                    pathData.append([
-                        "coords": points,
-                        "color": pass.constellation.rgba(alpha: alpha),
-                        "stroke": stroke
-                    ])
+                    pathEntries.append((
+                        id: id,
+                        version: version,
+                        dict: [
+                            "id": id,
+                            "coords": points,
+                            "color": trailColor,
+                            "stroke": stroke
+                        ]
+                    ))
                 }
             }
         }
@@ -446,13 +536,125 @@ private struct GlobeWebView: NSViewRepresentable {
         if let ringJson = jsonString(rings) {
             js += "if(window.updateRings)updateRings(\(ringJson));"
         }
-        if let pathJson = jsonString(pathData) {
-            js += "if(window.updatePaths)updatePaths(\(pathJson));"
+
+        // ---- Incremental path delta -------------------------------------
+        // Decide the smallest path update that brings the globe's Map in line
+        // with the current frame, exploiting three-globe's object-identity
+        // diff. See `Coordinator.sentPathVersions` for the rationale.
+        if let pathJS = buildPathDeltaJS(entries: pathEntries, coordinator: coordinator) {
+            js += pathJS
         }
+
         if let lat = userLatitude, let lon = userLongitude {
             js += "if(window.focusOn)focusOn(\(lat),\(lon));"
         }
         return js
+    }
+
+    /// Compute the incremental `applyPathDelta` call (or `nil` when nothing
+    /// about the paths changed this tick — the common steady state).
+    ///
+    /// Mutates the coordinator's `sentPathVersions` / `lastGlobalSignature` to
+    /// reflect what is now on the globe.
+    ///
+    /// Decision order:
+    ///  - If the GLOBAL signature changed (time-window membership,
+    ///    `smoothTrails`, or the quantized observer position — any of which can
+    ///    silently move every path's coords WITHOUT changing its per-path
+    ///    version), rebuild everything via `replaceAll`. This is the only thing
+    ///    that catches an observer move or a smoothTrails toggle, because those
+    ///    leave observation count, opacity, and stroke untouched.
+    ///  - Otherwise upsert paths that are new or whose version differs, and
+    ///    remove ids that were sent before but are gone now.
+    ///  - If neither set has anything, send no path update at all.
+    private func buildPathDeltaJS(entries: [(id: String, version: String, dict: [String: Any])],
+                                  coordinator: Coordinator) -> String? {
+        // Global signature. Observer position is quantized to ~1e-3° (≈100 m),
+        // matching `PassGeometryCache`'s own key granularity so the two agree
+        // on what counts as "moved". The visible pass set is folded in by id
+        // MEMBERSHIP only — never by observation count, since a live pass's
+        // count climbing each tick must NOT trigger a global rebuild (that is
+        // a per-path upsert). A window change alters membership and so does
+        // flip the signature, forcing the (rare, user-initiated) full rebuild.
+        let obsSig: String
+        if let lat = userLatitude, let lon = userLongitude {
+            let latQ = Int((lat * 1000).rounded())
+            let lonQ = Int((lon * 1000).rounded())
+            obsSig = "\(latQ),\(lonQ)"
+        } else {
+            obsSig = "none"
+        }
+        // Membership is the raw sorted id list, not its `hashValue`: Swift's
+        // string hash is per-process randomized (stable within a run, but we
+        // avoid depending on that) and a hash collision could in theory mask a
+        // membership change. The list is short enough (≈100 UUIDs) that direct
+        // comparison each tick is negligible. Membership change is in any case
+        // also caught by the per-path upsert/remove below; this just promotes
+        // it to a clean full rebuild.
+        let memberSig = passes.map { $0.id.uuidString }.sorted().joined(separator: ",")
+        let globalSignature = "\(smoothTrails ? 1 : 0)|\(obsSig)|\(memberSig)"
+
+        // Current id → version. (The dicts themselves are read straight from
+        // `entries` when building upserts, so no separate id→dict map is kept.)
+        var currentVersions: [String: String] = [:]
+        currentVersions.reserveCapacity(entries.count)
+        for entry in entries {
+            // Ids are unique per (pass, segmentIndex); on the off chance of a
+            // collision, last write wins — harmless, the dicts are equivalent.
+            currentVersions[entry.id] = entry.version
+        }
+
+        let globalChanged = coordinator.lastGlobalSignature != globalSignature
+
+        if globalChanged {
+            // Full rebuild: replace the entire dataset with every current dict.
+            // Order is stable (passes were sorted by endTime upstream) so the
+            // newest tracks draw last / on top, as before.
+            let allDicts = entries.map { $0.dict }
+            // Serialize BEFORE committing state: if serialization were to fail
+            // we must not record a send that never reached the globe, or the
+            // next diff would compute against a phantom baseline. We also hold
+            // off updating `lastGlobalSignature` so a failed rebuild is retried
+            // next tick rather than silently skipped.
+            guard let upsertJSON = jsonString(allDicts) else { return nil }
+            coordinator.lastGlobalSignature = globalSignature
+            coordinator.sentPathVersions = currentVersions
+            return "if(window.applyPathDelta)applyPathDelta({replaceAll:true,upsert:\(upsertJSON)});"
+        }
+        coordinator.lastGlobalSignature = globalSignature
+
+        // Per-path diff against the last send.
+        var upsertDicts: [[String: Any]] = []
+        for entry in entries where coordinator.sentPathVersions[entry.id] != entry.version {
+            upsertDicts.append(entry.dict)
+        }
+        var removeIDs: [String] = []
+        for id in coordinator.sentPathVersions.keys where currentVersions[id] == nil {
+            removeIDs.append(id)
+        }
+
+        if upsertDicts.isEmpty && removeIDs.isEmpty {
+            // Steady state: nothing changed, so the globe keeps every existing
+            // line object by identity and we skip the path call entirely.
+            // `sentPathVersions` already equals `currentVersions` here (same
+            // ids, same versions), so there is nothing to commit.
+            return nil
+        }
+
+        // Serialize the delta first; only once we have a payload to ship do we
+        // commit the new baseline, so Swift's record of the globe's contents
+        // never drifts from what was actually applied.
+        var parts: [String] = []
+        if !removeIDs.isEmpty {
+            guard let removeJSON = jsonString(removeIDs) else { return nil }
+            parts.append("remove:\(removeJSON)")
+        }
+        if !upsertDicts.isEmpty {
+            guard let upsertJSON = jsonString(upsertDicts) else { return nil }
+            parts.append("upsert:\(upsertJSON)")
+        }
+        coordinator.sentPathVersions = currentVersions
+        return "if(window.applyPathDelta)applyPathDelta({\(parts.joined(separator: ","))});"
     }
 
     /// Satellite-to-globe altitude mapping. Sits on a band well off the sphere
@@ -468,6 +670,65 @@ private struct GlobeWebView: NSViewRepresentable {
         guard let data = try? JSONSerialization.data(withJSONObject: obj),
               let str = String(data: data, encoding: .utf8) else { return nil }
         return str
+    }
+
+    /// Constellation colour for a trail, cooled and desaturated by age so older
+    /// tracks read as older (FIX #4). Returns a pre-formatted `rgba(...)` string
+    /// for globe.gl `pathColor`.
+    ///
+    /// Why blend toward a *cool grey* and not just lower alpha: against the
+    /// bright, dense day/night globe a pure alpha fade barely separates a
+    /// 1 h-old arc from a 6 h-old one — both stay vividly coloured. Pulling the
+    /// hue toward a muted blue-grey as it ages gives a second, stronger depth
+    /// cue: live/newest sweeps stay fully saturated and "hot", week-old ones
+    /// recede into a faint cool wash.
+    ///
+    /// Incremental-system contract: the desaturation amount is a pure function
+    /// of `opacityQ` — the quantized opacity already folded into each path's
+    /// version string — reconstructed here as `Double(opacityQ) / 200`. We do
+    /// NOT key it off the raw continuous `alpha`. That guarantees the emitted
+    /// colour is constant for a constant `opacityQ` and changes only when
+    /// `opacityQ` steps, which already moves the version and re-sends the path.
+    /// `alpha` is passed in only as the (already-quantized-upstream) value to
+    /// bake into the rgba's own alpha channel, keeping one source of truth for
+    /// the fade while the hue cooling rides the same age step.
+    private func desaturatedTrailColor(for constellation: SatConstellation,
+                                       opacityQ: Int,
+                                       alpha: Double) -> String {
+        let (r, g, b) = constellation.rgb255
+
+        // Reconstruct the quantized alpha so the cooling is a step function of
+        // the SAME signal the version key tracks (see contract above).
+        let quantAlpha = Double(opacityQ) / 200.0
+
+        // Map opacity → "age fraction" across the non-live fade band. The
+        // opacity curve runs ≈0.58 (just ended) down to a 0.06 floor (≈7 d+),
+        // with live pinned at 0.75. Normalize so freshly-ended ≈ 0 (no cooling)
+        // and the oldest ≈ 1 (max cooling); anything brighter than the
+        // just-ended value (i.e. live) also clamps to 0. Cheap arithmetic only.
+        let freshAlpha = 0.58
+        let oldAlpha = 0.06
+        let raw = (freshAlpha - quantAlpha) / (freshAlpha - oldAlpha)
+        let ageFraction = max(0.0, min(1.0, raw))
+
+        // Cap the blend so the oldest tracks are clearly muted but never lose
+        // their hue entirely (a fully grey trail would be unreadable against
+        // the night side). 0.7 leaves ~30% of the original chroma at the floor.
+        let blend = ageFraction * 0.7
+
+        // Cool-grey target: a slightly blue-biased neutral so aged trails drift
+        // cool rather than to a dead flat grey, reinforcing the "receding into
+        // the dark" read. Mid-low luminance so they sit back against the globe.
+        let targetR = 120.0, targetG = 130.0, targetB = 150.0
+
+        let mr = Double(r) + (targetR - Double(r)) * blend
+        let mg = Double(g) + (targetG - Double(g)) * blend
+        let mb = Double(b) + (targetB - Double(b)) * blend
+
+        let clampChannel: (Double) -> Int = { Int(max(0.0, min(255.0, $0)).rounded()) }
+        let a = max(0.0, min(1.0, alpha))
+        return String(format: "rgba(%d,%d,%d,%.3f)",
+                      clampChannel(mr), clampChannel(mg), clampChannel(mb), a)
     }
 
     /// Project a celestial body (sun/moon) from observer azimuth/elevation to lat/lon on the globe.

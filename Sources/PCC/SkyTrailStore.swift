@@ -418,7 +418,7 @@ class SkyTrailStore: ObservableObject {
         let dayKey = fmt.string(from: pass.startTime)
         let dayDir = passesDir.appendingPathComponent(dayKey)
         try? FileManager.default.createDirectory(at: dayDir, withIntermediateDirectories: true)
-        return dayDir.appendingPathComponent("\(pass.id).json")
+        return dayDir.appendingPathComponent("\(pass.id).pcc")
     }
 
     /// Marks a pass for persistence on the next batched flush rather than
@@ -459,7 +459,7 @@ class SkyTrailStore: ObservableObject {
         dirtyPasses.removeAll()
         for (_, pass) in batch {
             let url = passFileURL(for: pass)
-            guard let data = try? JSONEncoder().encode(pass) else { continue }
+            let data = pass.binaryEncoded()   // compact binary (~6× smaller than JSON)
             saveQueue.async {
                 try? data.write(to: url, options: .atomic)
             }
@@ -478,8 +478,11 @@ class SkyTrailStore: ObservableObject {
         // pass can't be resurrected by the next flush.
         dirtyPasses.removeValue(forKey: pass.id)
         let url = passFileURL(for: pass)
+        // Also clear any not-yet-migrated legacy JSON sibling.
+        let legacy = url.deletingPathExtension().appendingPathExtension("json")
         saveQueue.async {
             try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: legacy)
         }
     }
 
@@ -529,17 +532,47 @@ class SkyTrailStore: ObservableObject {
         var loaded: [SatPass] = []
         for dayDir in dayDirs where dayDir.lastPathComponent != Self.quarantineDirName {
             guard let files = try? fm.contentsOfDirectory(at: dayDir, includingPropertiesForKeys: nil) else { continue }
-            for file in files where file.pathExtension == "json" {
-                guard let data = try? Data(contentsOf: file) else { continue }
-                guard let pass = try? JSONDecoder().decode(SatPass.self, from: data) else {
-                    quarantineFile(file, into: quarantineDir, fm: fm)
-                    continue
-                }
-                guard pass.observations.count >= Self.minObservations else {
+            // Ids already present as binary, so a legacy JSON sibling can be
+            // dropped without re-migrating (e.g. after a crash mid-migration).
+            let binIds = Set(files.filter { $0.pathExtension == "pcc" }
+                .map { $0.deletingPathExtension().lastPathComponent })
+            for file in files {
+                switch file.pathExtension {
+                case "pcc":
+                    guard let data = try? Data(contentsOf: file) else { continue }
+                    guard let pass = SatPass(binary: data) else {
+                        quarantineFile(file, into: quarantineDir, fm: fm)
+                        continue
+                    }
+                    guard pass.observations.count >= Self.minObservations else {
+                        try? fm.removeItem(at: file)
+                        continue
+                    }
+                    loaded.append(pass)
+                case "json":
+                    // Legacy format: decode, write the compact binary sibling,
+                    // then drop the JSON. Binary is written BEFORE the JSON is
+                    // removed, so a crash mid-migration leaves the JSON intact
+                    // to retry; if both exist, the binary wins (handled above)
+                    // and the redundant JSON is discarded here.
+                    let id = file.deletingPathExtension().lastPathComponent
+                    if binIds.contains(id) { try? fm.removeItem(at: file); continue }
+                    guard let data = try? Data(contentsOf: file) else { continue }
+                    guard let pass = try? JSONDecoder().decode(SatPass.self, from: data) else {
+                        quarantineFile(file, into: quarantineDir, fm: fm)
+                        continue
+                    }
+                    guard pass.observations.count >= Self.minObservations else {
+                        try? fm.removeItem(at: file)
+                        continue
+                    }
+                    let binURL = file.deletingPathExtension().appendingPathExtension("pcc")
+                    try? pass.binaryEncoded().write(to: binURL, options: .atomic)
                     try? fm.removeItem(at: file)
+                    loaded.append(pass)
+                default:
                     continue
                 }
-                loaded.append(pass)
             }
         }
 

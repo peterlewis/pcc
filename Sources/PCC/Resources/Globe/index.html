@@ -177,10 +177,28 @@ try {
         .ringAltitude(0.002)
 
         // Per-pass trail polylines, WebGL-rendered.
+        //
+        // A non-null `pathStroke` makes globe.gl render each track as a fat
+        // tube (THREE Line2) rather than a 1px GL line — that is what lets the
+        // trails read as solid overlapping ribbons. Two settings make them
+        // *continuous* instead of a string of beads:
+        //
+        //   - `pathResolution` is the angular step (in degrees) at which each
+        //     chord between successive observations is subdivided onto the
+        //     sphere. The default of 2° is coarse: with per-point altitude
+        //     varying (arcs rise with elevation) a coarse subdivision makes the
+        //     tube pinch between samples and read as separate blobs. 0.5° packs
+        //     in ~4× the intermediate vertices so the tube stays a smooth,
+        //     unbroken sweep that hugs the curvature.
+        //   - the stroke fallback is bumped (1.2 → 2.4) so that even before a
+        //     per-path `stroke` arrives the tube is fat enough to bridge the
+        //     angular gap between adjacent dense samples; thin tubes leave hair
+        //     gaps at the joins that look like dots.
         .pathsData([])
         .pathPoints('coords')
+        .pathResolution(0.5)
         .pathColor(d => d.color)
-        .pathStroke(d => d.stroke || 1.2)
+        .pathStroke(d => d.stroke || 2.4)
         .pathPointAlt(p => p[2])
         .pathTransitionDuration(0)
 
@@ -333,7 +351,59 @@ try {
 
     window.updateElements = function(data) { myGlobe.htmlElementsData(data); };
     window.updateRings    = function(data) { myGlobe.ringsData(data); };
-    window.updatePaths    = function(data) { myGlobe.pathsData(data); };
+
+    // ---- Incremental path store ---------------------------------------
+    // three-globe diffs incoming `pathsData` by OBJECT IDENTITY (its
+    // ThreeDigest): an array element that is the same object reference as
+    // last frame is recognised as unchanged and its WebGL line geometry is
+    // reused rather than re-tessellated. With ~100 passes at full point
+    // resolution, re-tessellating every one each ~1 Hz Swift tick was the
+    // dominant cost and the source of the lag — even though closed tracks
+    // never change.
+    //
+    // We exploit the identity diff by holding a persistent id→path Map.
+    // Swift sends only a DELTA each tick (paths that are new or whose
+    // content version changed, plus ids to remove); everything else stays
+    // in the Map as the *same object reference*, so three-globe skips it.
+    // CRITICAL: never clone or rebuild the objects already in the Map —
+    // doing so would change their identity and force a needless re-tessellate.
+    const pathStore = new Map();
+
+    window.applyPathDelta = function(delta) {
+        if (!delta) return;
+        // A global invalidation (time-window trim, smoothTrails toggle, or a
+        // moved observer) means every path's coords may have changed, so the
+        // whole dataset is rebuilt from the accompanying `upsert` list.
+        if (delta.replaceAll) pathStore.clear();
+        if (delta.remove) {
+            for (const id of delta.remove) pathStore.delete(id);
+        }
+        if (delta.upsert) {
+            // Replacing the entry for an id with a fresh object is intended
+            // here: a changed path *should* re-tessellate. Untouched entries
+            // keep their existing reference and are skipped by the diff.
+            for (const p of delta.upsert) pathStore.set(p.id, p);
+        }
+        myGlobe.pathsData(Array.from(pathStore.values()));
+    };
+
+    // Fallback full-replace entry point. Kept for the web (iframe) host,
+    // which ships whole snapshots, and as a safety hatch. Routes through the
+    // same store so a later delta builds on a consistent baseline: clear,
+    // repopulate, then push.
+    window.updatePaths = function(data) {
+        pathStore.clear();
+        if (data) {
+            for (const p of data) {
+                // Synthesize an id if the snapshot host doesn't supply one so
+                // the Map stays keyed; identity reuse simply won't kick in for
+                // those entries, which is fine for the full-replace path.
+                const key = (p && p.id != null) ? p.id : pathStore.size;
+                pathStore.set(key, p);
+            }
+        }
+        myGlobe.pathsData(Array.from(pathStore.values()));
+    };
 
     // ---- Clock overlay ------------------------------------------------
     // JS drives its own tick loop so the displayed time updates smoothly
