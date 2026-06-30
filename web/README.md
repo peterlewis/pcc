@@ -3,7 +3,7 @@
 Browser build of [PCC](../README.md), driving a Precision Clock Mk IV over [Web Serial](https://developer.mozilla.org/docs/Web/API/Web_Serial_API).
 
 > [!WARNING]
-> Proof-of-concept. Work in progress. Things may not work. Use the [Mac app](https://github.com/peterlewis/pcc/releases) for the best experience.
+> Work in progress — now the active focus of the project, but still maturing, so not everything works yet. (The native [macOS app](../macos/) is paused.)
 
 **[Open PCC Web →](https://peterlewis.github.io/pcc/web/)**
 
@@ -52,11 +52,11 @@ web/
 │   ├── serial.js       # Web Serial wrapper
 │   ├── nmea.js         # GGA / RMC / GSV parsers
 │   ├── astronomy.js    # sun / moon / sunrise-sunset
-│   ├── satpass.js      # ← mirrors Sources/PCC/SatPass.swift
-│   ├── skytrailstore.js# ← mirrors Sources/PCC/SkyTrailStore.swift
+│   ├── satpass.js      # ← mirrors macos/Sources/PCC/SatPass.swift
+│   ├── skytrailstore.js# ← mirrors macos/Sources/PCC/SkyTrailStore.swift
 │   ├── polar.js        # ← mirrors SkyView.swift
 │   └── globe.js        # ← mirrors SkyGlobeView.swift
-└── globe/              # ← byte-identical copy of Sources/PCC/Resources/Globe/
+└── globe/              # ← byte-identical copy of macos/Sources/PCC/Resources/Globe/
 ```
 
 Several JS modules mirror Swift files 1:1 — see [MAC_PARITY.md](../MAC_PARITY.md).

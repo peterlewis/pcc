@@ -8,3 +8,7 @@ DerivedData/
 PCC.dmg
 PCC.app/
 PCC.zip
+
+# python
+__pycache__/
+*.pyc

@@ -1,0 +1,25 @@
+# --- Precision Clock Mk IV refclock, fed by clock-chrony-bridge.py ------------
+# Add this to /etc/chrony/chrony.conf (Linux) or /usr/local/etc/chrony.conf
+# (macOS/Homebrew). chrony CREATES this socket on startup; the bridge connects
+# to it and sends one sample per GPS second.
+#
+#   path   : must match the bridge's --sock argument
+#   refid  : <=4 chars, shown in `chronyc sources`
+#   precision 1e-3 : honest ~1 ms — there is no hardware PPS wire into the host,
+#                    so USB framing + scheduling set the floor (see README)
+#   offset : seconds added by chrony to cancel the constant GPS->host latency.
+#            Start at 0.0; once running, read the settled offset with
+#            `chronyc sourcestats` (or compare to a known NTP source) and put its
+#            negative here. (You can instead pass --offset to the bridge.)
+#   filter 16 + poll 4 : average 16 one-per-second samples over each ~16 s poll,
+#                        which knocks the USB jitter down nicely.
+refclock SOCK /var/run/chrony.clock.sock refid GPS precision 1e-3 offset 0.0 poll 4 filter 16
+
+# Let chrony STEP the clock (not just slew) for the first few updates, so an
+# initially wrong clock snaps into line instead of crawling.
+makestep 1.0 3
+
+# If this is the box's only time source and you trust it, you may also want:
+#   local stratum 10        # still serve time if the refclock drops
+# and, to serve clients on your LAN:
+#   allow 192.168.0.0/16

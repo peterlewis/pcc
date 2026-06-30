@@ -2,7 +2,7 @@
 
 The `pcc` repo ships **two** companion apps for the Precision Clock Mk IV:
 
-- **Native macOS app** (`Sources/PCC/`) — SwiftUI + AppKit, full feature set.
+- **Native macOS app** (`macos/Sources/PCC/`) — SwiftUI + AppKit, full feature set.
 - **Browser port** (`web/`) — static HTML/CSS/ES modules, reduced feature set,
   deployable to GitHub Pages / any static host.
 
@@ -21,11 +21,11 @@ enums with methods vs JS plain-object namespaces).
 
 | Mac (Swift)                                      | Web (JS)                       | What it owns                                                        |
 | ------------------------------------------------ | ------------------------------ | ------------------------------------------------------------------- |
-| `Sources/PCC/SatPass.swift`                      | `web/js/satpass.js`            | Observation + pass data shape, smoothing, ground track, age tiers, `TimeWindow`, `RetentionWindow` |
-| `Sources/PCC/SkyTrailStore.swift`                | `web/js/skytrailstore.js`      | Pass recording, rejoin window, horizon mask + sector heatmap aggregation, retention pruning |
-| `Sources/PCC/Views/SkyView.swift` (SkyPlotCanvas)| `web/js/polar.js`              | Polar sky-plot renderer: heatmap, mask, grid, trails, live sats     |
-| `Sources/PCC/Views/SkyGlobeView.swift`           | `web/js/globe.js`              | 3D globe host: assembles the JSON shape the shared globe HTML consumes |
-| `Sources/PCC/SerialManager.swift` (parsers only) | `web/js/nmea.js`               | GGA / RMC / GSV sentence parsing, GSV multi-message reassembly      |
+| `macos/Sources/PCC/SatPass.swift`                      | `web/js/satpass.js`            | Observation + pass data shape, smoothing, ground track, age tiers, `TimeWindow`, `RetentionWindow` |
+| `macos/Sources/PCC/SkyTrailStore.swift`                | `web/js/skytrailstore.js`      | Pass recording, rejoin window, horizon mask + sector heatmap aggregation, retention pruning |
+| `macos/Sources/PCC/Views/SkyView.swift` (SkyPlotCanvas)| `web/js/polar.js`              | Polar sky-plot renderer: heatmap, mask, grid, trails, live sats     |
+| `macos/Sources/PCC/Views/SkyGlobeView.swift`           | `web/js/globe.js`              | 3D globe host: assembles the JSON shape the shared globe HTML consumes |
+| `macos/Sources/PCC/SerialManager.swift` (parsers only) | `web/js/nmea.js`               | GGA / RMC / GSV sentence parsing, GSV multi-message reassembly      |
 
 ### Shared assets (byte-identical)
 
@@ -36,11 +36,11 @@ the other.
 
 | Web path                 | Mac path                                |
 | ------------------------ | --------------------------------------- |
-| `web/globe/index.html`   | `Sources/PCC/Resources/Globe/index.html`|
-| `web/globe/globe.gl.min.js` | `Sources/PCC/Resources/Globe/globe.gl.min.js` |
-| `web/globe/earth-day.jpg`| `Sources/PCC/Resources/Globe/earth-day.jpg`|
-| `web/globe/earth-night.jpg` | `Sources/PCC/Resources/Globe/earth-night.jpg` |
-| `web/globe/night-sky.png`| `Sources/PCC/Resources/Globe/night-sky.png`|
+| `web/globe/index.html`   | `macos/Sources/PCC/Resources/Globe/index.html`|
+| `web/globe/globe.gl.min.js` | `macos/Sources/PCC/Resources/Globe/globe.gl.min.js` |
+| `web/globe/earth-day.jpg`| `macos/Sources/PCC/Resources/Globe/earth-day.jpg`|
+| `web/globe/earth-night.jpg` | `macos/Sources/PCC/Resources/Globe/earth-night.jpg` |
+| `web/globe/night-sky.png`| `macos/Sources/PCC/Resources/Globe/night-sky.png`|
 
 The shared `index.html` uses a small `postHost(channel, body)` router:
 on macOS it forwards to `window.webkit.messageHandlers[channel]`
@@ -77,7 +77,7 @@ move it out of this list.
 ### When you touch Swift
 
 1. If the change is in a mirrored file (`SatPass.swift`, `SkyTrailStore.swift`, `SkyView.swift`, `SkyGlobeView.swift`, or the GSV parser in `SerialManager.swift`), **also update the matching `.js` file in the same commit**. Leave a comment in both files pointing at the other.
-2. If the change is in the shared globe HTML (`Sources/PCC/Resources/Globe/index.html` or peer assets), **also update `web/globe/*`**. Run `diff -rq web/globe Sources/PCC/Resources/Globe` to confirm they match before committing.
+2. If the change is in the shared globe HTML (`macos/Sources/PCC/Resources/Globe/index.html` or peer assets), **also update `web/globe/*`**. Run `diff -rq web/globe macos/Sources/PCC/Resources/Globe` to confirm they match before committing.
 
 ### When you touch JS
 
@@ -88,7 +88,7 @@ mirror a specific Swift file — keep those pointers accurate.
 
 ```bash
 # Byte-identical globe assets
-diff -rq web/globe Sources/PCC/Resources/Globe
+diff -rq web/globe macos/Sources/PCC/Resources/Globe
 
 # JS modules parse
 for f in web/js/*.js; do node --check --input-type=module < "$f" || echo "FAIL: $f"; done
