@@ -15,7 +15,7 @@ There *was* a native macOS menu-bar app — it still exists, just [paused](#the-
 
 - **Distribution.** A native Mac app requires a Developer Program membership (£99/yr) and signing + notarizing each build. A web app is a URL — nothing to install or sign.
 - **Reach.** Anyone on a Chromium browser can open it — macOS, Windows, Linux, a Chromebook. No per-platform build, no updates to push.
-- **Knowledge.** I know HTML / JS / Canvas better than Swift / AppKit.
+- **Knowledge.** I know more HTML / JS / Canvas than I do Swift / AppKit.
 
 A few things stay Mac-only by nature (acting as a system NTP server, native WeatherKit, on-device AI).
 
