@@ -1,8 +1,8 @@
-# Precision Clock Companion (Beta)
+# Precision Clock Companion
 
 A browser app that drives the [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs) by [mitxela](https://mitxela.com) over Web Serial — display modes, text & countdowns, brightness curves, a live polar sky, an orthographic globe **and** a flat world map, GPS / satellite / timing charts, and a raw serial monitor. With no clock attached it runs as a faithful **emulator**.
 
-### **[▶ Open Precision Clock Companion →](https://peterlewis.github.io/pcc/)**
+### **[▶ Open Precision Clock Companion (Beta) →](https://peterlewis.github.io/pcc/)**
 
 > [!NOTE]
 > Independent, community-built. Not affiliated with mitxela.
@@ -11,14 +11,13 @@ A browser app that drives the [Precision Clock Mk IV](https://mitxela.com/projec
 
 ## Why a website, and not the Mac app?
 
-There *was* a native macOS menu-bar app — it still exists, just [paused](#the-macos-app-paused). A few practical reasons the web version won out:
+There *was* a native macOS menu-bar app — it still exists, just [paused](#the-macos-app-paused). A few practical reasons why a web version is better:
 
-- **Distribution.** A native Mac app means a Developer Program membership ($99/yr), signing + notarizing each build, and a first-launch Gatekeeper prompt. A web app is a URL — nothing to install or sign.
+- **Distribution.** A native Mac app requires a Developer Program membership (£99/yr) and signing + notarizing each build. A web app is a URL — nothing to install or sign.
 - **Reach.** Anyone on a Chromium browser can open it — macOS, Windows, Linux, a Chromebook. No per-platform build, no updates to push.
-- **Web Serial does the hard part.** Talking to the USB serial device — the one thing a native app used to be needed for — [the browser now does natively](https://developer.mozilla.org/docs/Web/API/Web_Serial_API).
-- **It's the stack I know better.** I move faster in HTML / JS / Canvas than in Swift / AppKit, so the web version simply gets more attention.
+- **Knowledge.** I know HTML / JS / Canvas better than Swift / AppKit.
 
-A few things stay Mac-only by nature (acting as a system NTP server, native WeatherKit, on-device AI) — those live in the paused app, not here.
+A few things stay Mac-only by nature (acting as a system NTP server, native WeatherKit, on-device AI).
 
 ## What it does
 
