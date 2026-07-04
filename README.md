@@ -1,4 +1,4 @@
-# Precision Clock Companion
+# Precision Clock Companion (Beta)
 
 A browser app that drives the [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs) by [mitxela](https://mitxela.com) over Web Serial — display modes, text & countdowns, brightness curves, a live polar sky, an orthographic globe **and** a flat world map, GPS / satellite / timing charts, and a raw serial monitor. With no clock attached it runs as a faithful **emulator**.
 
