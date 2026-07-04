@@ -9,15 +9,13 @@ A browser app that drives the [Precision Clock Mk IV](https://mitxela.com/projec
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Deploys from CI](https://img.shields.io/badge/deploy-GitHub%20Pages%20(CI)-blue) ![Web Serial](https://img.shields.io/badge/Web%20Serial-Chromium-orange)
 
-## Why a website, and not the Mac app?
+## What happened to the Mac app??
 
-There *was* a native macOS menu-bar app — it still exists, just [paused](#the-macos-app-paused). A few practical reasons why a web version is better:
+There *was* a native macOS menu-bar app — it still exists, it's just [on hold](#the-macos-app-paused). A few reasons why:
 
-- **Distribution.** A native Mac app requires a Developer Program membership (£99/yr) and signing + notarizing each build. A web app is a URL — nothing to install or sign.
-- **Reach.** Anyone on a Chromium browser can open it — macOS, Windows, Linux, a Chromebook. No per-platform build, no updates to push.
+- **Distribution.** A native Mac app requires signing + notarizing each build, which is a pain. A web app is a URL.
+- **Reach.** Anyone on a Chromium browser can open it, no per-platform build, no updates to push.
 - **Knowledge.** I know more HTML / JS / Canvas than I do Swift / AppKit.
-
-A few things stay Mac-only by nature (acting as a system NTP server, native WeatherKit, on-device AI).
 
 ## What it does
 
