@@ -30,6 +30,18 @@ export class Clock extends EventTarget {
         return this.port !== null && this.writer !== null;
     }
 
+    /// A human label for the connected port. Web Serial deliberately withholds
+    /// the OS device path (e.g. cu.usbmodem…) for privacy — getInfo() exposes
+    /// only the USB vendor/product IDs — so this is the most specific honest
+    /// identifier we can show. Returns '' when no port is open.
+    describe() {
+        if (!this.port || typeof this.port.getInfo !== 'function') return '';
+        const info = this.port.getInfo() || {};
+        const hex = (n) => (Number.isInteger(n) ? n.toString(16).padStart(4, '0') : null);
+        const vid = hex(info.usbVendorId), pid = hex(info.usbProductId);
+        return vid && pid ? `USB ${vid}:${pid}` : 'USB SERIAL';
+    }
+
     /// Prompt the user to pick a serial port and open it at 115200.
     /// Browser requires a user gesture for `requestPort`; call this from
     /// a button click handler, not on page load.
@@ -54,6 +66,11 @@ export class Clock extends EventTarget {
         this.port = port;
         this.writer = port.writable.getWriter();
         this._closing = false;
+        // Detect the device vanishing — an unplug, or a `reboot` that re-enumerates USB —
+        // which Web Serial signals as a 'disconnect' on navigator.serial for that port. Without
+        // this the UI status lingers on "connected" after the link is actually gone.
+        this._onSerialDisconnect = (e) => { if (e.target === this.port) this._handleDrop('device disconnected — USB re-enumerated'); };
+        navigator.serial.addEventListener('disconnect', this._onSerialDisconnect);
         this._readLoopPromise = this._readLoop();
 
         this.dispatchEvent(new CustomEvent('status', {
@@ -65,9 +82,27 @@ export class Clock extends EventTarget {
         this.send('nmea = off');
     }
 
+    // Unexpected loss of the device (unplug / reboot re-enumeration). Distinct from
+    // disconnect(), which is the courteous user-initiated teardown. Releases locks, closes
+    // the port, and reports disconnected exactly once.
+    _handleDrop(message) {
+        if (this._closing) return;
+        this._closing = true;
+        if (this._onSerialDisconnect) { try { navigator.serial.removeEventListener('disconnect', this._onSerialDisconnect); } catch { /* ignore */ } this._onSerialDisconnect = null; }
+        try { this.reader && this.reader.releaseLock(); } catch { /* ignore */ }
+        this.reader = null;
+        try { this.writer && this.writer.releaseLock(); } catch { /* ignore */ }
+        this.writer = null;
+        try { this.port && this.port.close(); } catch { /* ignore */ }
+        this.port = null;
+        this.nmeaConsumers = 0;
+        this.dispatchEvent(new CustomEvent('status', { detail: { connected: false, message } }));
+    }
+
     async disconnect() {
         if (!this.port) return;
         this._closing = true;
+        if (this._onSerialDisconnect) { try { navigator.serial.removeEventListener('disconnect', this._onSerialDisconnect); } catch { /* ignore */ } this._onSerialDisconnect = null; }
 
         try {
             // Courteous teardown — stop active display modes so the clock
@@ -147,6 +182,9 @@ export class Clock extends EventTarget {
             }
             if (this._closing) break;
         }
+        // The loop only exits on its own when port.readable went null — i.e. the device
+        // dropped. (A clean disconnect() sets _closing first, so _handleDrop no-ops.)
+        if (!this._closing) this._handleDrop('serial stream ended — device disconnected');
     }
 
     /// Reference-counted NMEA firehose request. Multiple UI panels

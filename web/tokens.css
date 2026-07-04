@@ -1,0 +1,68 @@
+/* Precision Clock Companion — audited token baseline (attachment to CLAUDE-DESIGN-BRIEF.md §7)
+ *
+ * RULES ARE LOCKED, VALUES ARE A BASELINE: you own the values, we own the rules —
+ * one accent (LED red) · status never hue-only · the LED face is always a dark screen
+ * · light mode is a grey lab enclosure · ghost segments decorative only.
+ * Any replacement palette must pass the same WCAG audit these pass.
+ *
+ * Canonical source: prior brief §5 (audited). Where only the working mockup carried a
+ * value (light status/constellation), it is included and marked DIRECTIONAL — re-audit
+ * before locking. Known variance: the mockup used --led-off / #50545d txt3 / #ff4d3d
+ * none / light accent #cf2418; the audited values below supersede all four.
+ */
+
+:root, [data-theme="dark"] {
+  /* surfaces */
+  --inset:  #040506;   /* the LED "screen" black — deepest surface */
+  --bg:     #08090b;   /* page */
+  --panel:  #0e0f13;   /* panel surface */
+  --strip:  #121419;   /* panel header strip */
+  --line:   #1c1f26;   /* 1px hairline */
+  --line2:  #2b2f38;   /* stronger hairline / emphasis */
+  /* text */
+  --txt:    #c9cdd5;   /* primary */
+  --txt2:   #7f8590;   /* secondary */
+  --txt3:   #767c86;   /* captions / UI labels only — never body */
+  /* the one accent */
+  --led:      #ff3b2e;               /* brand + LED; 5.61:1 on --bg, body-safe */
+  --led-dim:  #5a1c16;               /* ghost "off" segment — decorative only, never text */
+  --led-glow: rgba(255,59,46,.55);   /* the one sanctioned glow */
+  /* GNSS status — reserved hues, never the brand red, never hue-only */
+  --lock: #36c98b;     /* valid fix */
+  --acq:  #f5b53d;     /* acquiring */
+  --none: #ff6a3d;     /* no fix — always paired with a "NO FIX" label */
+  /* constellations — charts & legends only, never UI chrome */
+  --gps: #3b9bff;
+  --glo: #ff5247;
+  --gal: #ffa726;
+  --bds: #5fd0ff;
+  /* type */
+  --sans: "B612", system-ui, sans-serif;
+  --mono: "B612 Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+[data-theme="light"] {
+  /* "a grey lab enclosure, not white" */
+  --bg:     #dfe2e6;
+  --panel:  #f4f5f7;
+  --strip:  #e9ebee;
+  --inset:  #0c0d10;   /* the LED face STAYS a dark screen — displays are never light */
+  --line:   #cdd2d8;
+  --line2:  #b3b8c0;
+  --txt:    #13171d;
+  --txt2:   #565e6a;
+  --txt3:   #878f9b;
+  --led:      #a81a10;               /* audited darkened red, 5.73:1 — the dark-mode
+                                        #ff3b2e fails contrast on light surfaces */
+  --led-dim:  #d8b9b5;               /* DIRECTIONAL — re-audit */
+  --led-glow: rgba(168,26,16,.35);   /* DIRECTIONAL — re-audit */
+  /* status — DIRECTIONAL (from the working mockup; darkened per the same audit intent) */
+  --lock: #0f9d63;
+  --acq:  #b9760a;
+  --none: #cc3a2c;
+  /* constellations — DIRECTIONAL (from the working mockup) */
+  --gps: #0a6cd1;
+  --glo: #cf2a20;
+  --gal: #b96b00;
+  --bds: #1186b8;
+}

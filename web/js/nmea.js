@@ -97,6 +97,22 @@ export function parseRMC(line) {
     return { utc, active: true };
 }
 
+/// Parse $xxGSA — DOP + the PRNs used in the position solution.
+/// Fields after the talker: mode(A/M), fixType(1/2/3), 12 PRN slots, PDOP,
+/// HDOP, VDOP[, systemId]. The three DOP values sit at fixed indices 15/16/17
+/// (the 12 PRN slots are always present, even when empty), so a trailing NMEA
+/// 4.10 systemId field doesn't shift them. Returns
+/// { fixType, pdop, hdop, vdop, usedPRNs } or null.
+export function parseGSA(line) {
+    const f = splitSentence(line);
+    if (f.length < 18) return null;
+    if (!f[0].endsWith('GSA')) return null;
+    const num = (s) => { const v = parseFloat(s); return Number.isFinite(v) ? v : null; };
+    const usedPRNs = [];
+    for (let i = 3; i <= 14; i++) { const p = parseInt(f[i], 10); if (Number.isFinite(p)) usedPRNs.push(p); }
+    return { fixType: parseInt(f[2], 10) || 0, pdop: num(f[15]), hdop: num(f[16]), vdop: num(f[17]), usedPRNs };
+}
+
 /// GSV (satellites in view) parser with multi-message reassembly.
 ///
 /// GSV is multi-message: a single "frame" may span up to 4 sentences,

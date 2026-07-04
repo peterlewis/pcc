@@ -1,349 +1,1148 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PCC — Precision Clock Companion (Web)</title>
-<meta name="description" content="A browser-based companion for the Precision Clock Mk IV. Drives the display, sends text and countdowns, and shows live satellite reception, trails, sector heatmaps, and a 3D globe over Web Serial.">
-<meta name="color-scheme" content="light dark">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230e1218'/%3E%3Ccircle cx='32' cy='32' r='20' fill='none' stroke='%234da3ff' stroke-width='3'/%3E%3Cline x1='32' y1='32' x2='32' y2='16' stroke='%234da3ff' stroke-width='3' stroke-linecap='round'/%3E%3Cline x1='32' y1='32' x2='44' y2='38' stroke='%234da3ff' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="./css/app.css">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<base href="./">
+<title>Precision Clock Companion</title>
+<meta name="description" content="Precision Clock Mk IV companion — emulator, GNSS sky, and GPS timing analytics. Static, offline-capable.">
+<link rel="stylesheet" href="css/base.css?v=86">
 </head>
 <body>
+<div id="root">
+<div data-screen-label="Precision Clock Companion" style="position:fixed;inset:0;background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:13px;overflow:hidden">
 
-<!--
-  Classic (non-module) script so it still runs when the file:// origin
-  blocks ES modules. If the page was opened by double-clicking index.html
-  rather than served over HTTP, flip the banner on and hide the rest of
-  the UI so the user isn't mashing dead buttons.
--->
-<div id="fileProtocolWarn" class="file-warn" hidden>
-    <h2>Open via a local web server</h2>
-    <p>You've opened this page as a file. Browsers block JavaScript modules and Web Serial from <span class="mono">file://</span> URLs, so none of the buttons will work from here.</p>
-    <p><strong>From the <span class="mono">pcc</span> folder, run:</strong></p>
-    <pre class="mono">bash web/serve.sh</pre>
-    <p class="muted">…or manually: <span class="mono">python3 -m http.server 8765 -d web</span> then open <span class="mono">http://localhost:8765</span>.</p>
-    <p class="muted">Web Serial also requires HTTPS on public hosting, but localhost is exempt.</p>
-</div>
-<script>
-    if (location.protocol === 'file:') {
-        document.getElementById('fileProtocolWarn').hidden = false;
-        document.documentElement.classList.add('file-protocol');
-    }
-</script>
+  <sc-if value="{{entryVisible}}" hint-placeholder-val="{{true}}">
+    <div data-screen-label="Entry" style="position:absolute;inset:0;z-index:40">
+      <div ref="{{refEntryBg}}" style="position:absolute;inset:0;background:radial-gradient(115% 85% at 50% 40%, var(--bg) 52%, color-mix(in oklab, var(--bg) 85%, black))"></div>
+      <div ref="{{refFloorShadow}}" style="position:absolute;left:0;top:0;width:10px;height:30px;opacity:0;background:radial-gradient(closest-side, rgba(0,0,0,.5), transparent 74%)"></div>
+      <div ref="{{refFoldStage}}" onClick="{{onEntryClick}}" onMouseEnter="{{onEntryOver}}" onMouseLeave="{{onEntryOut}}" style="position:absolute;left:calc(50% - 240px);top:56%;width:0;height:0;cursor:pointer">
+        <div ref="{{refTimeHalf}}" style="position:absolute;left:0;top:0;width:480px;height:124px;background:var(--inset);border:1px solid var(--line2);z-index:1">
+          <canvas ref="{{refEntryTime}}" style="position:absolute;left:22px;top:5px;width:436px;height:112px"></canvas>
+        </div>
+        <div ref="{{refLinkWrap}}" style="position:absolute;left:0;top:0;width:0;height:0;z-index:2">
+          <div ref="{{refDateHalf}}" style="position:absolute;left:0;top:-124px;width:480px;height:124px;background:var(--inset);border:1px solid var(--line2)">
+            <canvas ref="{{refEntryDate}}" style="position:absolute;left:20px;top:5px;width:440px;height:112px"></canvas>
+          </div>
+          <div ref="{{refLinkPlate}}" style="position:absolute;left:0;top:-35px;width:35px;height:71px;background:var(--inset);border:1px solid var(--line2);border-radius:18px">
+            <span ref="{{refPinTop}}" style="position:absolute;left:13px;top:13px;width:9px;height:9px;border-radius:50%;background:#2c2f35"></span>
+            <span ref="{{refPinBot}}" style="position:absolute;left:13px;top:49px;width:9px;height:9px;border-radius:50%;background:#2c2f35"></span>
+          </div>
+        </div>
+      </div>
+      <div ref="{{refHint}}" style="position:absolute;left:50%;top:calc(56% + 170px);transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:9px">
+        <div style="width:1px;height:26px;background:var(--line2)"></div>
+        <div style="font-family:var(--mono);font-size:10px;letter-spacing:.34em;color:var(--txt3);padding-left:.34em">OPEN</div>
+        <div style="display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--txt3)"><span style="border:1px solid var(--line2);padding:1px 6px 2px;line-height:1.2">⏎</span><span>OR CLICK</span></div>
+      </div>
+      <div ref="{{refEntryCap}}" style="position:absolute;left:0;right:0;bottom:18px;display:flex;justify-content:space-between;padding:0 22px;font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:var(--txt3)">
+        <span style="display:inline-flex;align-items:center;gap:9px">PRECISION CLOCK COMPANION <span style="font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.16em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:3px;padding:3px 5px;line-height:1">BETA</span></span>
+        <span>MK IV DISPLAY EMULATOR — FIRMWARE FONT · HOST TIME</span>
+      </div>
+    </div>
+  </sc-if>
 
-<header class="topbar">
-    <div class="brand"><strong>PCC</strong> <span class="sub">Precision Clock Companion <span class="tag">Web</span></span></div>
-    <div class="spacer"></div>
-    <div id="statusPill" class="status-pill"><span class="dot"></span><span id="statusText">Disconnected</span></div>
-</header>
-
-<div class="layout">
-    <nav class="sidebar" id="sidebar">
-        <button data-tab="connect" class="active">Connect</button>
-        <button data-tab="display">Display</button>
-        <button data-tab="satellites">Satellites</button>
-        <button data-tab="globe">Globe</button>
-        <button data-tab="monitor">Monitor</button>
-        <button data-tab="about">About</button>
-    </nav>
-
-    <main>
-        <!-- CONNECT -->
-        <section class="panel active" id="panel-connect">
-            <h1 class="panel-title">Connect</h1>
-            <p class="panel-sub">Pair the browser with the clock over USB. Click Connect and pick the clock's serial port in the browser prompt.</p>
-
-            <div id="browserWarn" class="browser-warn" hidden>
-                Your browser doesn't support Web Serial. Open this page in Chrome, Edge, Arc, Brave, or Opera on a desktop OS.
+  <div style="position:absolute;inset:0;display:flex;flex-direction:column">
+    <header style="height:64px;flex:none;display:flex;align-items:stretch;background:linear-gradient(180deg, var(--strip), var(--panel) 72%);border-bottom:1px solid var(--line)">
+      <div style="display:flex;flex-direction:column;justify-content:center;gap:3px;padding:0 18px;border-right:1px solid var(--line)">
+        <div style="display:flex;align-items:center;gap:8px"><span style="font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:.1em;color:var(--txt);white-space:nowrap">{{hdrTitle}}</span><span style="font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.16em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:3px;padding:3px 5px;line-height:1;white-space:nowrap">BETA</span></div>
+        <div style="font-family:var(--mono);font-size:9px;letter-spacing:.18em;color:var(--txt3);white-space:nowrap">COMPANION</div>
+      </div>
+      <div ref="{{refDockSlot}}" style="display:flex;align-items:stretch">
+        <sc-if value="{{hdrBarOn}}" hint-placeholder-val="{{false}}">
+          <div style="display:flex;align-items:center;gap:8px;padding:0 12px 0 16px;border-right:1px solid var(--line)">
+          <div data-dockbar="1" style="position:relative;height:46px;display:flex">
+            <div ref="{{refHdrDateHalf}}" style="position:relative;width:353px;height:46px;background:var(--inset);border:1px solid var(--line2);transform:rotate(180deg)">
+              <canvas ref="{{refHdrDate}}" style="position:absolute"></canvas>
             </div>
-
-            <div class="card connect-card">
-                <h2>Serial port</h2>
-                <p class="lede" id="connectLede">The Mk IV enumerates as a <span class="mono">cu.usbmodem*</span> device on macOS and a COM port on Windows. If this is your first connect, the browser will ask which port to grant access to — pick the one that appears when you plug the clock in.</p>
-                <div class="row">
-                    <button class="btn" id="connectBtn">Connect</button>
-                    <button class="btn ghost" id="disconnectBtn" disabled>Disconnect</button>
-                </div>
+            <div ref="{{refHdrTimeHalf}}" style="position:relative;width:353px;height:46px;background:var(--inset);border:1px solid var(--line2);border-left:0">
+              <canvas ref="{{refHdrTime}}" style="position:absolute"></canvas>
             </div>
-
-            <div class="card info-card">
-                <h2>WIP / POC</h2>
-                <p>Browser port of the Mac PCC app. Work in progress, things may not work. See <a href="#" data-goto="about">About</a> for what's in and out.</p>
+            <div ref="{{refHdrLink}}" style="position:absolute;left:337px;top:0;width:32px;height:16px;background:var(--inset);border:1px solid var(--line2);border-radius:8px">
+              <span ref="{{refHdrPinA}}" style="position:absolute;border-radius:50%;background:#2c2f35"></span>
+              <span ref="{{refHdrPinB}}" style="position:absolute;border-radius:50%;background:#2c2f35"></span>
             </div>
+          </div>
+          <button onClick="{{onCloseHdrClock}}" title="Collapse the clock — free up the menu bar" style="align-self:center;width:20px;height:46px;display:flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--line);color:var(--txt3);cursor:pointer;padding:0" style-hover="color:var(--txt);border-color:var(--line2)"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 2l6 6M8 2l-6 6"></path></svg></button>
+          </div>
+        </sc-if>
+        <sc-if value="{{hdrClockClosed}}" hint-placeholder-val="{{false}}">
+          <div style="display:flex;align-items:center;padding:0 14px;border-right:1px solid var(--line)">
+            <button onClick="{{onOpenHdrClock}}" title="Show the docked clock" style="display:flex;align-items:center;gap:7px;height:30px;padding:0 11px;background:transparent;border:1px solid var(--line);color:var(--txt2);cursor:pointer;font-family:var(--mono);font-size:10px;letter-spacing:.12em;white-space:nowrap" style-hover="border-color:var(--line2);color:var(--txt)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1"><circle cx="6" cy="6" r="4.6"></circle><path d="M6 3.4V6l1.7 1"></path></svg>CLOCK</button>
+          </div>
+        </sc-if>
+      </div>
+      <div style="flex:1"></div>
+      <div onClick="{{onHdrStatus}}" title="{{hdrStatusHint}}" style="display:flex;align-items:center;gap:9px;padding:0 16px;border-left:1px solid var(--line);cursor:pointer;{{hdrStatusBg}}">
+        <span style="width:8px;height:8px;flex:none;background:{{connLed}};box-shadow:0 0 8px {{connGlow}}"></span>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <span style="font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--txt);white-space:nowrap">{{connState}}</span>
+          <span style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:var(--txt3);white-space:nowrap">{{connSub}}</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;justify-content:center;gap:2px;padding:0 14px;border-left:1px solid var(--line)">
+        <span style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--txt3)">PORT</span>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--txt);white-space:nowrap">{{portLabel}}</span>
+      </div>
+      <div style="display:flex;flex-direction:column;justify-content:center;gap:2px;padding:0 14px;border-left:1px solid var(--line)">
+        <span style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--txt3)">FRAMING</span>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--txt2);white-space:nowrap">115200 8N1</span>
+      </div>
+      <div style="display:flex;flex-direction:column;justify-content:center;gap:2px;padding:0 14px;border-left:1px solid var(--line)">
+        <span style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--txt3)">FIX · SATS</span>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--txt);white-space:nowrap">{{fixTypeLabel}} · {{satsLabel}}</span>
+      </div>
+      <div style="display:flex;flex-direction:column;justify-content:center;gap:2px;padding:0 14px;border-left:1px solid var(--line)">
+        <span style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--txt3)">FIX AGE</span>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--txt);white-space:nowrap">{{ageLabel}}</span>
+      </div>
+      <button onClick="{{onToggleDrawer}}" title="Serial monitor" style="{{drawerBtnStyle}}"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 3.5L5 6 2 8.5M6.5 9h4"></path></svg>MONITOR</button>
+      <div style="display:flex;align-items:center;gap:8px;padding:0 14px;border-left:1px solid var(--line)">
+        <span style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--txt3)">SIM</span>
+        <div style="display:flex;border:1px solid var(--line)">
+          <button onClick="{{onScenLock}}" disabled="{{scenDisabled}}" style="{{ssScenLock}}">LOCK</button>
+          <button onClick="{{onScenAcq}}" disabled="{{scenDisabled}}" style="{{ssScenAcq}}">ACQ</button>
+          <button onClick="{{onScenNone}}" disabled="{{scenDisabled}}" style="{{ssScenNone}}">NO FIX</button>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;padding:0 16px;border-left:1px solid var(--line)">
+        <div style="display:flex;border:1px solid var(--line)">
+          <button onClick="{{onThemeDark}}" style="{{ssThemeDark}}">DARK</button>
+          <button onClick="{{onThemeLight}}" style="{{ssThemeLight}}">LIGHT</button>
+        </div>
+      </div>
+    </header>
 
-            <div class="card">
-                <h2>Built on</h2>
-                <p class="muted">Web Serial API · HTML5 Canvas · globe.gl / three.js (offline, MIT) · IndexedDB for pass history · no backend, no account, no tracking. Static files only.</p>
-            </div>
-        </section>
+    <div style="flex:1;display:flex;min-height:0">
+      <nav data-screen-label="Nav rail" style="width:186px;flex:none;display:flex;flex-direction:column;background:var(--panel);border-right:1px solid var(--line);overflow-y:auto">
+        <div style="padding:16px 16px 8px;font-family:var(--mono);font-size:9px;letter-spacing:.24em;color:var(--txt3)">ROOMS</div>
+        <button onClick="{{goRoom_display}}" style="position:relative;display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:11px 12px 11px 17px;background:{{roomBg_display}};border:0;font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:{{roomC_display}};cursor:pointer">
+          <span style="position:absolute;left:0;top:0;bottom:0;width:2px;background:{{roomE_display}}"></span>
+          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="3" width="10" height="6"></rect><path d="M3.5 6h5"></path></svg>
+          DISPLAY<span style="margin-left:auto;width:6px;height:6px;border-radius:1px;background:{{roomDot_display}};transition:background .3s"></span>
+        </button>
+        <button onClick="{{goRoom_sky}}" style="position:relative;display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:11px 12px 11px 17px;background:{{roomBg_sky}};border:0;font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:{{roomC_sky}};cursor:pointer">
+          <span style="position:absolute;left:0;top:0;bottom:0;width:2px;background:{{roomE_sky}}"></span>
+          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="6" cy="6" r="4.5"></circle><circle cx="7.6" cy="4.4" r="1.1" fill="currentColor" stroke="none"></circle></svg>
+          SKY<span style="margin-left:auto;width:6px;height:6px;border-radius:1px;background:{{roomDot_sky}};transition:background .3s"></span>
+        </button>
+        <button onClick="{{goRoom_timing}}" style="position:relative;display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:11px 12px 11px 17px;background:{{roomBg_timing}};border:0;font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:{{roomC_timing}};cursor:pointer">
+          <span style="position:absolute;left:0;top:0;bottom:0;width:2px;background:{{roomE_timing}}"></span>
+          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M1 8.5h2V3.5h3v5h2v-3h3"></path></svg>
+          TIMING<span style="margin-left:auto;width:6px;height:6px;border-radius:1px;background:{{roomDot_timing}};transition:background .3s"></span>
+        </button>
+        <button onClick="{{goRoom_device}}" style="position:relative;display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:11px 12px 11px 17px;background:{{roomBg_device}};border:0;font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:{{roomC_device}};cursor:pointer">
+          <span style="position:absolute;left:0;top:0;bottom:0;width:2px;background:{{roomE_device}}"></span>
+          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="3.5" width="5" height="5"></rect><path d="M6.5 6h4M8.5 4.5v3"></path></svg>
+          DEVICE<span style="margin-left:auto;width:6px;height:6px;border-radius:1px;background:{{roomDot_device}};transition:background .3s"></span>
+        </button>
+        <div style="flex:1"></div>
+        <div style="padding:0 16px 14px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--txt3)">DESIGN PROTOTYPE · V0.2</div>
+      </nav>
 
-        <!-- DISPLAY -->
-        <section class="panel" id="panel-display">
-            <h1 class="panel-title">Display</h1>
-            <p class="panel-sub">Drive the clock's face: mode, free text, countdowns, brightness.</p>
+      <main ref="{{refMain}}" style="flex:1;min-width:0;overflow:auto;background:var(--bg)">
 
-            <div class="card">
-                <h2>Mode</h2>
-                <div class="row">
-                    <label>Active mode</label>
-                    <select id="modeSelect">
-                        <option value="none">None (default face)</option>
-                        <option value="text">Text</option>
-                        <option value="countdown">Countdown</option>
-                    </select>
-                </div>
-                <p class="muted" style="margin-top: 10px; font-size: 12px;">Changing mode sends <span class="mono">mode_text</span> / <span class="mono">mode_countdown</span> toggles and clears the previous mode first.</p>
-            </div>
+        <sc-if value="{{roomSky}}" hint-placeholder-val="{{false}}">
+          <div style="position:sticky;top:0;z-index:6;display:flex;align-items:stretch;height:35px;background:var(--panel);border-bottom:1px solid var(--line);padding:0 8px;overflow-x:auto">
+            <button onClick="{{go_satellites}}" style="{{subStyle_satellites}}">SATELLITES</button>
+            <button onClick="{{go_signal}}" style="{{subStyle_signal}}">SIGNAL</button>
+            <button onClick="{{go_position}}" style="{{subStyle_position}}">POSITION</button>
+            <button onClick="{{go_globe}}" style="{{subStyle_globe}}">GLOBE</button>
+            <button onClick="{{go_map}}" style="{{subStyle_map}}">MAP</button>
+            <button onClick="{{go_export}}" style="{{subStyle_export}}">EXPORT</button>
+          </div>
+        </sc-if>
+        <sc-if value="{{roomDevice}}" hint-placeholder-val="{{false}}">
+          <div style="position:sticky;top:0;z-index:6;display:flex;align-items:stretch;height:35px;background:var(--panel);border-bottom:1px solid var(--line);padding:0 8px;overflow-x:auto">
+            <button onClick="{{go_connect}}" style="{{subStyle_connect}}">CONNECTION</button>
+            <button onClick="{{go_devmodes}}" style="{{subStyle_devmodes}}">DISPLAY MODES</button>
+            <button onClick="{{go_devbright}}" style="{{subStyle_devbright}}">BRIGHTNESS</button>
+            <button onClick="{{go_devconfig}}" style="{{subStyle_devconfig}}">CONFIG FILE</button>
+            <button onClick="{{go_devadvanced}}" style="{{subStyle_devadvanced}}">ADVANCED</button>
+            <button onClick="{{go_devupdates}}" style="{{subStyle_devupdates}}">UPDATES</button>
+          </div>
+        </sc-if>
 
-            <div class="card">
-                <h2>Text</h2>
-                <div class="row">
-                    <input type="text" id="textInput" placeholder="Up to 10 chars for static, longer marches" style="flex:1; min-width: 240px;">
-                    <button class="btn" id="textSendBtn">Send</button>
-                    <button class="btn ghost" id="textStopBtn">Stop</button>
-                </div>
-                <p class="muted" style="margin-top: 10px; font-size: 12px;">Longer than 10 characters scrolls as a marquee. Speed is app-side — adjust below.</p>
-                <div class="row" style="margin-top: 14px;">
-                    <label>Scroll speed</label>
-                    <select id="scrollSpeed">
-                        <option value="0.55">Slow</option>
-                        <option value="0.40" selected>Normal</option>
-                        <option value="0.28">Fast</option>
-                        <option value="0.18">Very fast</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="card">
-                <h2>Countdown</h2>
-                <div class="row">
-                    <label>Target (local)</label>
-                    <input type="datetime-local" id="countdownTarget">
-                    <button class="btn" id="countdownStartBtn">Start</button>
-                    <button class="btn ghost" id="countdownStopBtn">Stop</button>
-                </div>
-                <p class="muted" style="margin-top: 10px; font-size: 12px;">Sends <span class="mono">countdown_to = &lt;unix&gt;</span> then <span class="mono">mode_countdown = 1</span>.</p>
-            </div>
-
-            <div class="card">
-                <h2>Brightness</h2>
-                <div class="row">
-                    <label>Lock brightness</label>
-                    <input type="checkbox" id="brightLock">
-                    <input type="range" id="brightSlider" min="0" max="1" step="0.01" value="0.5" disabled style="flex: 1; min-width: 200px;">
-                    <span id="brightValue" class="mono muted">50%</span>
-                </div>
-                <p class="muted" style="margin-top: 10px; font-size: 12px;">Manual brightness persists until the clock resets. Unlock to restore ambient tracking.</p>
-            </div>
-
-            <div class="card">
-                <h2>Send raw command</h2>
-                <div class="row">
-                    <input type="text" id="rawInput" placeholder="e.g. mode_satview = 1" class="mono" style="flex: 1; min-width: 280px;">
-                    <button class="btn" id="rawSendBtn">Send</button>
-                </div>
-                <p class="muted" style="margin-top: 10px; font-size: 12px;">The clock's serial protocol is <span class="mono">key = value</span> terminated by CRLF. See the Mk IV docs for the full command list.</p>
-            </div>
-        </section>
-
-        <!-- SATELLITES -->
-        <section class="panel" id="panel-satellites">
-            <h1 class="panel-title">Satellites</h1>
-            <p class="panel-sub">Live sky view from the clock's GNSS module. Dot colour is the constellation; fill is SNR. Sector heatmap shows peak SNR per 5° × 5° cell; trails show recent passes.</p>
-
-            <div class="row" style="margin-bottom: 14px;">
-                <button class="btn" id="satStartBtn">Start live view</button>
-                <button class="btn ghost" id="satStopBtn" disabled>Stop</button>
-                <span class="muted" id="satCount">0 satellites in view</span>
-            </div>
-
-            <div class="row toggles" style="margin-bottom: 14px;">
-                <label title="Record satellite observations to IndexedDB">
-                    <input type="checkbox" id="logToggle"> Record history
-                </label>
-                <label title="Render persistent passes as age-faded arcs">
-                    <input type="checkbox" id="showTrails" checked> Trails
-                </label>
-                <label title="Colour each 5° × 5° sky cell by peak observed SNR">
-                    <input type="checkbox" id="showHeatmap" checked> Heatmap
-                </label>
-                <label title="Red tint shows the minimum elevation observed per sector — persistent obstructions">
-                    <input type="checkbox" id="showHorizon" checked> Horizon
-                </label>
-                <label title="Show PRN labels next to each live satellite">
-                    <input type="checkbox" id="showLabels" checked> Labels
-                </label>
-                <label title="Apply moving-average smoothing to trail az/el (removes 1° NMEA staircase)">
-                    <input type="checkbox" id="smoothTrails" checked> Smooth
-                </label>
-            </div>
-
-            <div class="row" style="margin-bottom: 14px;">
-                <label for="timeWindow">Show passes from</label>
-                <select id="timeWindow">
-                    <option value="live">Live (last 3 min)</option>
-                    <option value="m5">Last 5 minutes</option>
-                    <option value="m15">Last 15 minutes</option>
-                    <option value="h1" selected>Last hour</option>
-                    <option value="h2">Last 2 hours</option>
-                    <option value="h6">Last 6 hours</option>
-                    <option value="d1">Last 24 hours</option>
-                    <option value="d7">Last 7 days</option>
-                    <option value="d30">Last 30 days</option>
-                    <option value="all">All time</option>
-                </select>
-
-                <label for="retentionSelect" style="margin-left: 14px;">Keep data for</label>
-                <select id="retentionSelect">
-                    <option value="h1">1 hour</option>
-                    <option value="h6">6 hours</option>
-                    <option value="d1">24 hours</option>
-                    <option value="d7">7 days</option>
-                    <option value="d30" selected>30 days</option>
-                    <option value="d90">90 days</option>
-                    <option value="y1">1 year</option>
-                    <option value="unlimited">Unlimited</option>
-                </select>
-
-                <button class="btn ghost" id="clearHistoryBtn" title="Delete all recorded passes from IndexedDB">Clear history</button>
-            </div>
-
-            <div class="sat-layout">
-                <div class="polar-canvas-wrap">
-                    <canvas id="polar"></canvas>
-                </div>
-
-                <div>
-                    <div class="card gps-info">
-                        <h2>GPS fix</h2>
-                        <dl>
-                            <dt>Status</dt><dd id="gpsStatus" class="muted">No fix</dd>
-                            <dt>Latitude</dt><dd id="gpsLat">—</dd>
-                            <dt>Longitude</dt><dd id="gpsLon">—</dd>
-                            <dt>Altitude</dt><dd id="gpsAlt">—</dd>
-                            <dt>HDOP</dt><dd id="gpsHdop">—</dd>
-                            <dt>Sats used</dt><dd id="gpsSats">—</dd>
-                            <dt>Maidenhead</dt><dd id="gpsGrid">—</dd>
-                            <dt>UTC</dt><dd id="gpsUtc">—</dd>
-                        </dl>
+        <sc-if value="{{sec_devmodes}}" hint-placeholder-val="{{false}}">
+          <div class="pcc-cards" data-screen-label="devmodes" style="animation:pcc-in .16s ease-out both;padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:stretch;max-width:1420px">
+            <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+                <div style="display:flex;align-items:center;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)"><span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">TIME · PRECISION · STANDBY</span></div>
+                <div style="padding:12px;display:flex;flex-direction:column;gap:14px;flex:1">
+                  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                    <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">PRECISION</span>
+                    <div style="display:flex;border:1px solid var(--line)">
+                      <button onClick="{{oP0}}" style="{{ssP0}}">P0</button>
+                      <button onClick="{{oP1}}" style="{{ssP1}}">P1</button>
+                      <button onClick="{{oP2}}" style="{{ssP2}}">P2</button>
+                      <button onClick="{{oP3}}" style="{{ssP3}}">P3</button>
                     </div>
-
-                    <div class="card">
-                        <h2>Celestial</h2>
-                        <dl style="display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0;">
-                            <dt class="muted" style="font-size: 12px;">Sun alt / az</dt><dd id="sunAltAz" class="mono">—</dd>
-                            <dt class="muted" style="font-size: 12px;">Moon alt / az</dt><dd id="moonAltAz" class="mono">—</dd>
-                            <dt class="muted" style="font-size: 12px;">Moon phase</dt><dd id="moonPhase" class="mono">—</dd>
-                            <dt class="muted" style="font-size: 12px;">Sunrise</dt><dd id="sunrise" class="mono">—</dd>
-                            <dt class="muted" style="font-size: 12px;">Sunset</dt><dd id="sunset" class="mono">—</dd>
-                        </dl>
-                        <p class="muted" style="margin-top: 10px; font-size: 12px;">Computed from the GPS-reported position and UTC time.</p>
+                    <span style="font-family:var(--mono);font-size:10px;color:var(--txt3)">FRACTION DIGITS</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">TIME SOURCE</span>
+                    <div style="display:flex;border:1px solid var(--line)">
+                      <button onClick="{{oSrcLocal}}" style="{{ssSrcLocal}}">LOCAL</button>
+                      <button onClick="{{oSrcUtc}}" style="{{ssSrcUtc}}">UTC</button>
                     </div>
+                  </div>
+                  <button onClick="{{oStandby}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt);align-self:flex-start">
+                    <span style="{{cbStandby}}"></span>STANDBY — BLANK THE FACE
+                  </button>
+                </div>
+              </section>
 
-                    <div class="card sky-stats">
-                        <h2>History</h2>
-                        <dl>
-                            <dt>Passes</dt><dd id="statPasses">0</dd>
-                            <dt>Today</dt><dd id="statToday">0</dd>
-                            <dt>Observations</dt><dd id="statObs">0</dd>
-                            <dt>Peak elevation</dt><dd id="statPeak">—</dd>
-                            <dt>Longest pass</dt><dd id="statLongest">—</dd>
-                            <dt>Azimuth coverage</dt><dd id="statCoverage">0%</dd>
-                        </dl>
+            <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">FORMATS</span>
+                </div>
+                <div style="padding:12px;display:flex;flex-direction:column;gap:14px">
+                  <div style="display:flex;flex-direction:column;gap:7px">
+                    <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">DATE ROW</span>
+                    <div class="pcc-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px">
+                      <button onClick="{{oFmtIso}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbIso}}"></span>ISO 8601</button>
+                      <button onClick="{{oFmtOrd}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbOrd}}"></span>ISO ORDINAL</button>
+                      <button onClick="{{oFmtWeek}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbWeek}}"></span>ISO WEEK</button>
+                      <button onClick="{{oFmtUnix}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbUnix}}"></span>UNIX</button>
+                      <button onClick="{{oFmtJul}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbJul}}"></span>JULIAN DATE</button>
+                      <button onClick="{{oFmtMjd}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbMjd}}"></span>MODIFIED JD</button>
                     </div>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:7px">
+                    <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">WEEKDAY</span>
+                    <div class="pcc-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px">
+                      <button onClick="{{oWdOff}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbWdOff}}"></span>OFF</button>
+                      <button onClick="{{oWdFull}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbWdFull}}"></span>WEEKDAY</button>
+                      <button onClick="{{oWdMmdd}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbWdMmdd}}"></span>WDY MM-DD</button>
+                      <button onClick="{{oWdDd}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbWdDd}}"></span>WEEKDAY DD</button>
+                    </div>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:7px">
+                    <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">TIME ROW</span>
+                    <div class="pcc-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px">
+                      <button onClick="{{oTrStd}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbTrStd}}"></span>HH:MM:SS.mmm</button>
+                      <button onClick="{{oTrOff}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbTrOff}}"></span>UTC OFFSET</button>
+                      <button onClick="{{oTrTz}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbTrTz}}"></span>TZ NAME</button>
+                    </div>
+                  </div>
+                </div>
+              </section>
 
-                    <div class="card">
-                        <h2>Legend</h2>
-                        <div class="legend" id="legend">
-                            <span><i class="swatch" style="background:#007aff"></i>GPS</span>
-                            <span><i class="swatch" style="background:#ff3b30"></i>GLONASS</span>
-                            <span><i class="swatch" style="background:#ff9500"></i>Galileo</span>
-                            <span><i class="swatch" style="background:#5ac8fa"></i>BeiDou</span>
+            <section style="background:var(--panel);border:1px solid var(--line);grid-column:1/-1">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">ASTRO</span>
+                  <span style="font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--txt3)">DATE ROW · SUN / MOON / GRID · TIME ROW KEEPS TICKING</span>
+                </div>
+                <div style="padding:12px;display:flex;flex-direction:column;gap:14px">
+                  <div style="display:flex;flex-direction:column;gap:7px">
+                    <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">MODE</span>
+                    <div class="pcc-cards" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px 12px">
+                      <button onClick="{{oAstOff}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbAstOff}}"></span>OFF</button>
+                      <button onClick="{{oAstSun}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbAstSun}}"></span>SUN RISE/SET</button>
+                      <button onClick="{{oAstAzel}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbAstAzel}}"></span>SUN AZ · EL</button>
+                      <button onClick="{{oAstMoon}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbAstMoon}}"></span>MOON PHASE</button>
+                      <button onClick="{{oAstGrid}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbAstGrid}}"></span>MAIDENHEAD</button>
+                      <button onClick="{{oAstLl}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbAstLl}}"></span>LAT · LON</button>
+                    </div>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:7px">
+                    <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">PAGE DWELL</span>
+                    <div style="display:flex;gap:8px;align-items:center">
+                      <input ref="{{refAstroDwellIn}}" type="number" min="250" max="65535" defaultValue="{{astroDwellVal}}" style="width:104px;min-width:0;font-family:var(--mono);font-size:12px;background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:5px 8px">
+                      <button onClick="{{onAstroDwell}}" style="font-family:var(--sans);font-size:12px;padding:5px 14px;background:transparent;border:1px solid var(--led);color:var(--txt);cursor:pointer" style-hover="background:var(--led-fill)">APPLY</button>
+                      <span style="font-family:var(--mono);font-size:10px;letter-spacing:.05em;color:var(--txt3)">MS — SUN &amp; LAT/LON PAGE THROUGH THEIR SUB-SCREENS AT THIS RATE (MIN 250)</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{sec_devbright}}" hint-placeholder-val="{{false}}">
+          <div class="pcc-cards" data-screen-label="devbright" style="animation:pcc-in .16s ease-out both;padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:stretch;max-width:1420px">
+            <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">FACE</span>
+                </div>
+                <div style="padding:12px;display:flex;flex-direction:column;gap:14px">
+                  <div style="display:flex;flex-direction:column;gap:6px">
+                    <div style="display:flex;justify-content:space-between;align-items:center">
+                      <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">BRIGHTNESS</span>
+                      <span style="font-family:var(--mono);font-size:11px;color:var(--txt)">{{brightPctLabel}}</span>
+                    </div>
+                    <input type="range" min="5" max="100" step="1" value="{{brightVal}}" onChange="{{onBright}}" disabled="{{brightLock}}">
+                    <button onClick="{{oBrightLock}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt);align-self:flex-start">
+                      <span style="{{cbBrightLock}}"></span>LOCK BRIGHTNESS
+                    </button>
+                  </div>
+                  <div style="display:flex;gap:12px;align-items:flex-start">
+                    <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+                      <div style="display:flex;justify-content:space-between;align-items:center">
+                        <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">DAC CURVE γ</span>
+                        <span style="font-family:var(--mono);font-size:11px;color:var(--txt)">{{gammaLabel}}</span>
+                      </div>
+                      <input type="range" min="0.5" max="2.4" step="0.05" value="{{gammaVal}}" onChange="{{onGamma}}">
+                      <span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--txt3)">MASTER DAC — PERCEPTUAL LAW</span>
+                    </div>
+                    <canvas ref="{{refGammaCurve}}" style="width:64px;height:46px;flex:none"></canvas>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:7px">
+                    <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">COLON STYLE</span>
+                    <div class="pcc-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px">
+                      <button onClick="{{oColSlow}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbColSlow}}"></span>SLOWFADE</button>
+                      <button onClick="{{oColHeart}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbColHeart}}"></span>HEARTBEAT</button>
+                      <button onClick="{{oColSaw}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbColSaw}}"></span>1PPS SAWTOOTH</button>
+                      <button onClick="{{oColAlt}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbColAlt}}"></span>ALT SAWTOOTH</button>
+                      <button onClick="{{oColTog}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbColTog}}"></span>TOGGLE</button>
+                      <button onClick="{{oColSolid}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbColSolid}}"></span>SOLID</button>
+                    </div>
+                    <span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--txt3)">{{colonFreezeNote}}</span>
+                  </div>
+                </div>
+              </section>
+
+            <section style="background:var(--panel);border:1px solid var(--line);grid-column:1/-1;max-width:1000px">
+              <div style="display:flex;align-items:center;justify-content:space-between;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)">
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">POINT VALUES · DAC CURVE</span>
+                <span style="font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--txt3)">{{dacApplyNote}}</span>
+              </div>
+              <div style="padding:12px;display:flex;gap:16px;flex-wrap:wrap">
+                <div style="flex:1;min-width:280px;display:flex;flex-direction:column;gap:8px">
+                  <canvas ref="{{refDacCurve}}" style="width:100%;height:220px;display:block;background:var(--well);border:1px solid var(--line2)"></canvas>
+                  <span style="font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--txt3)">DRAG A POINT · X = SENSOR ADC 0–4095 · Y = DAC BRIGHTNESS 0–4095</span>
+                </div>
+                <div style="width:230px;display:flex;flex-direction:column;gap:12px">
+                  <div style="display:flex;flex-direction:column;gap:3px">
+                    <div style="display:grid;grid-template-columns:32px 1fr 1fr;gap:6px;font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--txt3);padding-bottom:3px;border-bottom:1px solid var(--line)"><span>PT</span><span>ADC</span><span>DAC</span></div>
+                    <sc-for list="{{dacPts}}" as="r">
+                      <div style="display:grid;grid-template-columns:32px 1fr 1fr;gap:6px;font-family:var(--mono);font-size:12px;color:var(--txt);padding:2px 0"><span style="color:var(--txt3)">{{r.n}}</span><span>{{r.adc}}</span><span>{{r.dac}}</span></div>
+                    </sc-for>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:5px">
+                    <span style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--txt3)">PRESETS</span>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap">
+                      <button onClick="{{oDacRevC}}" style="font-family:var(--mono);font-size:10px;padding:4px 8px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">REV C</button>
+                      <button onClick="{{oDacGl}}" style="font-family:var(--mono);font-size:10px;padding:4px 8px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">GL5549</button>
+                      <button onClick="{{oDacRevD}}" style="font-family:var(--mono);font-size:10px;padding:4px 8px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">REV D</button>
+                    </div>
+                  </div>
+                  <div style="display:flex;gap:6px;margin-top:2px">
+                    <button onClick="{{onDacApply}}" style="flex:1;font-family:var(--sans);font-size:12px;padding:6px 0;background:transparent;border:1px solid var(--led);color:var(--txt);cursor:pointer" style-hover="background:var(--led-fill)">APPLY</button>
+                    <button onClick="{{onDacCopy}}" style="font-family:var(--sans);font-size:12px;padding:6px 12px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">COPY BS</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{sec_devconfig}}" hint-placeholder-val="{{false}}">
+          <div data-screen-label="devconfig" style="animation:pcc-in .16s ease-out both;padding:14px;max-width:1000px">
+            <section style="background:var(--panel);border:1px solid var(--line)">
+              <div style="display:flex;align-items:center;justify-content:space-between;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)">
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">config.txt — DEVICE USB VOLUME</span>
+                <span style="font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--txt3)">{{cfgName}}</span>
+              </div>
+              <div style="padding:12px;display:flex;flex-direction:column;gap:10px">
+                <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+                  <button onClick="{{onReadConfig}}" disabled="{{readCfgDisabled}}" style="{{readCfgStyle}}">READ config.txt</button>
+                  <button onClick="{{onCfgWriteToggle}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbCfgWrite}}"></span>ALLOW WRITE-BACK</button>
+                  <span style="flex:1"></span>
+                  <sc-if value="{{cfgDirty}}" hint-placeholder-val="{{false}}"><span style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:3px;padding:2px 7px">UNSAVED CHANGES</span></sc-if>
+                </div>
+                <textarea ref="{{refCfgEditor}}" onInput="{{onCfgInput}}" spellCheck="false" placeholder="Click READ config.txt and pick the file on the mounted CLOCK drive to edit it here…" style="width:100%;height:320px;resize:vertical;font-family:var(--mono);font-size:12px;background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:10px;line-height:1.55;white-space:pre;overflow:auto"></textarea>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <button onClick="{{onCfgSave}}" disabled="{{cfgSaveDisabled}}" style="{{cfgSaveStyle}}">SAVE TO CLOCK</button>
+                  <button onClick="{{onCfgRevert}}" style="font-family:var(--sans);font-size:12px;padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="border-color:var(--txt3);color:var(--txt)">REVERT</button>
+                  <span style="font-family:var(--mono);font-size:9px;letter-spacing:.05em;color:var(--txt3);line-height:1.6">SERIAL CONFIG IS WRITE-ONLY — THE FILE IS READ/WRITTEN VIA THE MOUNTED CLOCK USB VOLUME (CHROMIUM ONLY). WRITE-BACK IS GATED OFF BY DEFAULT; RE-PLUG OR REBOOT THE CLOCK TO RELOAD IT.</span>
+                </div>
+              </div>
+            </section>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{sec_devadvanced}}" hint-placeholder-val="{{false}}">
+          <div class="pcc-cards" data-screen-label="devadvanced" style="animation:pcc-in .16s ease-out both;padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:stretch;max-width:1420px">
+            <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">CLOCK SETTINGS</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">LIVE OVER SERIAL</span>
+                </div>
+                <div style="padding:12px;display:flex;flex-direction:column;gap:11px">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+                    <span style="font-size:12px;color:var(--txt2)">Timezone override</span>
+                    <span style="position:relative;display:inline-flex;align-items:center">
+                      <select value="{{tzVal}}" onChange="{{onTz}}" style="appearance:none;-webkit-appearance:none;font-family:var(--mono);font-size:11px;background:var(--well);color:var(--txt);border:1px solid var(--line2);padding:4px 22px 4px 8px;border-radius:0;cursor:pointer">
+                        <option value="auto">AUTO (GPS)</option>
+                        <option value="utc">UTC</option>
+                        <option value="utc+1">UTC+1</option>
+                        <option value="utc-5">UTC−5</option>
+                        <option value="utc+9">UTC+9</option>
+                      </select>
+                      <span style="position:absolute;right:7px;pointer-events:none;color:var(--txt3);font-size:8px">▾</span>
+                    </span>
+                  </div>
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+                    <span style="font-size:12px;color:var(--txt2)">Matrix frequency</span>
+                    <span style="position:relative;display:inline-flex;align-items:center">
+                      <select value="{{mxVal}}" onChange="{{onMx}}" style="appearance:none;-webkit-appearance:none;font-family:var(--mono);font-size:11px;background:var(--well);color:var(--txt);border:1px solid var(--line2);padding:4px 22px 4px 8px;border-radius:0;cursor:pointer">
+                        <option value="1.0">1.0 kHz</option>
+                        <option value="1.6">1.6 kHz</option>
+                        <option value="2.0">2.0 kHz</option>
+                      </select>
+                      <span style="position:absolute;right:7px;pointer-events:none;color:var(--txt3);font-size:8px">▾</span>
+                    </span>
+                  </div>
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+                    <span style="font-size:12px;color:var(--txt2)">Time tolerance</span>
+                    <span style="display:flex;align-items:center;gap:6px">
+                      <input defaultValue="50" size="4" style="width:58px;font-family:var(--mono);font-size:11px;background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:4px 6px;text-align:right">
+                      <span style="font-family:var(--mono);font-size:10px;color:var(--txt3)">ms</span>
+                    </span>
+                  </div>
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+                    <span style="font-size:12px;color:var(--txt2)">Simulated position</span>
+                    <span style="display:flex;align-items:center;gap:6px">
+                      <input ref="{{refLatIn}}" defaultValue="52.20530" size="8" style="width:76px;font-family:var(--mono);font-size:11px;background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:4px 6px;text-align:right">
+                      <input ref="{{refLonIn}}" defaultValue="0.12180" size="8" style="width:76px;font-family:var(--mono);font-size:11px;background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:4px 6px;text-align:right">
+                      <button onClick="{{onApplyPos}}" style="font-family:var(--mono);font-size:10px;padding:4px 9px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">APPLY</button>
+                    </span>
+                  </div>
+                  <div style="border-top:1px solid var(--line);padding-top:11px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+                    <span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--txt3)">RE-ENUMERATES USB · ≈3 S</span>
+                    <button onClick="{{onReboot}}" disabled="{{rebootDisabled}}" style="{{rebootStyle}}">{{rebootLabel}}</button>
+                  </div>
+                </div>
+              </section>
+
+            <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">DIAGNOSTICS</span>
+                </div>
+                <div style="padding:12px;display:flex;flex-direction:column;gap:10px">
+                  <div class="pcc-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px">
+                    <button onClick="{{oDgOff}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbDgOff}}"></span>OFF</button>
+                    <button onClick="{{oDgTest}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbDgTest}}"></span>DISPLAY TEST</button>
+                    <button onClick="{{oDgVbat}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbDgVbat}}"></span>BATTERY</button>
+                    <button onClick="{{oDgSat}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{rbDgSat}}"></span>SAT VIEW</button>
+                    <div style="display:flex;align-items:center;gap:8px;padding:2px 0;font-family:var(--sans);font-size:12px;color:var(--txt3);opacity:.55">
+                      <span style="width:12px;height:12px;flex:none;border:1px solid var(--line)"></span>TTFF
+                      <span style="font-family:var(--mono);font-size:9px;letter-spacing:.1em">DEVICE ONLY</span>
+                    </div>
+                  </div>
+                  <span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--txt3)">DIAGNOSTIC MODES OVERRIDE THE FACE UNTIL CLEARED</span>
+                </div>
+              </section>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{sec_devupdates}}" hint-placeholder-val="{{false}}">
+          <div class="pcc-cards" data-screen-label="devupdates" style="animation:pcc-in .16s ease-out both;padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:stretch;max-width:1420px">
+            <section style="background:var(--panel);border:1px solid var(--line);grid-column:1/-1;max-width:1000px">
+              <div style="display:flex;align-items:center;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)"><span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">FIRMWARE &amp; DATA</span></div>
+              <div style="padding:22px 14px;font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--txt3);line-height:1.7">Firmware / timezone-table update checking against GitHub lands in this build.</div>
+            </section>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{sec_display}}" hint-placeholder-val="{{true}}">
+          <div data-screen-label="Display" style="animation:pcc-in .16s ease-out both;padding:14px;display:flex;flex-direction:column;gap:14px;min-width:840px;max-width:1560px">
+            <section style="background:var(--panel);border:1px solid var(--line)">
+              <div style="display:flex;align-items:center;justify-content:space-between;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)"><span style="font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--txt3)">DISPLAY OWNER — WHO DRIVES THE DATE ROW</span></div>
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:11px 12px">
+                <div style="display:flex;border:1px solid var(--line)"><button onClick="{{onModeTime}}" style="{{ssModeTime}}">MODES</button><button onClick="{{onModeText}}" style="{{ssModeText}}">TEXT</button><button onClick="{{onModeCd}}" style="{{ssModeCd}}">COUNTDOWN</button></div>
+                <span style="flex:1"></span>
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.06em;color:var(--txt3)">SEND / SET BELOW HANDS THE DATE ROW TO THAT SOURCE</span>
+              </div>
+            </section>
+
+            <section style="background:var(--panel);border:1px solid var(--line)">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">02 · MK IV FACE — LIVE EMULATION</span>
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--txt3)">{{faceStatusLine}}</span>
+              </div>
+              <div style="padding:18px 14px 8px">
+                <div ref="{{refDispWrap}}" style="position:relative;display:flex;justify-content:center">
+                  <div ref="{{refDispBar}}" style="position:relative;display:flex;box-shadow:0 12px 26px -14px rgba(0,0,0,.55);visibility:hidden">
+                    <div ref="{{refDispDateHalf}}" style="position:relative;width:620px;height:160px;background:var(--inset);border:1px solid var(--line2);transform:rotate(180deg)">
+                      <canvas ref="{{refDispDate}}" style="position:absolute"></canvas>
+                    </div>
+                    <div ref="{{refDispTimeHalf}}" style="position:relative;width:620px;height:160px;background:var(--inset);border:1px solid var(--line2)">
+                      <canvas ref="{{refDispTime}}" style="position:absolute"></canvas>
+                    </div>
+                    <div ref="{{refDispLink}}" style="position:absolute;left:574px;top:0;width:91px;height:46px;background:var(--inset);border:1px solid var(--line2);border-radius:23px">
+                      <span ref="{{refDispPinA}}" style="position:absolute;left:17px;top:17px;width:12px;height:12px;border-radius:50%;background:#2c2f35"></span>
+                      <span ref="{{refDispPinB}}" style="position:absolute;left:63px;top:17px;width:12px;height:12px;border-radius:50%;background:#2c2f35"></span>
+                    </div>
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;justify-content:flex-end;padding:9px 2px 2px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--txt3)">
+                  <span>{{sourceTag}}</span>
+                </div>
+              </div>
+            </section>
+
+            <div class="pcc-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;grid-auto-rows:1fr;align-items:stretch">
+              <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+                <div style="display:flex;align-items:center;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)"><span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">TEXT</span></div>
+                <div style="padding:12px;display:flex;flex-direction:column;gap:11px;flex:1"><div style="display:flex;flex-direction:column;gap:9px">
+                      <div style="display:flex;gap:8px">
+                        <input ref="{{refTextInput}}" defaultValue="HELLO" maxLength="48" spellCheck="false" style="flex:1;min-width:0;font-family:var(--mono);font-size:12px;background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:6px 8px">
+                        <button onClick="{{onSendText}}" style="font-family:var(--sans);font-size:12px;padding:5px 14px;background:transparent;border:1px solid var(--led);color:var(--txt);cursor:pointer" style-hover="background:var(--led-fill)">SEND</button>
+                        <button onClick="{{onClearText}}" style="font-family:var(--sans);font-size:12px;padding:5px 12px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="border-color:var(--txt3);color:var(--txt)">CLEAR</button>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                        <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">MARQUEE</span>
+                        <div style="display:flex;border:1px solid var(--line)">
+                          <button onClick="{{onSpdSlow}}" style="{{ssSpdSlow}}">SLOW</button>
+                          <button onClick="{{onSpdStd}}" style="{{ssSpdStd}}">STD</button>
+                          <button onClick="{{onSpdFast}}" style="{{ssSpdFast}}">FAST</button>
                         </div>
+                        <span style="font-family:var(--mono);font-size:10px;color:var(--txt3)">{{marqueeNote}}</span>
+                      </div>
+                    </div></div>
+              </section>
+              <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+                <div style="display:flex;align-items:center;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)"><span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">COUNTDOWN</span></div>
+                <div style="padding:12px;display:flex;flex-direction:column;gap:11px;flex:1"><div style="display:flex;flex-direction:column;gap:9px">
+                      <div style="display:flex;gap:8px">
+                        <input ref="{{refCdInput}}" type="datetime-local" style="flex:1;min-width:0;font-family:var(--mono);font-size:12px;background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:5px 8px">
+                        <button onClick="{{onSetCd}}" style="font-family:var(--sans);font-size:12px;padding:5px 14px;background:transparent;border:1px solid var(--led);color:var(--txt);cursor:pointer" style-hover="background:var(--led-fill)">SET</button>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                        <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">PRESET</span>
+                        <button onClick="{{onCd10m}}" style="font-family:var(--mono);font-size:10px;padding:4px 9px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">+10 MIN</button>
+                        <button onClick="{{onCd1h}}" style="font-family:var(--mono);font-size:10px;padding:4px 9px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">+1 HR</button>
+                        <button onClick="{{onCdNye}}" style="font-family:var(--mono);font-size:10px;padding:4px 9px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">NEW YEAR</button>
+                      </div>
+                      <div style="font-family:var(--mono);font-size:10px;color:var(--txt3)">TARGET {{cdTargetLabel}}</div>
+                    </div></div>
+              </section>
+              <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+                <div style="display:flex;align-items:center;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)"><span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">DATA SOURCES</span></div>
+                <div style="padding:12px;display:flex;flex-direction:column;gap:10px;flex:1">
+                  <div style="display:flex;flex-direction:column;gap:6px">
+                    <div style="display:flex;gap:6px"><input ref="{{refDsName}}" placeholder="NAME" style="width:34%;min-width:0;font-family:var(--mono);font-size:11px;background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:5px 7px"><input ref="{{refDsUrl}}" placeholder="https://api… (must allow CORS)" style="flex:1;min-width:0;font-family:var(--mono);font-size:11px;background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:5px 7px"></div>
+                    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                      <button onClick="{{oDsJson}}" style="display:flex;align-items:center;gap:6px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:11px;color:var(--txt)"><span style="{{rbDsJson}}"></span>JSON PATH</button>
+                      <button onClick="{{oDsRegex}}" style="display:flex;align-items:center;gap:6px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:11px;color:var(--txt)"><span style="{{rbDsRegex}}"></span>REGEX</button>
+                      <button onClick="{{oDsText}}" style="display:flex;align-items:center;gap:6px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:11px;color:var(--txt)"><span style="{{rbDsText}}"></span>TEXT</button>
                     </div>
+                    <input ref="{{refDsPath}}" placeholder="{{dsPathPlaceholder}}" style="font-family:var(--mono);font-size:11px;background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:5px 7px">
+                    <div style="display:flex;gap:6px"><input ref="{{refDsFormat}}" defaultValue="{v}" style="width:40%;min-width:0;font-family:var(--mono);font-size:11px;background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:5px 7px" title="Display format — {v} is the value"><input ref="{{refDsInterval}}" type="number" min="5" defaultValue="60" style="width:64px;font-family:var(--mono);font-size:11px;background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:5px 7px" title="Poll interval (s)"><button onClick="{{onDsAdd}}" style="flex:1;font-family:var(--sans);font-size:12px;padding:5px 0;background:transparent;border:1px solid var(--led);color:var(--txt);cursor:pointer" style-hover="background:var(--led-fill)">ADD</button></div>
+                  </div>
+                  <sc-if value="{{dsEmpty}}" hint-placeholder-val="{{false}}"><div style="font-family:var(--mono);font-size:9px;letter-spacing:.05em;color:var(--txt3);line-height:1.7;padding:4px 0">No sources yet — add a REST feed (JSON path, regex, or first line of text) and it polls, then push its value to the date row.</div></sc-if>
+                  <sc-for list="{{dsList}}" as="d">
+                    <div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--line);padding-top:7px">
+                      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px"><span style="font-family:var(--mono);font-size:11px;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{d.name}}</span><span style="font-family:var(--mono);font-size:12px;color:var(--led);white-space:nowrap">{{d.val}}</span></div>
+                      <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+                        <button onClick="{{d.onPush}}" style="font-family:var(--mono);font-size:9px;letter-spacing:.06em;padding:3px 8px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">PUSH</button>
+                        <button onClick="{{d.onAuto}}" style="{{d.autoStyle}}">AUTO</button>
+                        <button onClick="{{d.onTog}}" style="{{d.enStyle}}">{{d.enTxt}}</button>
+                        <span style="flex:1"></span>
+                        <button onClick="{{d.onDel}}" style="font-family:var(--mono);font-size:11px;padding:2px 7px;background:transparent;border:0;color:var(--txt3);cursor:pointer" style-hover="color:var(--led)">✕</button>
+                      </div>
+                    </div>
+                  </sc-for>
+                  <span style="font-family:var(--mono);font-size:9px;letter-spacing:.04em;color:var(--txt3);line-height:1.6;margin-top:auto">STORED IN THIS BROWSER (localStorage) — HEADER TOKENS ARE SAVED IN THE CLEAR. AUTO PUSHES EACH NEW VALUE (WON'T STOMP COUNTDOWN / DIAGNOSTICS).</span>
                 </div>
+              </section>
+              <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+                <div style="display:flex;align-items:center;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)"><span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">WEATHER — AT FIX</span></div>
+                <div style="padding:12px;display:flex;flex-direction:column;gap:10px;flex:1">
+                  <sc-if value="{{wxOnline}}" hint-placeholder-val="{{true}}">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 18px">
+                      <div style="display:flex;justify-content:space-between;gap:10px"><span style="font-size:12px;color:var(--txt2)">Temp</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{wTemp}}</span></div>
+                      <div style="display:flex;justify-content:space-between;gap:10px"><span style="font-size:12px;color:var(--txt2)">Humidity</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{wRh}}</span></div>
+                      <div style="display:flex;justify-content:space-between;gap:10px"><span style="font-size:12px;color:var(--txt2)">Sky</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{wCode}}</span></div>
+                      <div style="display:flex;justify-content:space-between;gap:10px"><span style="font-size:12px;color:var(--txt2)">Wind</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{wWind}}</span></div>
+                    </div>
+                    <div style="font-family:var(--mono);font-size:9px;letter-spacing:.05em;color:var(--txt3)">AT {{wPos}} · UPDATED {{wAsOf}}</div>
+                  </sc-if>
+                  <sc-if value="{{wxOffline}}" hint-placeholder-val="{{false}}">
+                    <div style="display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--none)"><span style="width:8px;height:8px;flex:none;background:var(--none)"></span>WEATHER UNAVAILABLE</div>
+                  </sc-if>
+                  <div style="display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);padding-top:10px;margin-top:auto">
+                    <button onClick="{{onWxPush}}" style="font-family:var(--sans);font-size:12px;padding:5px 14px;background:transparent;border:1px solid var(--led);color:var(--txt);cursor:pointer" style-hover="background:var(--led-fill)">PUSH TO DATE ROW</button>
+                    <span style="flex:1"></span>
+                    <button onClick="{{onWxRetry}}" style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;padding:5px 11px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">REFRESH</button>
+                  </div>
+                </div>
+              </section>
             </div>
-        </section>
+          </div>
+        </sc-if>
 
-        <!-- GLOBE -->
-        <section class="panel" id="panel-globe">
-            <h1 class="panel-title">3D globe</h1>
-            <p class="panel-sub">Photographic Earth with a real day/night terminator. Satellites float above their sub-satellite points; recorded passes render as age-faded arcs. Bundled globe.gl / three.js — no external assets.</p>
+        <sc-if value="{{sec_connect}}" hint-placeholder-val="{{false}}">
+          <div data-screen-label="Connect" style="animation:pcc-in .16s ease-out both;padding:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(370px,1fr));gap:14px;align-items:start;max-width:1180px">
+            <section style="background:var(--panel);border:1px solid var(--line)">
+              <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">01 · CONNECTION</span>
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">WEB SERIAL</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;padding:15px 12px;border-bottom:1px solid var(--line)">
+                <span style="width:10px;height:10px;flex:none;background:{{connLed}};box-shadow:0 0 9px {{connGlow}}"></span>
+                <div style="display:flex;flex-direction:column;gap:3px">
+                  <span style="font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:.06em;color:var(--txt)">{{connState}}</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--txt3)">{{connSub}}</span>
+                </div>
+              </div>
+              <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Port</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt);text-align:right">{{cPort}}</span></div>
+              <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Device</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt);text-align:right">{{cDevice}}</span></div>
+              <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Framing</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt);text-align:right">115200 8N1</span></div>
+              <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Session</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt);text-align:right">{{cSession}}</span></div>
+              <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Fix</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt);text-align:right">{{cFix}}</span></div>
+              <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Satellites used / in view</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt);text-align:right">{{cSats}}</span></div>
+              <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px"><span style="font-size:12px;color:var(--txt2)">Fix age</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt);text-align:right">{{cAge}}</span></div>
+              <div style="display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)">
+                <button onClick="{{onConnectReal}}" disabled="{{realDisabled}}" style="{{btnRealStyle}}">CONNECT DEVICE</button>
+                <button onClick="{{onConnect}}" disabled="{{connectDisabled}}" style="{{btnConnStyle}}">SIMULATE</button>
+                <button onClick="{{onDisconnect}}" disabled="{{discDisabled}}" style="{{btnDiscStyle}}">DISCONNECT</button>
+              </div>
+              <div style="display:flex;gap:8px;padding:0 12px 12px">
+                <button onClick="{{onReadConfig}}" disabled="{{readCfgDisabled}}" style="{{readCfgStyle}}">READ config.txt FROM DRIVE</button>
+              </div>
+              <div style="padding:0 12px 12px;font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--txt3)">CONNECT DEVICE OPENS A REAL MK IV OVER WEB SERIAL. SIMULATE POPULATES DEMO DATA FOR EXPLORING WITHOUT HARDWARE — DISABLED ONCE A REAL DEVICE HAS BEEN USED. READ config.txt PULLS THE DEVICE'S REAL SETTINGS FROM ITS USB DRIVE (SERIAL CAN'T READ CONFIG BACK).</div>
+            </section>
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">BROWSER SUPPORT</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">LIVE CHECK</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Web Serial API</span><span style="font-family:var(--mono);font-size:12px;color:{{supSerialC}}">{{supSerial}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Secure context</span><span style="font-family:var(--mono);font-size:12px;color:{{supCtxC}}">{{supCtx}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px"><span style="font-size:12px;color:var(--txt2)">Engine</span><span style="font-family:var(--mono);font-size:12px;color:{{supChromC}}">{{supChrom}}</span></div>
+                <sc-if value="{{gateVisible}}" hint-placeholder-val="{{false}}">
+                  <div style="margin:0 12px 12px;padding:10px;background:var(--well);border:1px solid var(--line2)">
+                    <div style="font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--none);margin-bottom:5px">THIS CONTEXT CANNOT REACH THE CLOCK</div>
+                    <div style="font-size:12px;color:var(--txt2);line-height:1.5">Web Serial needs a Chromium browser on <span style="font-family:var(--mono)">https</span> or <span style="font-family:var(--mono)">localhost</span>. The emulator and simulated session still run.</div>
+                  </div>
+                </sc-if>
 
-            <div class="row toggles" style="margin-bottom: 14px;">
-                <label><input type="checkbox" id="globeShowSats" checked> Satellites</label>
-                <label><input type="checkbox" id="globeShowCelestials" checked> Sun &amp; Moon</label>
-                <label><input type="checkbox" id="globeShowLabels" checked> Labels</label>
-                <label><input type="checkbox" id="globeSmooth" checked> Smooth trails</label>
-                <label><input type="checkbox" id="globeShowClock" checked> Clock overlay</label>
-                <button class="btn ghost" id="globeClockFormatBtn" title="Toggle between Match clock (local) and ISO 8601 (UTC)">Clock format</button>
+
+              </section>
+              <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">CONNECTION STATES</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">REFERENCE</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="width:8px;height:8px;flex:none;background:var(--line2)"></span><span style="font-family:var(--mono);font-size:11px;width:110px;color:var(--txt)">DISCONNECTED</span><span style="font-size:11px;color:var(--txt3)">No port open — emulator on host time</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="width:8px;height:8px;flex:none;background:var(--acq)"></span><span style="font-family:var(--mono);font-size:11px;width:110px;color:var(--txt)">CONNECTING</span><span style="font-size:11px;color:var(--txt3)">Port chooser open / handshake</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="width:8px;height:8px;flex:none;background:var(--lock)"></span><span style="font-family:var(--mono);font-size:11px;width:110px;color:var(--txt)">LOCKED</span><span style="font-size:11px;color:var(--txt3)">Valid 3D fix, stream healthy</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="width:8px;height:8px;flex:none;background:var(--acq)"></span><span style="font-family:var(--mono);font-size:11px;width:110px;color:var(--txt)">ACQUIRING</span><span style="font-size:11px;color:var(--txt3)">Connected, searching the sky</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="width:8px;height:8px;flex:none;background:var(--none)"></span><span style="font-family:var(--mono);font-size:11px;width:110px;color:var(--txt)">NO FIX</span><span style="font-size:11px;color:var(--txt3)">Signal lost — always labelled, never hue-only</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="width:8px;height:8px;flex:none;background:var(--acq)"></span><span style="font-family:var(--mono);font-size:11px;width:110px;color:var(--txt)">REBOOT</span><span style="font-size:11px;color:var(--txt3)">USB re-enumeration, auto-reconnect</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 12px"><span style="width:8px;height:8px;flex:none;background:var(--none)"></span><span style="font-family:var(--mono);font-size:11px;width:110px;color:var(--txt)">UNSUPPORTED</span><span style="font-size:11px;color:var(--txt3)">Browser gate — see support panel</span></div>
+              </section>
             </div>
+          </div>
+        </sc-if>
 
-            <div class="globe-wrap">
-                <iframe id="globeFrame" title="3D globe" src="./globe/index.html" allow="fullscreen"></iframe>
+        <sc-if value="{{sec_satellites}}" hint-placeholder-val="{{false}}">
+          <div data-screen-label="Satellites" style="animation:pcc-in .16s ease-out both;padding:14px;display:grid;grid-template-columns:minmax(430px,1.5fr) minmax(300px,1fr);gap:14px;align-items:start;max-width:1560px">
+            <section style="background:var(--panel);border:1px solid var(--line)">
+              <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">03 · SKY PLOT</span>
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">N UP · RINGS 30°/60° · SIZE = C/N₀</span>
+              </div>
+              <div style="padding:12px">
+                <canvas ref="{{refSky}}" style="width:100%;height:520px;display:block"></canvas>
+              </div>
+              <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 12px;border-top:1px solid var(--line)">
+                <button onClick="{{oHeat}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbHeat}}"></span>HEATMAP</button>
+                <button onClick="{{oHoriz}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbHoriz}}"></span>HORIZON</button>
+                <button onClick="{{oTrails}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbTrails}}"></span>TRAILS</button>
+                <button onClick="{{oLabels}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbLabels}}"></span>LABELS</button>
+                <span style="flex:1"></span>
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">WINDOW</span>
+                <div style="display:flex;border:1px solid var(--line)">
+                  <button onClick="{{oWinLive}}" style="{{ssWinLive}}">LIVE</button>
+                  <button onClick="{{oWin15}}" style="{{ssWin15}}">15M</button>
+                  <button onClick="{{oWin1h}}" style="{{ssWin1h}}">1H</button>
+                  <button onClick="{{oWinAll}}" style="{{ssWinAll}}">ALL</button>
+                </div>
+              </div>
+            </section>
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">GPS FIX</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">{{fFix}}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Latitude</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fLat}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Longitude</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fLon}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Altitude</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fAlt}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">HDOP</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fHdop}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Satellites used / in view</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fSatsUV}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px"><span style="font-size:12px;color:var(--txt2)">Maidenhead grid</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fGrid}}</span></div>
+              </section>
+              <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">CELESTIAL</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">OBSERVER FRAME</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Sun alt / az</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{cSunAlt}} / {{cSunAz}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Moon alt / az</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{cMoonAlt}} / {{cMoonAz}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Moon phase</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{cMoonPhase}} · {{cMoonIllum}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Sunrise</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{cRise}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px"><span style="font-size:12px;color:var(--txt2)">Sunset</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{cSet}}</span></div>
+              </section>
+              <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">SESSION</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">RECORDED PASSES</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Started</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{sStarted}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Passes</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{sPasses}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Observations</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{sObs}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Peak elevation</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{sPeak}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Sky coverage</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{sCover}}</span></div>
+                <div style="display:flex;align-items:center;gap:14px;padding:8px 12px;font-family:var(--mono);font-size:10px;color:var(--txt2)">
+                  <span style="display:flex;align-items:center;gap:5px"><span style="width:9px;height:9px;background:var(--gps)"></span>GPS {{nGps}}</span>
+                  <span style="display:flex;align-items:center;gap:5px"><span style="width:9px;height:9px;background:var(--glo)"></span>GLO {{nGlo}}</span>
+                  <span style="display:flex;align-items:center;gap:5px"><span style="width:9px;height:9px;background:var(--gal)"></span>GAL {{nGal}}</span>
+                  <span style="display:flex;align-items:center;gap:5px"><span style="width:9px;height:9px;background:var(--bds)"></span>BDS {{nBds}}</span>
+                </div>
+              </section>
             </div>
-        </section>
+          </div>
+        </sc-if>
 
-        <!-- MONITOR -->
-        <section class="panel" id="panel-monitor">
-            <h1 class="panel-title">Serial monitor</h1>
-            <p class="panel-sub">Raw NMEA and command echoes from the clock. Enable NMEA to see the GNSS firehose; leave it off to watch replies to commands.</p>
-
-            <div class="row" style="margin-bottom: 12px;">
-                <label><input type="checkbox" id="nmeaToggle"> Request NMEA stream</label>
-                <button class="btn ghost" id="clearLogBtn">Clear log</button>
-                <button class="btn ghost" id="pauseLogBtn" data-paused="false">Pause</button>
+        <sc-if value="{{sec_signal}}" hint-placeholder-val="{{false}}">
+          <div data-screen-label="Signal" style="animation:pcc-in .16s ease-out both;padding:14px;display:flex;flex-direction:column;gap:14px;max-width:1560px">
+            <div style="display:grid;grid-template-columns:minmax(420px,1.4fr) minmax(300px,1fr);gap:14px;align-items:stretch">
+              <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">04 · C/N₀ VS ELEVATION</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">ANTENNA / MULTIPATH QC</span>
+                </div>
+                <div style="padding:12px;flex:1">
+                  <canvas ref="{{refCn0elev}}" style="width:100%;height:320px;display:block"></canvas>
+                </div>
+                <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 12px;border-top:1px solid var(--line)">
+                  <button onClick="{{oMedian}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbMedian}}"></span>BINNED MEDIAN</button>
+                  <span style="flex:1"></span>
+                  <span style="display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;color:var(--txt2)"><span style="width:9px;height:9px;background:var(--gps)"></span>GPS</span>
+                  <span style="display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;color:var(--txt2)"><span style="width:9px;height:9px;background:var(--glo)"></span>GLO</span>
+                  <span style="display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;color:var(--txt2)"><span style="width:9px;height:9px;background:var(--gal)"></span>GAL</span>
+                  <span style="display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;color:var(--txt2)"><span style="width:9px;height:9px;background:var(--bds)"></span>BDS</span>
+                </div>
+              </section>
+              <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">SIGNAL BARS</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">dB-Hz · DIM = UNUSED</span>
+                </div>
+                <div style="padding:10px 12px;overflow-y:auto;max-height:378px">
+                  <sc-for list="{{barRows}}" as="b" hint-placeholder-count="8">
+                    <div style="display:grid;grid-template-columns:42px 1fr 44px 30px;gap:8px;align-items:center;padding:2.5px 0;opacity:{{b.dim}}">
+                      <span style="font-family:var(--mono);font-size:10px;color:var(--txt2)">{{b.key}}</span>
+                      <span style="position:relative;display:block;height:8px;background:var(--inset);border:1px solid var(--line)">
+                        <span style="position:absolute;left:0;top:0;bottom:0;width:{{b.w}};background:{{b.color}}"></span>
+                      </span>
+                      <span style="font-family:var(--mono);font-size:11px;color:var(--txt);text-align:right">{{b.val}}</span>
+                      <span style="font-family:var(--mono);font-size:10px;color:var(--txt3);text-align:right">{{b.el}}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </section>
             </div>
+            <section style="background:var(--panel);border:1px solid var(--line)">
+              <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">C/N₀ OVER TIME — PER PRN</span>
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">TOP 8 BY SIGNAL · 30 MIN</span>
+              </div>
+              <div style="padding:12px">
+                <canvas ref="{{refCn0time}}" style="width:100%;height:250px;display:block"></canvas>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid var(--line)">
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">CONSTELLATION</span>
+                <div style="display:flex;border:1px solid var(--line)">
+                  <button onClick="{{oFilAll}}" style="{{ssFilAll}}">ALL</button>
+                  <button onClick="{{oFilG}}" style="{{ssFilG}}">GPS</button>
+                  <button onClick="{{oFilR}}" style="{{ssFilR}}">GLO</button>
+                  <button onClick="{{oFilE}}" style="{{ssFilE}}">GAL</button>
+                  <button onClick="{{oFilC}}" style="{{ssFilC}}">BDS</button>
+                </div>
+              </div>
+            </section>
+          </div>
+        </sc-if>
 
-            <div class="monitor-log" id="monitorLog"></div>
-        </section>
-
-        <!-- ABOUT -->
-        <section class="panel" id="panel-about">
-            <h1 class="panel-title">About PCC Web</h1>
-            <p class="panel-sub">Browser build of PCC — WIP / POC.</p>
-
-            <div class="card info-card">
-                <h2>Status</h2>
-                <p>Proof-of-concept. Work in progress. Things may not work. The <a href="https://github.com/peterlewis/pcc/releases" target="_blank" rel="noopener">Mac app</a> is the supported companion.</p>
+        <sc-if value="{{sec_position}}" hint-placeholder-val="{{false}}">
+          <div data-screen-label="Position" style="animation:pcc-in .16s ease-out both;padding:14px;display:grid;grid-template-columns:minmax(430px,1.2fr) minmax(330px,1fr);gap:14px;align-items:start;max-width:1560px">
+            <section style="background:var(--panel);border:1px solid var(--line)">
+              <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">05 · STATIC-POSITION SCATTER</span>
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">E/N OFFSET FROM RUNNING MEAN</span>
+              </div>
+              <div style="padding:12px">
+                <canvas ref="{{refPosScatter}}" style="width:100%;height:500px;display:block"></canvas>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid var(--line)">
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">WINDOW</span>
+                <div style="display:flex;border:1px solid var(--line)">
+                  <button onClick="{{oPwin15}}" style="{{ssPwin15}}">15M</button>
+                  <button onClick="{{oPwin30}}" style="{{ssPwin30}}">30M</button>
+                  <button onClick="{{oPwin1h}}" style="{{ssPwin1h}}">1H</button>
+                </div>
+                <span style="font-family:var(--mono);font-size:10px;color:var(--txt3)">EACH FIX = ONE SAMPLE · AGE-FADED</span>
+              </div>
+            </section>
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">PRECISION</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">THE HONEST FIGURE</span>
+                </div>
+                <div class="pcc-cards" style="display:grid;grid-template-columns:1fr 1fr">
+                  <div style="padding:12px;border-right:1px solid var(--line)">
+                    <div style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3);margin-bottom:4px">CEP 50%</div>
+                    <div style="font-family:var(--mono);font-size:26px;font-weight:700;color:var(--txt)">{{pCep}}</div>
+                  </div>
+                  <div style="padding:12px">
+                    <div style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3);margin-bottom:4px">2DRMS 95%</div>
+                    <div style="font-family:var(--mono);font-size:26px;font-weight:700;color:var(--txt)">{{pDrms}}</div>
+                  </div>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-top:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">σ east / σ north</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{pSigE}} / {{pSigN}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-top:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Mean latitude</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{pMeanLat}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-top:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Mean longitude</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{pMeanLon}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-top:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Fixes in window</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{pN}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-top:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Time to first fix</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{ttffLabel}}</span></div>
+              </section>
+              <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">DOP HISTORY</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">HDOP — · PDOP – – · VDOP · ·</span>
+                </div>
+                <div style="padding:12px">
+                  <canvas ref="{{refDop}}" style="width:100%;height:170px;display:block"></canvas>
+                </div>
+              </section>
+              <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">FIX CONTINUITY</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">TYPE BAND + SATS USED</span>
+                </div>
+                <div style="padding:12px">
+                  <canvas ref="{{refCont}}" style="width:100%;height:160px;display:block"></canvas>
+                </div>
+              </section>
             </div>
+          </div>
+        </sc-if>
 
-            <div class="card">
-                <h2>What it does</h2>
-                <ul class="compact">
-                    <li>Drive the clock: display modes, text, countdowns, brightness, raw commands</li>
-                    <li>Polar sky view: sector heatmap, horizon mask, trails</li>
-                    <li>3D globe (shared HTML with the Mac app)</li>
-                    <li>IndexedDB pass history with retention + time-window filter</li>
-                    <li>GPS info, sun/moon, raw serial monitor</li>
-                    <li>Light/dark follows the OS</li>
-                </ul>
+        <sc-if value="{{sec_timing}}" hint-placeholder-val="{{false}}">
+          <div data-screen-label="Timing" style="animation:pcc-in .16s ease-out both;padding:14px;display:flex;flex-direction:column;gap:14px;max-width:1560px">
+            <section style="background:var(--panel);border:1px solid var(--line)">
+              <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">06 · TIMING — PPS HOST-TIMESTAMPING</span>
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:{{ppsBannerC}}">{{ppsBanner}}</span>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+                <div style="padding:12px;border-right:1px solid var(--line)">
+                  <div style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3);margin-bottom:4px">PHASE JITTER RMS</div>
+                  <div style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--txt)">{{tJitter}}<span style="font-size:11px;font-weight:400;color:var(--txt3)"> µs</span></div>
+                </div>
+                <div style="padding:12px;border-right:1px solid var(--line)">
+                  <div style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3);margin-bottom:4px">PEAK-TO-PEAK</div>
+                  <div style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--txt)">{{tP2p}}<span style="font-size:11px;font-weight:400;color:var(--txt3)"> µs</span></div>
+                </div>
+                <div style="padding:12px;border-right:1px solid var(--line)">
+                  <div style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3);margin-bottom:4px">OSC DRIFT</div>
+                  <div style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--txt)">{{tDrift}}<span style="font-size:11px;font-weight:400;color:var(--txt3)"> ppm</span></div>
+                </div>
+                <div style="padding:12px;border-right:1px solid var(--line)">
+                  <div style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3);margin-bottom:4px">HOLDOVER</div>
+                  <div style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--txt)">{{tHold}}<span style="font-size:11px;font-weight:400;color:var(--txt3)"> s</span></div>
+                  <div style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--txt3);margin-top:3px">{{tHoldSub}}</div>
+                </div>
+                <div style="padding:12px;border-right:1px solid var(--line)">
+                  <div style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3);margin-bottom:4px">DIE TEMP</div>
+                  <div style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--txt)">{{tTemp}}<span style="font-size:11px;font-weight:400;color:var(--txt3)"> °C</span></div>
+                </div>
+                <div style="padding:12px">
+                  <div style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3);margin-bottom:4px">PPS EDGES</div>
+                  <div style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--txt)">{{tSeq}}</div>
+                  <div style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--txt3);margin-top:3px">DROPPED {{tDrop}}</div>
+                </div>
+              </div>
+            </section>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;align-items:stretch">
+              <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">PHASE AT PPS EDGE</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">CENTRED ms-TICK · ±1σ BAND</span>
+                </div>
+                <div style="padding:12px;flex:1">
+                  <canvas ref="{{refPhase}}" style="width:100%;height:240px;display:block"></canvas>
+                </div>
+                <div style="padding:0 12px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--txt3);line-height:1.6">CAPTURED IN FIRMWARE AT THE EDGE (SYSTICK ≈12.5 ns) — USB TRANSPORT JITTER NEVER TOUCHES THIS NUMBER.</div>
+              </section>
+              <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">OSCILLATOR DRIFT + DIE TEMP</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">CAL WINDOW 63 s → STAIRCASE</span>
+                </div>
+                <div style="padding:12px;flex:1">
+                  <canvas ref="{{refStair}}" style="width:100%;height:240px;display:block"></canvas>
+                </div>
+                <div style="padding:0 12px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--txt3);line-height:1.6">ppm = calerr · 10⁶ / (32768 · 63) — ONE STEP PER SUCCESSFUL RTC CALIBRATION.</div>
+              </section>
             </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;align-items:stretch">
+              <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">DRIFT VS DIE TEMP</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:{{fitStatusC}}">{{fitStatus}}</span>
+                </div>
+                <div style="padding:12px;flex:1">
+                  <canvas ref="{{refPpmtemp}}" style="width:100%;height:250px;display:block"></canvas>
+                </div>
+                <div style="padding:0 12px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--txt3);line-height:1.6">THE 32 kHz TUNING FORK'S PARABOLA — FITTED CURVE IN AMBER.</div>
+              </section>
+              <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">TEMP COMPENSATION — SOFTWARE TCXO</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">HOST FITS · FIRMWARE HOOK PENDING</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">k0 / k1 / k2 (ref 25 °C)</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fitK0}} / {{fitK1}} / {{fitK2}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Samples</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fitN}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Temp spread</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fitSpread}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Fit residual RMS</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fitRms}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Compensation state</span><span style="font-family:var(--mono);font-size:12px;color:{{compStateC}}">{{compState}}</span></div>
+                <div style="margin:10px 12px;padding:8px 10px;background:var(--well);border:1px solid var(--line2);font-family:var(--mono);font-size:11px;color:var(--txt)">{{compLine}}</div>
+                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--txt3);line-height:1.6">$PMTXTS TIMESTAMP + DIE-TEMP COME FROM DRAFT FIRMWARE PRs (pps=on) — NOT YET MERGED UPSTREAM. THE HOST FITS ppm(T) AND EMITS THIS temp_comp LINE, BUT FIRMWARE CONSUMPTION ISN'T WIRED YET, SO IT'S FOR REVIEW/LOGGING TODAY. WHILE LOCKED, calibrateRTC OWNS CALR; ABSOLUTE UTC OFFSET ISN'T RECOVERABLE OVER USB (≈1 ms FLOOR), SO THE APP SHOWS JITTER, STABILITY AND DRIFT.</div>
+              </section>
+            </div>
+          </div>
+        </sc-if>
 
-            <div class="card">
-                <h2>What it can't</h2>
-                <ul class="compact">
-                    <li>NTP server — no UDP listen from a browser</li>
-                    <li>Firmware / timezone updates — no USB mass-storage mount</li>
-                    <li>Native map — MapKit-only</li>
-                    <li>WeatherKit — Apple-only</li>
-                    <li>AI insights — Foundation Models are Mac-only</li>
-                </ul>
+        <sc-if value="{{sec_globe}}" hint-placeholder-val="{{false}}">
+          <div data-screen-label="Globe" style="animation:pcc-in .16s ease-out both;padding:14px;display:grid;grid-template-columns:1fr minmax(280px,330px);gap:14px;align-items:start;max-width:1560px">
+            <section style="background:var(--panel);border:1px solid var(--line)">
+              <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">07 · GLOBE</span>
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">ORTHOGRAPHIC · DRAG TO ROTATE</span>
+              </div>
+              <div style="position:relative;padding:10px">
+                <canvas ref="{{refGlobe}}" style="width:100%;height:560px;display:block;cursor:grab"></canvas>
+                <sc-if value="{{globeClockOn}}" hint-placeholder-val="{{false}}">
+                  <div style="position:absolute;top:20px;right:22px;font-family:var(--mono);font-size:12px;letter-spacing:.1em;color:var(--txt2)">{{gClock}}</div>
+                </sc-if>
+              </div>
+              <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 12px;border-top:1px solid var(--line)">
+                <button onClick="{{oGTerm}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbGTerm}}"></span>TERMINATOR</button>
+                <button onClick="{{oGTrails}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbGTrails}}"></span>TRAILS</button>
+                <button onClick="{{oGLabels}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbGLabels}}"></span>LABELS</button>
+                <button onClick="{{oGGrat}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbGGrat}}"></span>GRATICULE</button>
+                <button onClick="{{oGRot}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbGRot}}"></span>AUTO-ROTATE</button>
+                <button onClick="{{oGClock}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbGClock}}"></span>CLOCK OVERLAY</button>
+              </div>
+            </section>
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">READOUTS</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">LIVE</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Sub-solar point</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{gSub}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">In view at observer</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{gVis}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px"><span style="font-size:12px;color:var(--txt2)">Observer grid</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fGrid}}</span></div>
+              </section>
+              <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">NOTES</span>
+                </div>
+                <div style="padding:10px 12px;font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--txt3);line-height:1.7">SATELLITES AT SUB-SATELLITE POINTS · TRAILS = GROUND TRACKS · OBSERVER MARKED GREEN.<br>{{landNote}}</div>
+              </section>
             </div>
+          </div>
+        </sc-if>
 
-            <div class="card">
-                <h2>Links</h2>
-                <ul class="compact">
-                    <li><a href="https://mitxela.com/projects/precision_clock_mk_iv/docs" target="_blank" rel="noopener">Precision Clock Mk IV docs</a></li>
-                    <li><a href="https://github.com/peterlewis/pcc" target="_blank" rel="noopener">peterlewis/pcc</a></li>
-                    <li><a href="https://github.com/peterlewis/pcc/releases" target="_blank" rel="noopener">macOS releases</a></li>
-                </ul>
-            </div>
-        </section>
-    </main>
+        <sc-if value="{{sec_map}}" hint-placeholder-val="{{false}}">
+          <div data-screen-label="Map" style="animation:pcc-in .16s ease-out both;padding:14px;max-width:1560px">
+            <section style="background:var(--panel);border:1px solid var(--line)">
+              <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">08 · MAP</span>
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">GROUND TRACKS — WORLD · EQUIRECTANGULAR</span>
+              </div>
+              <div style="position:relative;padding:10px">
+                <canvas ref="{{refMap}}" style="width:100%;aspect-ratio:2/1;display:block"></canvas>
+                <div style="position:absolute;top:20px;right:22px;font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--txt2)">{{gSub}}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 12px;border-top:1px solid var(--line)">
+                <button onClick="{{oGTrails}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbGTrails}}"></span>TRAILS</button>
+                <button onClick="{{oGLabels}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbGLabels}}"></span>LABELS</button>
+                <button onClick="{{oGGrat}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbGGrat}}"></span>GRATICULE</button>
+                <span style="margin-left:auto;font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--txt3)">SATELLITES AT SUB-SATELLITE POINTS · SUN GOLD · OBSERVER GREEN</span>
+              </div>
+            </section>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{sec_weather}}" hint-placeholder-val="{{false}}">
+          <div data-screen-label="Weather" style="animation:pcc-in .16s ease-out both;padding:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(370px,1fr));gap:14px;align-items:start;max-width:1180px">
+            <section style="background:var(--panel);border:1px solid var(--line)">
+              <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">08 · CONDITIONS AT FIX</span>
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">OPEN-METEO · KEYLESS</span>
+              </div>
+              <sc-if value="{{wxOnline}}" hint-placeholder-val="{{true}}">
+                <div>
+                  <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Temperature</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{wTemp}}</span></div>
+                  <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Feels like</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{wApp}}</span></div>
+                  <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Sky</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{wCode}} · {{wCloud}}</span></div>
+                  <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Humidity</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{wRh}}</span></div>
+                  <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Pressure MSL</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{wMslp}}</span></div>
+                  <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Wind / gust</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{wWind}} / {{wGust}}</span></div>
+                  <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Precipitation</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{wPrecip}}</span></div>
+                  <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Updated</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{wAsOf}}</span></div>
+                  <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px"><span style="font-size:12px;color:var(--txt2)">Point forecast at</span><span style="font-family:var(--mono);font-size:11px;color:var(--txt2)">{{wPos}}</span></div>
+                </div>
+              </sc-if>
+              <sc-if value="{{wxOffline}}" hint-placeholder-val="{{false}}">
+                <div style="margin:12px;padding:12px;background:var(--well);border:1px solid var(--line2)">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                    <span style="width:8px;height:8px;background:var(--none)"></span>
+                    <span style="font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--none)">WEATHER UNAVAILABLE</span>
+                  </div>
+                  <div style="font-size:12px;color:var(--txt2);line-height:1.5;margin-bottom:10px">Open-Meteo could not be reached. The clock and GNSS views are unaffected — weather returns when the network does.</div>
+                  <button onClick="{{onWxRetry}}" style="font-family:var(--sans);font-size:12px;padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt);cursor:pointer" style-hover="border-color:var(--txt3)">RETRY</button>
+                </div>
+              </sc-if>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-top:1px solid var(--line)">
+                <button onClick="{{oWxOff}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:var(--txt3)"><span style="{{cbWxOff}}"></span>SIMULATE OUTAGE</button>
+                <span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--txt3)">PROTOTYPE CONTROL</span>
+              </div>
+            </section>
+            <section style="background:var(--panel);border:1px solid var(--line)">
+              <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">PUSH TO CLOCK</span>
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">TEXT MODE</span>
+              </div>
+              <div style="padding:12px;display:flex;flex-direction:column;gap:11px">
+                <div style="padding:9px 10px;background:var(--well);border:1px solid var(--line2);font-family:var(--mono);font-size:12px;color:var(--txt);min-height:36px">{{pushPreview}}</div>
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  <button onClick="{{onWxPush}}" style="font-family:var(--sans);font-size:12px;padding:6px 16px;background:transparent;border:1px solid var(--led);color:var(--txt);cursor:pointer" style-hover="background:var(--led-fill)">PUSH TO DISPLAY</button>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">REFRESH</span>
+                  <div style="display:flex;border:1px solid var(--line)">
+                    <button onClick="{{oWivOff}}" style="{{ssWivOff}}">OFF</button>
+                    <button onClick="{{oWiv5}}" style="{{ssWiv5}}">5M</button>
+                    <button onClick="{{oWiv15}}" style="{{ssWiv15}}">15M</button>
+                  </div>
+                </div>
+                <span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--txt3);line-height:1.6">SENDS AS TEXT MODE — MARQUEES AUTOMATICALLY PAST 10 CHARACTERS. THE DATE ROW CARRIES THE MESSAGE; TIME KEEPS TICKING.</span>
+              </div>
+            </section>
+          </div>
+        </sc-if>
+
+        <div ref="{{refDrawer}}" data-screen-label="Monitor drawer" style="position:fixed;left:186px;right:0;bottom:0;height:min(46vh,380px);z-index:40;background:var(--panel);border-top:1px solid var(--line2);box-shadow:0 -22px 44px -22px rgba(0,0,0,.55);display:flex;flex-direction:column;transform:{{drawerXform}};transition:transform .2s cubic-bezier(.3,0,.1,1)">
+          <button onClick="{{onToggleDrawer}}" title="Close monitor" style="position:absolute;right:12px;top:9px;z-index:2;background:transparent;border:0;color:var(--txt3);font-family:var(--mono);font-size:13px;line-height:1;cursor:pointer" style-hover="color:var(--txt)">✕</button>
+          <div style="padding:12px 14px;height:100%;display:flex;flex-direction:column">
+            <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column;flex:1;min-height:0">
+              <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">09 · SERIAL MONITOR — RAW NMEA</span>
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">{{monRate}}</span>
+              </div>
+              <div ref="{{refMonLog}}" style="flex:1;overflow-y:auto;background:var(--well);margin:10px 12px;border:1px solid var(--line2);padding:8px 10px;font-family:var(--mono);font-size:11px;line-height:1.55;min-height:0">
+                <sc-for list="{{monRows}}" as="r" hint-placeholder-count="12">
+                  <div style="display:flex;gap:9px;padding:0.5px 0">
+                    <span style="color:var(--txt3);flex:none">{{r.ts}}</span>
+                    <span style="{{r.tagStyle}};flex:none;width:16px">{{r.tag}}</span>
+                    <span style="{{r.txtStyle}};word-break:break-all">{{r.text}}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:0 12px 10px">
+                <button onClick="{{oPaused}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbPaused}}"></span>PAUSE VIEW</button>
+                <button onClick="{{oAuto}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbAuto}}"></span>AUTOSCROLL</button>
+                <button onClick="{{onClear}}" style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;padding:4px 10px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">CLEAR</button>
+                <span style="flex:1"></span>
+                <span style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--txt3)">RX <span style="color:var(--txt)">TEXT</span> · TX <span style="color:var(--led)">RED</span> · ERR <span style="color:var(--none)">ORANGE</span></span>
+              </div>
+              <div style="display:flex;gap:8px;padding:0 12px 12px">
+                <span style="display:flex;align-items:center;padding:0 8px;background:var(--well);border:1px solid var(--line2);border-right:0;font-family:var(--mono);font-size:12px;color:var(--led)">$</span>
+                <input ref="{{refCmd}}" onKeyDown="{{onCmdKey}}" placeholder="PMTX,STATUS  — checksum appended automatically" spellCheck="false" style="flex:1;min-width:0;font-family:var(--mono);font-size:12px;background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:6px 8px;margin-left:-8px">
+                <button onClick="{{onSendCmd}}" style="font-family:var(--sans);font-size:12px;padding:5px 16px;background:transparent;border:1px solid var(--led);color:var(--txt);cursor:pointer" style-hover="background:var(--led-fill)">SEND</button>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <sc-if value="{{sec_export}}" hint-placeholder-val="{{false}}">
+          <div data-screen-label="Export" style="animation:pcc-in .16s ease-out both;padding:14px;display:grid;grid-template-columns:minmax(320px,1fr) minmax(380px,1.4fr);gap:14px;align-items:start;max-width:1180px">
+            <section style="background:var(--panel);border:1px solid var(--line)">
+              <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">10 · SESSION</span>
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">IN-MEMORY</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Started</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{eStarted}}</span></div>
+              <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Duration</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{eDur}}</span></div>
+              <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Position fixes</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{eFixes}}</span></div>
+              <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Satellite observations</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{eObs}}</span></div>
+              <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">NMEA lines held</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{eLines}}</span></div>
+              <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px"><span style="font-size:12px;color:var(--txt2)">PPS samples</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{ePps}}</span></div>
+              <div style="padding:8px 12px;border-top:1px solid var(--line);font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--txt3)">SESSION LIVES IN MEMORY — CLEARED ON RELOAD.</div>
+            </section>
+            <section style="background:var(--panel);border:1px solid var(--line)">
+              <div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 10px;background:var(--strip);border-bottom:1px solid var(--line)">
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--txt3)">RECORDED DATA</span>
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">DOWNLOADS</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 12px;border-bottom:1px solid var(--line)">
+                <div>
+                  <div style="font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--txt)">POSITION CSV</div>
+                  <div style="font-size:11px;color:var(--txt3);margin-top:2px">Fix time series — lat/lon/alt, E/N offsets, DOP, sats, fix type</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;flex:none">
+                  <span style="font-family:var(--mono);font-size:10px;color:var(--txt3)">{{eCsvN}}</span>
+                  <button onClick="{{onDlCsv}}" style="font-family:var(--sans);font-size:12px;padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt);cursor:pointer" style-hover="border-color:var(--txt3)">DOWNLOAD</button>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 12px;border-bottom:1px solid var(--line)">
+                <div>
+                  <div style="font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--txt)">SESSION JSON</div>
+                  <div style="font-size:11px;color:var(--txt3);margin-top:2px">Full session — observer, stats, satellite snapshot, PPS fit</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;flex:none">
+                  <span style="font-family:var(--mono);font-size:10px;color:var(--txt3)">STRUCTURED</span>
+                  <button onClick="{{onDlJson}}" style="font-family:var(--sans);font-size:12px;padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt);cursor:pointer" style-hover="border-color:var(--txt3)">DOWNLOAD</button>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 12px;border-bottom:1px solid var(--line)">
+                <div>
+                  <div style="font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--txt)">TRACK GPX</div>
+                  <div style="font-size:11px;color:var(--txt3);margin-top:2px">Fix track for GIS tools — 1 point / 5 s</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;flex:none">
+                  <span style="font-family:var(--mono);font-size:10px;color:var(--txt3)">{{eGpxN}}</span>
+                  <button onClick="{{onDlGpx}}" style="font-family:var(--sans);font-size:12px;padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt);cursor:pointer" style-hover="border-color:var(--txt3)">DOWNLOAD</button>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 12px">
+                <div>
+                  <div style="font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--txt)">RAW NMEA</div>
+                  <div style="font-size:11px;color:var(--txt3);margin-top:2px">Received sentences as captured, checksums intact</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;flex:none">
+                  <span style="font-family:var(--mono);font-size:10px;color:var(--txt3)">{{eNmeaN}}</span>
+                  <button onClick="{{onDlNmea}}" style="font-family:var(--sans);font-size:12px;padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt);cursor:pointer" style-hover="border-color:var(--txt3)">DOWNLOAD</button>
+                </div>
+              </div>
+            </section>
+          </div>
+        </sc-if>
+
+        <!-- @@PANELS -->
+
+      </main>
+    </div>
+  </div>
 </div>
-
-<script type="module" src="./js/app.js"></script>
+</div>
+<script type="module" src="js/app-controller.js?v=86"></script>
 </body>
 </html>

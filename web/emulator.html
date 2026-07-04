@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Precision Clock Mk IV — Emulator</title>
+<style>
+  @font-face { font-family: 'B612'; src: url('./fonts/B612-Regular.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+  @font-face { font-family: 'B612'; src: url('./fonts/B612-Bold.woff2') format('woff2'); font-weight: 700; font-display: swap; }
+  @font-face { font-family: 'B612 Mono'; src: url('./fonts/B612Mono-Regular.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+  @font-face { font-family: 'B612 Mono'; src: url('./fonts/B612Mono-Bold.woff2') format('woff2'); font-weight: 700; font-display: swap; }
+
+  :root {
+    --inset:  #040506;   /* device screen / recessed bezel */
+    --bg:     #08090b;
+    --panel:  #0e0f13;
+    --strip:  #121419;
+    --line:   #1c1f26;
+    --line2:  #2b2f38;
+    --txt:    #c9cdd5;
+    --txt2:   #7f8590;
+    --txt3:   #5d626b;
+    --led:      #ff3b2e;
+    --led-dim:  #4d1813;
+    --led-glow: rgba(255,59,46,0.55);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--txt);
+    font-family: 'B612', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+    --clock-w: clamp(300px, 64vw, 640px);   /* closed: large hero */
+  }
+  body.open { --clock-w: clamp(240px, 46vw, 460px); }  /* open: docked, smaller */
+
+  .stage {
+    min-height: 100dvh;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 28px 20px 60px;
+    perspective: 1600px;
+  }
+
+  /* ---- the clock object ---- */
+  /* Open animation shrinks the clock's real WIDTH (not transform:scale), so its layout box
+     matches its visual size — the workspace flows directly beneath with no dead space. */
+  .clock-shell {
+    width: 100%;
+    display: flex; flex-direction: column; align-items: center;
+    transform-origin: top center;
+    transform: translateY(20vh);   /* closed: floated toward centre */
+    transition: transform .85s cubic-bezier(.7,0,.25,1);
+    cursor: pointer;
+  }
+  .clock-shell:focus { outline: none; }
+  .clock-shell:focus-visible { outline: 2px solid var(--led); outline-offset: 8px; }
+  body.open .clock-shell { transform: translateY(0); cursor: default; }
+
+  .bezel {
+    position: relative;
+    width: var(--clock-w);
+    aspect-ratio: 430 / 230;
+    background: var(--inset);
+    border: 1px solid var(--line2);
+    border-radius: 2px;
+    box-shadow: inset 0 0 0 1px #000, 0 1px 0 #000;
+    /* subtle hinge tilt while closed */
+    transform: rotateX(7deg);
+    transform-origin: top center;
+    transition: transform .85s cubic-bezier(.7,0,.25,1), width .85s cubic-bezier(.7,0,.25,1);
+  }
+  body.open .bezel { transform: rotateX(0deg); }
+  canvas#face { display: block; width: 100%; height: 100%; }
+
+  .nameplate {
+    width: var(--clock-w);
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-top: 8px;
+    transition: width .85s cubic-bezier(.7,0,.25,1);
+    font-size: 10px; letter-spacing: .22em; text-transform: uppercase;
+    color: var(--txt3);
+  }
+  .nameplate b { color: var(--txt2); font-weight: 700; }
+
+  .hint {
+    margin-top: 24px; font-size: 11px; letter-spacing: .28em; text-transform: uppercase;
+    color: var(--txt3);
+    display: flex; align-items: center; gap: 10px;
+    transition: opacity .35s ease;
+  }
+  .hint::before, .hint::after { content: ''; width: 26px; height: 1px; background: var(--line2); }
+  body.open .hint { opacity: 0; pointer-events: none; height: 0; margin: 0; overflow: hidden; }
+
+  /* ---- workspace revealed beneath ---- */
+  .workspace {
+    width: 100%; max-width: 880px;
+    max-height: 0; overflow: hidden;
+    opacity: 0; transform: translateY(26px);
+    pointer-events: none;
+    transition: max-height .7s cubic-bezier(.7,0,.25,1), opacity .5s ease .2s, transform .6s cubic-bezier(.7,0,.25,1) .2s, margin-top .7s ease;
+  }
+  body.open .workspace { max-height: 1200px; margin-top: 30px; opacity: 1; transform: none; pointer-events: auto; }
+
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1px; background: var(--line); border: 1px solid var(--line);
+  }
+  .cell { background: var(--panel); padding: 16px 18px; }
+  .cell label {
+    display: block; font-size: 10px; letter-spacing: .2em; text-transform: uppercase;
+    color: var(--txt2); margin-bottom: 10px;
+  }
+  select, input[type=text] {
+    width: 100%; background: var(--strip); color: var(--txt);
+    border: 1px solid var(--line2); border-radius: 0; padding: 8px 10px;
+    font-family: 'B612 Mono', monospace; font-size: 13px;
+  }
+  select:focus, input:focus { outline: none; border-color: var(--led); }
+  input[type=range] {
+    width: 100%; -webkit-appearance: none; appearance: none; height: 2px;
+    background: var(--line2); margin: 14px 0 6px;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 12px; height: 18px;
+    background: var(--led); border: 0; border-radius: 0; cursor: pointer;
+  }
+  .val { font-family: 'B612 Mono', monospace; font-size: 12px; color: var(--led); float: right; }
+  .seg { display: flex; gap: 1px; border: 1px solid var(--line2); }
+  .seg button {
+    flex: 1; background: var(--strip); color: var(--txt2); border: 0;
+    padding: 8px 0; font-family: 'B612 Mono', monospace; font-size: 12px; cursor: pointer;
+  }
+  .seg button[aria-pressed=true] { background: var(--led); color: #1a0502; font-weight: 700; }
+  .foot {
+    margin-top: 14px; font-size: 11px; line-height: 1.6; color: var(--txt3);
+    font-family: 'B612 Mono', monospace;
+  }
+  .foot b { color: var(--txt2); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: .001ms !important; animation-duration: .001ms !important; }
+  }
+</style>
+</head>
+<body class="closed">
+  <div class="stage">
+    <div class="clock-shell" id="shell" role="button" tabindex="0" aria-label="Open the workspace" aria-expanded="false" aria-controls="workspace">
+      <div class="bezel"><canvas id="face"></canvas></div>
+      <div class="nameplate"><span>Precision Clock <b>Mk&nbsp;IV</b></span><span>Emulator</span></div>
+      <div class="hint" id="hint">Click the clock to open</div>
+    </div>
+
+    <div class="workspace" id="workspace">
+      <div class="grid">
+        <div class="cell">
+          <label>Display mode</label>
+          <select id="mode">
+            <option value="iso8601">ISO 8601 — YYYY-MM-DD</option>
+            <option value="ordinal">ISO ordinal — YYYY-DDD</option>
+            <option value="isoweek">ISO week — YYYY-Www-D</option>
+            <option value="unix">Unix epoch</option>
+            <option value="julian">Julian date</option>
+            <option value="mjd">Modified Julian</option>
+            <option value="weekday">Weekday</option>
+            <option value="wdy_mm_dd">Weekday MM-DD</option>
+            <option value="weekda_dd">Weekday DD</option>
+            <option value="offset">UTC offset</option>
+            <option value="countdown">Countdown</option>
+            <option value="text">Text</option>
+            <option value="vbat">Battery voltage</option>
+            <option value="satview">Satellites</option>
+            <option value="displaytest">Display test</option>
+            <option value="standby">Standby</option>
+          </select>
+          <input type="text" id="textin" placeholder="text mode message" maxlength="12" style="margin-top:10px; display:none">
+        </div>
+
+        <div class="cell">
+          <label>Colon animation</label>
+          <select id="colon">
+            <option value="slowfade">Slow fade (default)</option>
+            <option value="heartbeat">Heartbeat</option>
+            <option value="sawtooth">1 PPS sawtooth</option>
+            <option value="alt_sawtooth">Alternating sawtooth</option>
+            <option value="toggle">Toggle</option>
+            <option value="solid">Solid</option>
+          </select>
+        </div>
+
+        <div class="cell">
+          <label>Gem <span class="val">display effects</span></label>
+          <select id="gem">
+            <option value="none">None</option>
+            <option value="larson">Larson scanner (A1)</option>
+            <option value="terminator">Terminator bar (B1)</option>
+          </select>
+        </div>
+
+        <div class="cell" id="gemSunCell" style="display:none">
+          <label>Sun speed</label>
+          <select id="gemSun">
+            <option value="3600" selected>Demo — 24 h in 24 s</option>
+            <option value="240">Fast — 24 h in 6 min</option>
+            <option value="1">Real — 24 h is 24 h</option>
+          </select>
+        </div>
+
+        <div class="cell">
+          <label>Brightness <span class="val" id="brightVal">100%</span></label>
+          <input type="range" id="bright" min="0" max="100" value="100">
+        </div>
+
+        <div class="cell">
+          <label>Precision <span class="val" id="precVal">P3 · ms</span></label>
+          <input type="range" id="prec" min="0" max="3" value="3">
+        </div>
+
+        <div class="cell">
+          <label>Time base</label>
+          <div class="seg" id="tbase">
+            <button data-utc="0" aria-pressed="true">LOCAL</button>
+            <button data-utc="1" aria-pressed="false">UTC</button>
+          </div>
+        </div>
+
+        <div class="cell">
+          <label>Date board orientation</label>
+          <div class="seg" id="orient">
+            <button data-inv="0" aria-pressed="true">NORMAL</button>
+            <button data-inv="1" aria-pressed="false">INVERTED</button>
+          </div>
+        </div>
+      </div>
+      <div class="foot">
+        Standalone emulator — every glyph, colon waveform and dimension is rendered from the real
+        Mk&nbsp;IV firmware (<b>lut_7seg</b>) and <b>colons.scad</b> geometry. No hardware required.
+        Live device mirroring (<b>applyDeviceFrame</b>) arrives with the Web&nbsp;Serial phase.
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createClockFace } from './js/clockface.js';
+
+    const canvas = document.getElementById('face');
+    const face = createClockFace(canvas, { rows: ['date', 'time'], mode: 'iso8601', colonMode: 'slowfade' });
+    window.__face = face; // debug/testing handle (harmless in a standalone demo page)
+
+    // keep the canvas crisp through the open/close size transition
+    const bezel = canvas.parentElement;
+    const ro = new ResizeObserver(() => face.resize(bezel.clientWidth, bezel.clientHeight));
+    ro.observe(bezel);
+    face.resize(bezel.clientWidth, bezel.clientHeight);
+    face.start(() => new Date());
+
+    // ---- opening interaction ----
+    const shell = document.getElementById('shell');
+    const workspace = document.getElementById('workspace');
+    let isOpen = false;
+    function open() {
+      if (isOpen) return;
+      isOpen = true;
+      document.body.classList.replace('closed', 'open');
+      shell.setAttribute('aria-expanded', 'true');
+      shell.setAttribute('aria-label', 'Workspace open');
+    }
+    shell.addEventListener('click', open);
+    shell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+    // once the reveal animation finishes, drop the max-height cap so tall/zoomed/narrow
+    // single-column layouts can't clip the footer.
+    workspace.addEventListener('transitionend', (e) => {
+      if (e.propertyName === 'max-height' && isOpen) { workspace.style.maxHeight = 'none'; workspace.style.overflow = 'visible'; }
+    });
+
+    // ---- controls ----
+    const $ = (id) => document.getElementById(id);
+    const textin = $('textin');
+    $('mode').addEventListener('change', (e) => {
+      const m = e.target.value;
+      textin.style.display = m === 'text' ? 'block' : 'none';
+      const ctx = {};
+      if (m === 'text') ctx.text = textin.value || 'PRECISION';
+      if (m === 'countdown') ctx.countdownTo = Date.UTC(new Date().getFullYear() + 1, 0, 1);
+      if (m === 'vbat') ctx.vbat = 3.0123;
+      if (m === 'satview') ctx.gps = 9;
+      face.setMode(m, ctx);
+    });
+    textin.addEventListener('input', () => face.setModeCtx({ text: textin.value || 'PRECISION' }));
+    $('colon').addEventListener('change', (e) => face.setColonMode(e.target.value));
+    $('bright').addEventListener('input', (e) => { const v = +e.target.value; $('brightVal').textContent = v + '%'; face.setBrightness(v / 100); });
+    const precLabels = ['P0 · off', 'P1 · 0.1s', 'P2 · 0.01s', 'P3 · ms'];
+    $('prec').addEventListener('input', (e) => { const v = +e.target.value; $('precVal').textContent = precLabels[v]; face.setPrecision(v); });
+    function segWire(id, attr, fn) {
+      const box = $(id);
+      box.addEventListener('click', (e) => {
+        const b = e.target.closest('button'); if (!b) return;
+        [...box.children].forEach((c) => c.setAttribute('aria-pressed', c === b));
+        fn(+b.dataset[attr]);
+      });
+    }
+    segWire('tbase', 'utc', (v) => face.setUTC(!!v));
+    segWire('orient', 'inv', (v) => face.setInverted(!!v));
+
+    // ---- gems (proposed firmware effects — DISPLAY_GEMS.md A1/B1) ----
+    const gemSel = $('gem'), gemSun = $('gemSun'), gemSunCell = $('gemSunCell');
+    const applyGem = () => {
+      const g = gemSel.value;
+      gemSunCell.style.display = g === 'terminator' ? '' : 'none';
+      face.setGem(g, { timeScale: +gemSun.value });
+    };
+    gemSel.addEventListener('change', applyGem);
+    gemSun.addEventListener('change', applyGem);
+  </script>
+</body>
+</html>

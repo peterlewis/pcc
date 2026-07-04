@@ -1,56 +1,80 @@
-# PCC (Precision Clock Companion)
+# PCC — Precision Clock Companion
 
-Companion software for the [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs) by [mitxela](https://mitxela.com).
+A browser app that drives the [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs) by [mitxela](https://mitxela.com) over Web Serial — display modes, text & countdowns, brightness curves, a live polar sky, an orthographic globe **and** a flat world map, GPS / satellite / timing charts, and a raw serial monitor. With no clock attached it runs as a faithful **emulator**.
 
-**Active focus: [PCC Web](#pcc-web)** — a browser build that drives the clock over Web Serial. The native **macOS app is paused** (parked under [`macos/`](macos/), still builds) while development concentrates on the web version.
+### **[▶ Open PCC Web →](https://peterlewis.github.io/pcc/)**
 
 > [!NOTE]
 > Independent, community-built. Not affiliated with mitxela.
 
-![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Web: active](https://img.shields.io/badge/Web-active-blue) ![macOS app: paused](https://img.shields.io/badge/macOS%20app-paused-lightgrey)
+![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Deploys from CI](https://img.shields.io/badge/deploy-GitHub%20Pages%20(CI)-blue) ![Web Serial](https://img.shields.io/badge/Web%20Serial-Chromium-orange)
+
+<p align="center"><img src="assets/native-vs-web.svg" alt="Native macOS app vs web app — a Venn diagram: same clock, one of these ships itself" width="660"></p>
+
+## Why a website, and not the Mac app?
+
+There *was* a native macOS menu-bar app. It still exists — it's just [paused](#the-macos-app-paused). Honestly:
+
+- **Apple signing is a tax on shipping.** A Developer Program membership ($99/yr), code-signing and notarizing *every* build, and Gatekeeper still greeting new users with "unidentified developer" — all to hand someone a `.dmg`. A URL has none of that.
+- **A browser reaches everyone.** macOS, Windows, Linux, a Chromebook — anyone on a Chromium browser can just open it. No install, no per-platform build, no updates to push.
+- **Web Serial does the hard part.** The one thing a "real app" used to be *needed* for — talking to the USB serial device — [the browser now does natively](https://developer.mozilla.org/docs/Web/API/Web_Serial_API).
+- **It's tech I understand better.** I iterate faster in HTML / JS / Canvas than in Swift / AppKit, so the web version simply gets more love.
+- **CBA** to keep fighting the native toolchain for a hobby project. The web app does ~everything and redeploys itself on `git push`.
+
+A few things stay Mac-only by nature (acting as a system NTP server, native WeatherKit, on-device AI) — those live in the paused app, not here.
+
+## What it does
+
+- **Clock control** — display modes, text & scrolling marquee, countdowns, brightness / gamma / DAC curves, colon styles, and raw `key = value` commands.
+- **Sky room** — a polar az/el plot with sector heatmap and age-faded trails, C/N₀ vs elevation + over time, a static-position CEP scatter with DOP history, an orthographic **globe** with a soft day/night terminator, and a flat **world map** with satellites at their real sub-points.
+- **Timing** — PPS host-timestamping: phase jitter, drift staircase, and a temperature-compensation fit (with the draft firmware streaming `$PMTXTS`).
+- **Emulator** — everything above runs with no hardware, driven by a built-in simulator; connect a real Mk IV over Web Serial and the same views drive the physical clock.
+- **Config & data** — read/write the clock's `config.txt`, REST data-sources for the date row, weather-at-fix, and a raw NMEA / serial monitor.
+
+## Run it
+
+- **Hosted:** <https://peterlewis.github.io/pcc/> — needs a Chromium browser (Chrome / Edge / Arc / Brave) over HTTPS.
+- **Local dev:** live source, no build step:
+  ```bash
+  git clone https://github.com/peterlewis/pcc.git
+  cd pcc && bash web/serve.sh        # http://localhost:8765
+  ```
+- **Build the static site** (what CI deploys):
+  ```bash
+  cd web && npm install && node build.mjs   # → ../docs/
+  ```
+
+Web Serial isn't in Safari or Firefox — use a Chromium browser. Nothing is required to *look* around (it emulates a clock); plug one in to drive the real thing.
 
 ## Repository layout
 
 | Path | What |
 | --- | --- |
-| [`web/`](web/) | **PCC Web** — the webserial version (active). Drives the clock from a Chromium browser. |
-| [`chrony-bridge/`](chrony-bridge/) | Host daemon feeding the clock's GPS time into chrony as a local NTP source. |
-| [`macos/`](macos/) | The native macOS menu-bar app — **paused**. Still builds with `swift build` from that folder. |
+| [`web/`](web/) | **The app** — source. Built to `docs/` by CI and served on Pages. See [`web/README.md`](web/README.md). |
+| [`chrony-bridge/`](chrony-bridge/) | Small host daemon feeding the clock's GPS time into [chrony](https://chrony-project.org/) as a local NTP source. |
+| [`.github/workflows/pages.yml`](.github/workflows/pages.yml) | Builds `web/` with esbuild and deploys to GitHub Pages on every push to `main`. |
 
-## PCC Web
-
-Drives a Precision Clock Mk IV from a Chromium-based browser over [Web Serial](https://developer.mozilla.org/docs/Web/API/Web_Serial_API): display modes, text, countdowns, brightness and raw `key = value` commands; a polar sky view with sector heatmap and age-faded trails; an offline 3D globe; pass history in IndexedDB; GPS / sun / moon info; and a raw serial monitor.
-
-**[Open PCC Web →](https://peterlewis.github.io/pcc/web/)** · full details in [`web/README.md`](web/README.md)
-
-```bash
-git clone https://github.com/peterlewis/pcc.git
-cd pcc
-bash web/serve.sh        # http://localhost:8765
-```
-
-Needs a Chromium browser (Chrome / Edge / Arc / Brave) and `localhost` or HTTPS — Web Serial isn't in Safari or Firefox. A few capabilities stay Mac-only by nature (NTP server, firmware / timezone updates, native map, WeatherKit, on-device AI) — see [`web/README.md`](web/README.md).
+`main` is **web-only**. The native macOS app is **paused** and preserved on the [`macos-app`](https://github.com/peterlewis/pcc/tree/macos-app) branch (kept as a Swift reference).
 
 ## chrony-bridge (NTP)
 
-A browser can't open a UDP port, so for a real local NTP source there's a small cross-platform daemon that reads the clock's serial stream and feeds [chrony](https://chrony-project.org/) through its `SOCK` refclock — handy on a headless Linux / Raspberry Pi box. Setup, the honest accuracy notes, and service files are in [`chrony-bridge/README.md`](chrony-bridge/README.md).
+A browser can't open a UDP port, so for a real local NTP source there's a small cross-platform daemon that reads the clock's serial stream and feeds chrony through its `SOCK` refclock — handy on a headless Linux / Raspberry Pi box. Setup, honest accuracy notes and service files are in [`chrony-bridge/README.md`](chrony-bridge/README.md).
 
-## macOS app (paused)
+## The macOS app (paused)
 
-The original native menu-bar app — three satellite views, GPS-disciplined NTP, WeatherKit, on-device AI insights. Development is **paused** in favour of the web version, but it stays buildable in [`macos/`](macos/):
+The original native menu-bar app — three satellite views, GPS-disciplined NTP, WeatherKit, on-device AI insights — is paused in favour of the web version, but preserved and still buildable on its branch:
 
 ```bash
+git fetch && git switch macos-app
 cd macos && swift build && swift run PCC
 ```
-
-Screenshots, full feature list and setup are in [`macos/README.md`](macos/README.md).
 
 ## Related
 
 - [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs) — official documentation
-- [clock4](https://github.com/mitxela/clock4) — hardware design and firmware source
+- [clock4](https://github.com/mitxela/clock4) — hardware design & firmware source (mitxela)
 - [Forum thread](https://mitxela.com/forum/topic/pcc-precision-clock-companion-macos-menu-bar-app) — discussion on the mitxela forum
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Third-party attributions for the macOS app's bundled assets are in [`macos/THIRD_PARTY_LICENSES.md`](macos/THIRD_PARTY_LICENSES.md).
+MIT — see [LICENSE](LICENSE). Bundled third-party assets (fonts, map data, libraries) keep their own licenses; see [THIRD_PARTY.md](THIRD_PARTY.md).

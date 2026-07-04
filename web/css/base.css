@@ -1,0 +1,57 @@
+/* base.css — reset, tokens, controls; fonts served LOCALLY (no CDN). From the prototype helmet. */
+@font-face{font-family:"B612";src:url("../fonts/B612-Regular.woff2") format("woff2");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:"B612";src:url("../fonts/B612-Bold.woff2") format("woff2");font-weight:700;font-style:normal;font-display:swap}
+@font-face{font-family:"B612 Mono";src:url("../fonts/B612Mono-Regular.woff2") format("woff2");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:"B612 Mono";src:url("../fonts/B612Mono-Bold.woff2") format("woff2");font-weight:700;font-style:normal;font-display:swap}
+:root, :root[data-theme="dark"] {
+  --inset:#040506; --bg:#08090b; --panel:#0e0f13; --strip:#121419; --well:#07080a;
+  --line:#1c1f26; --line2:#2b2f38;
+  --txt:#c9cdd5; --txt2:#7f8590; --txt3:#767c86;
+  --led:#ff3b2e; --led-dim:#5a1c16; --led-glow:rgba(255,59,46,.55); --led-fill:rgba(255,59,46,.09);
+  --lock:#36c98b; --acq:#f5b53d; --none:#ff6a3d;
+  --beta:#f5b53d; --beta-fill:rgba(245,181,61,.12); /* pre-release marker — the amber, kept distinct from GNSS --acq */
+  --gps:#3b9bff; --glo:#ff5247; --gal:#ffa726; --bds:#5fd0ff;
+  --face-led:#ff3b2e; --face-dim:#5a1c16; --face-glow:rgba(255,59,46,.55);
+  --sans:"B612", system-ui, sans-serif;
+  --mono:"B612 Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+:root[data-theme="light"] {
+  --bg:#e0dfdb; --panel:#f2f1ed; --strip:#e7e5e0; --inset:#0b0c0e; --well:#fbfaf7;
+  --line:#d1cfc8; --line2:#b2b0a8;
+  --txt:#16181d; --txt2:#575b63; --txt3:#8b8e94;
+  --led:#a81a10; --led-dim:#d8b9b5; --led-glow:rgba(168,26,16,.3); --led-fill:rgba(168,26,16,.07);
+  --lock:#0f8f5c; --acq:#a86f10; --none:#c23a2b;
+  --beta:#a86f10; --beta-fill:rgba(168,111,16,.1);
+  --gps:#0a63c2; --glo:#c22a1f; --gal:#a86400; --bds:#0f7ea8;
+}
+html, body { margin:0; padding:0; background:var(--bg); overflow:hidden; }
+* { box-sizing:border-box; }
+body { font-variant-numeric:tabular-nums; -webkit-font-smoothing:antialiased; }
+::selection { background:rgba(255,59,46,.28); }
+:focus-visible { outline:1px solid var(--led); outline-offset:1px; }
+::-webkit-scrollbar { width:10px; height:10px; }
+::-webkit-scrollbar-thumb { background:var(--line2); border:3px solid transparent; background-clip:padding-box; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-corner { background:transparent; }
+input[type="range"] { -webkit-appearance:none; appearance:none; background:transparent; cursor:pointer; height:16px; padding:0; }
+input[type="range"]::-webkit-slider-runnable-track { height:14px; background:
+  linear-gradient(var(--line2),var(--line2)) center / 100% 2px no-repeat,
+  repeating-linear-gradient(90deg, var(--line2) 0 1px, transparent 1px 10px) center / 100% 7px no-repeat; }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance:none; width:9px; height:14px; margin-top:0; border-radius:0;
+  background:linear-gradient(90deg, var(--led) 0 3px, rgba(0,0,0,.45) 3px 6px, var(--led) 6px 9px); box-shadow:0 0 5px var(--led-glow); }
+input[type="range"]:disabled::-webkit-slider-thumb { background:var(--txt3); box-shadow:none; }
+input[type="datetime-local"]::-webkit-calendar-picker-indicator { filter:invert(.6); }
+@keyframes pcc-caret { 0%,100% { opacity:1; } 50% { opacity:0; } }
+@keyframes pcc-in { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:none; } }
+
+/* ---- responsive safety net ---------------------------------------------------------------
+   Rooms declare a min-width for their instrument layouts; below it that forced width caused
+   horizontal overflow. Relax it so content shrinks to fit, and collapse the fixed 2-column
+   card grids (class pcc-cards) to a single column so panes stack instead of cramming. */
+@media (max-width: 1040px) {
+  [data-screen-label] { min-width: 0 !important; }
+  .pcc-cards { grid-template-columns: 1fr !important; grid-auto-rows: auto !important; }
+}
+@media (max-width: 720px) {
+  [data-screen-label] { padding: 10px !important; }
+}

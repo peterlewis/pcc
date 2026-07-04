@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mk IV — PPS timing stability (demo)</title>
+<style>
+  @font-face { font-family:'B612'; src:url('./fonts/B612-Regular.woff2') format('woff2'); font-weight:400; }
+  @font-face { font-family:'B612'; src:url('./fonts/B612-Bold.woff2') format('woff2'); font-weight:700; }
+  @font-face { font-family:'B612 Mono'; src:url('./fonts/B612Mono-Regular.woff2') format('woff2'); font-weight:400; }
+  @font-face { font-family:'B612 Mono'; src:url('./fonts/B612Mono-Bold.woff2') format('woff2'); font-weight:700; }
+  :root{
+    --bg:#08090b; --panel:#0e0f13; --strip:#121419; --line:#1c1f26; --line2:#2b2f38;
+    --txt:#c9cdd5; --txt2:#7f8590; --txt3:#5d626b; --led:#ff3b2e; --grid:#1a1d24;
+    --lock:#36c98b; --acq:#f5b53d; --none:#ff6a3d;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:'B612',system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:920px;margin:0 auto;padding:28px 20px 60px;}
+  h1{font-size:13px;letter-spacing:.22em;text-transform:uppercase;color:var(--txt2);font-weight:700;margin:0 0 4px;}
+  .sub{font-size:11px;color:var(--txt3);font-family:'B612 Mono',monospace;margin-bottom:22px;}
+  .sub b{color:var(--led);}
+  .readouts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin-bottom:20px;}
+  .cell{background:var(--panel);padding:13px 16px;}
+  .cell label{display:block;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt2);margin-bottom:7px;}
+  .cell .v{font-family:'B612 Mono',monospace;font-size:19px;color:var(--txt);}
+  .cell .v small{font-size:11px;color:var(--txt3);}
+  .pill{display:inline-block;font-family:'B612 Mono',monospace;font-size:12px;font-weight:700;padding:3px 9px;border:1px solid var(--line2);}
+  .pill.locked{color:var(--lock);border-color:var(--lock);}
+  .pill.acquiring{color:var(--acq);border-color:var(--acq);}
+  .pill.unstable,.pill.nopps{color:var(--none);border-color:var(--none);}
+  .chart{background:var(--panel);border:1px solid var(--line);margin-bottom:1px;padding:12px 14px 6px;}
+  .chart h2{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt2);margin:0 0 8px;font-weight:400;display:flex;justify-content:space-between;}
+  .chart h2 span{font-family:'B612 Mono',monospace;color:var(--led);text-transform:none;}
+  canvas{display:block;width:100%;height:120px;}
+  .controls{display:flex;gap:10px;margin:16px 0;flex-wrap:wrap;}
+  button{background:var(--strip);color:var(--txt);border:1px solid var(--line2);border-radius:0;padding:8px 14px;font-family:'B612 Mono',monospace;font-size:12px;cursor:pointer;}
+  button[aria-pressed=true]{background:var(--led);color:#1a0502;font-weight:700;border-color:var(--led);}
+  .mono{font-family:'B612 Mono',monospace;font-size:11px;color:var(--txt3);word-break:break-all;}
+  .foot{margin-top:18px;font-size:11px;line-height:1.6;color:var(--txt3);font-family:'B612 Mono',monospace;}
+  .foot b{color:var(--txt2);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Precision Clock Mk IV · Timing stability</h1>
+  <div class="sub">Driven by <b>synthetic $PMTXTS data</b> (no hardware) to exercise the real parser &amp; metrics in <b>js/ppsts.js</b>.</div>
+
+  <div class="readouts">
+    <div class="cell"><label>Lock</label><div class="v"><span id="lock" class="pill">—</span></div></div>
+    <div class="cell"><label>Phase jitter · RMS</label><div class="v"><span id="rms">—</span> <small>µs</small></div></div>
+    <div class="cell"><label>Jitter · peak-peak</label><div class="v"><span id="pkpk">—</span> <small>µs</small></div></div>
+    <div class="cell"><label>Oscillator drift</label><div class="v"><span id="ppm">—</span> <small>ppm</small></div></div>
+    <div class="cell"><label>Die temperature</label><div class="v"><span id="temp">—</span> <small>°C</small></div></div>
+    <div class="cell"><label>Holdover age</label><div class="v"><span id="hold">—</span> <small>s</small></div></div>
+    <div class="cell"><label>PPS edges · gaps</label><div class="v"><span id="cnt">0</span> <small>/</small> <span id="gaps">0</span></div></div>
+  </div>
+
+  <div class="chart"><h2>Phase error vs GPS PPS <span id="phLbl">µs</span></h2><canvas id="phase"></canvas></div>
+  <div class="chart"><h2>Oscillator drift vs die temperature <span id="ppmLbl">ppm</span></h2><canvas id="drift"></canvas></div>
+
+  <div class="controls">
+    <button id="run" aria-pressed="true">⏸ Pause</button>
+    <button id="loss" aria-pressed="false">Simulate signal loss</button>
+    <button id="noise" aria-pressed="false">Inject extra jitter</button>
+  </div>
+  <div class="mono" id="raw">—</div>
+
+  <div class="foot">
+    Phase error is reconstructed from the firmware's edge capture (<b>subms</b>+<b>systick</b>), so USB
+    transport jitter doesn't corrupt it. Absolute offset to UTC is not shown — it isn't observable
+    over USB. See <b>PPS_TIMESTAMP.md</b>. This is a proposal; firmware is untested on hardware.
+  </div>
+</div>
+
+<script type="module">
+  import { PpsMonitor, LSE_HZ, CAL_PERIOD } from './js/ppsts.js';
+
+  const mon = new PpsMonitor({ capacity: 600 });
+  const LOAD = 79999;                 // 80 MHz / 1 ms, matches firmware SysTick->LOAD
+
+  // --- synthetic $PMTXTS generator (stands in for the device) ---
+  let seq = 0, epoch = Math.floor(Date.UTC(2026, 5, 30, 9, 0, 0) / 1000);
+  let sincecal = 7, t = 0;
+  let lossMode = false, noiseMode = false;
+  const gauss = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); };
+
+  function nmeaChecksum(body){ let c = 0; for (let i=0;i<body.length;i++) c ^= body.charCodeAt(i); return c.toString(16).toUpperCase().padStart(2,'0'); }
+
+  function synth(){
+    seq++; epoch++; t++;                                 // firmware seq is 32-bit
+    // slow ambient temperature wander, and the 32 kHz crystal's parabolic ppm-vs-temp
+    // (tuning-fork tempco ≈ −0.034 ppm/°C² about a ~25 °C turnover) — fitted live vs GPS.
+    const temp = 25 + 8 * Math.sin(t/200) + 0.2*gauss();
+    const ppmTrue = -0.034 * (temp-25)*(temp-25) + 0.12*gauss();
+    const calerr = Math.round(ppmTrue * LSE_HZ * CAL_PERIOD / 1e6);
+    sincecal = (t % CAL_PERIOD);
+    // phase jitter about the second boundary, in ms (locked ≈ 18µs RMS); loss → wander off
+    const jitMs = (noiseMode ? 0.12 : 0.018) * gauss() + (lossMode ? 0.3 * gauss() : 0);
+    let phaseMs = (1000 + jitMs) % 1000; if (phaseMs < 0) phaseMs += 1000;
+    const subms = Math.floor(phaseMs);
+    const frac = phaseMs - subms;                       // 0..1
+    const systick = Math.max(0, Math.min(LOAD, Math.round(LOAD - frac*(LOAD+1))));
+    const flags = lossMode ? (t % 3 ? 0x4 : 0x6) : 0x7; // drop valid/pps under loss
+    const body = `PMTXTS,${seq},${epoch},${subms},${systick},${LOAD},${calerr},${sincecal},${Math.round(temp)},${flags.toString(16).toUpperCase()}`;
+    return `$${body}*${nmeaChecksum(body)}`;
+  }
+
+  // --- charts ---
+  function draw(canvas, series, { color, zeroCentred }){
+    const dpr = Math.min(window.devicePixelRatio||1, 2);
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    canvas.width = w*dpr; canvas.height = h*dpr;
+    const g = canvas.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+    g.clearRect(0,0,w,h);
+    g.fillStyle = getComputedStyle(document.body).getPropertyValue('--strip'); g.fillRect(0,0,w,h);
+    if (series.length < 2) return null;
+    let lo = Math.min(...series), hi = Math.max(...series);
+    if (zeroCentred){ const m = Math.max(Math.abs(lo),Math.abs(hi),1e-6); lo = -m; hi = m; }
+    if (hi - lo < 1e-9) { hi += 1; lo -= 1; }
+    const pad = (hi-lo)*0.12; hi += pad; lo -= pad;
+    const x = (i) => (i/(series.length-1))*w;
+    const y = (v) => h - ((v-lo)/(hi-lo))*h;
+    // grid
+    g.strokeStyle = getComputedStyle(document.body).getPropertyValue('--grid'); g.lineWidth = 1;
+    for (let k=0;k<=4;k++){ const yy = (k/4)*h; g.beginPath(); g.moveTo(0,yy); g.lineTo(w,yy); g.stroke(); }
+    // zero line
+    if (lo < 0 && hi > 0){ g.strokeStyle = getComputedStyle(document.body).getPropertyValue('--line2'); g.beginPath(); g.moveTo(0,y(0)); g.lineTo(w,y(0)); g.stroke(); }
+    // trace
+    g.strokeStyle = color; g.lineWidth = 1.5; g.beginPath();
+    series.forEach((v,i)=>{ const px=x(i), py=y(v); i?g.lineTo(px,py):g.moveTo(px,py); });
+    g.stroke();
+    return { lo, hi };
+  }
+
+  const cssv = (n)=>getComputedStyle(document.body).getPropertyValue(n);
+
+  // scatter of oscillator error (ppm) vs die temperature — the crystal's curve emerges here
+  function drawScatter(canvas, pts, { color }){
+    const dpr = Math.min(window.devicePixelRatio||1, 2);
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    canvas.width = w*dpr; canvas.height = h*dpr;
+    const g = canvas.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+    g.clearRect(0,0,w,h); g.fillStyle = cssv('--strip'); g.fillRect(0,0,w,h);
+    if (pts.length < 2) return null;
+    const xs = pts.map(p=>p.temp), ys = pts.map(p=>p.ppm);
+    let xlo=Math.min(...xs), xhi=Math.max(...xs), ylo=Math.min(...ys), yhi=Math.max(...ys);
+    if (xhi-xlo<1){ xhi+=1; xlo-=1; } if (yhi-ylo<1e-6){ yhi+=0.1; ylo-=0.1; }
+    const xp=(xhi-xlo)*0.08, yp=(yhi-ylo)*0.14; xlo-=xp; xhi+=xp; ylo-=yp; yhi+=yp;
+    const X=v=>((v-xlo)/(xhi-xlo))*w, Y=v=>h-((v-ylo)/(yhi-ylo))*h;
+    g.strokeStyle=cssv('--grid'); g.lineWidth=1;
+    for(let k=0;k<=4;k++){ const yy=(k/4)*h; g.beginPath(); g.moveTo(0,yy); g.lineTo(w,yy); g.stroke(); }
+    if (ylo<0 && yhi>0){ g.strokeStyle=cssv('--line2'); g.beginPath(); g.moveTo(0,Y(0)); g.lineTo(w,Y(0)); g.stroke(); }
+    pts.forEach((p,i)=>{ g.fillStyle=color; g.globalAlpha=0.2+0.8*(i/(pts.length-1)); g.beginPath(); g.arc(X(p.temp),Y(p.ppm),1.8,0,Math.PI*2); g.fill(); });
+    g.globalAlpha=1;
+    return { xlo, xhi, ylo, yhi };
+  }
+
+  const $ = (id)=>document.getElementById(id);
+  function render(){
+    const s = mon.stats(); if (!s) return;
+    const fmt = (v,d=1)=> (v==null||Number.isNaN(v)) ? '—' : v.toFixed(d);
+    $('lock').textContent = s.lock; $('lock').className = 'pill ' + s.lock.replace('-','');
+    $('rms').textContent = fmt(s.rmsJitterUs,1);
+    $('pkpk').textContent = fmt(s.pkpkJitterUs,1);
+    $('ppm').textContent = fmt(s.ppm,3);
+    $('temp').textContent = (s.temp==null||Number.isNaN(s.temp)) ? '—' : s.temp;
+    $('hold').textContent = s.sincecal;
+    $('cnt').textContent = s.count; $('gaps').textContent = s.gaps;
+    const r1 = draw($('phase'), mon.phaseSeriesUs(), { color: cssv('--led'), zeroCentred:true });
+    const r2 = drawScatter($('drift'), mon.ppmVsTemp(), { color: cssv('--lock') });
+    if (r1) $('phLbl').textContent = `±${Math.max(Math.abs(r1.lo),Math.abs(r1.hi)).toFixed(0)} µs`;
+    if (r2) $('ppmLbl').textContent = `${r2.ylo.toFixed(2)} … ${r2.yhi.toFixed(2)} ppm · ${r2.xlo.toFixed(0)}–${r2.xhi.toFixed(0)} °C`;
+  }
+
+  let running = true;
+  let timer = setInterval(()=>{
+    if (!running) return;
+    const line = synth();
+    $('raw').textContent = line;
+    mon.ingestLine(line);
+    render();
+  }, 90);   // ~11× real-time so the charts fill quickly
+
+  $('run').addEventListener('click', (e)=>{ running = !running; e.target.setAttribute('aria-pressed', running); e.target.textContent = running ? '⏸ Pause' : '▶ Resume'; });
+  $('loss').addEventListener('click', (e)=>{ lossMode = !lossMode; e.target.setAttribute('aria-pressed', lossMode); });
+  $('noise').addEventListener('click', (e)=>{ noiseMode = !noiseMode; e.target.setAttribute('aria-pressed', noiseMode); });
+</script>
+</body>
+</html>

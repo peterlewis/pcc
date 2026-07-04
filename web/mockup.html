@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PCC Web — design mockup</title>
+<style>
+  @font-face{font-family:'B612';src:url('./fonts/B612-Regular.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
+  @font-face{font-family:'B612';src:url('./fonts/B612-Bold.woff2') format('woff2');font-weight:700;font-style:normal;font-display:swap}
+  @font-face{font-family:'B612 Mono';src:url('./fonts/B612Mono-Regular.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
+  @font-face{font-family:'B612 Mono';src:url('./fonts/B612Mono-Bold.woff2') format('woff2');font-weight:700;font-style:normal;font-display:swap}
+  :root{
+    --mono: "B612 Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: "B612", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --gps:#3b9bff; --glo:#ff5247; --gal:#ffa726; --bds:#5fd0ff;
+  }
+  [data-theme="dark"]{
+    --bg:#08090b; --panel:#0e0f13; --strip:#121419; --inset:#040506;
+    --line:#1c1f26; --line2:#2b2f38;
+    --txt:#c9cdd5; --txt2:#7f8590; --txt3:#50545d;
+    --led:#ff3b2e; --led-off:#3a1410; --accent:#ff3b2e; --accent-bg:rgba(255,59,46,.12);
+    --lock:#36c98b; --acq:#f5b53d; --none:#ff4d3d;
+  }
+  [data-theme="light"]{
+    --bg:#dfe2e6; --panel:#f4f5f7; --strip:#e9ebee; --inset:#0c0d10;
+    --line:#cdd2d8; --line2:#b3b8c0;
+    --txt:#13171d; --txt2:#565e6a; --txt3:#878f9b;
+    --led:#ff4233; --led-off:#3a1410; --accent:#cf2418; --accent-bg:rgba(207,36,24,.10);
+    --lock:#0f9d63; --acq:#b9760a; --none:#cc3a2c;
+    --gps:#0a6cd1; --glo:#cf2a20; --gal:#b96b00; --bds:#1186b8;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0; background:var(--bg); color:var(--txt); font-family:var(--sans); font-size:13px; line-height:1.45; -webkit-font-smoothing:antialiased}
+  .mono{font-family:var(--mono); font-variant-numeric:tabular-nums}
+  .micro{font-family:var(--mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--txt3)}
+
+  .app{display:flex; flex-direction:column; height:100vh}
+  header{display:flex; align-items:center; gap:14px; height:38px; flex:0 0 38px; padding:0 12px; background:var(--strip); border-bottom:1px solid var(--line)}
+  .wordmark{font-family:var(--mono); font-weight:700; letter-spacing:.06em}
+  .wordmark .tag{font-size:9px; letter-spacing:.2em; text-transform:uppercase; color:var(--txt3); border:1px solid var(--line2); padding:1px 5px; margin-left:8px; vertical-align:2px}
+  header .spacer{flex:1}
+  .conn{display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:11.5px; color:var(--txt2)}
+  .conn .v{color:var(--txt)} .sep{color:var(--line2)}
+  .led{width:8px; height:8px; background:var(--lock); display:inline-block}
+  .tbtn{font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--txt2); background:transparent; border:1px solid var(--line2); padding:3px 8px; cursor:pointer}
+  .tbtn:hover{color:var(--txt); border-color:var(--accent)}
+
+  .body{display:flex; flex:1; min-height:0}
+  nav{flex:0 0 168px; background:var(--panel); border-right:1px solid var(--line); padding:8px 0; overflow-y:auto}
+  nav .grp{padding:10px 14px 5px}
+  nav button{display:flex; align-items:center; gap:9px; width:100%; text-align:left; font-family:var(--mono); font-size:12px; color:var(--txt2); background:transparent; border:0; border-left:2px solid transparent; padding:6px 14px; cursor:pointer}
+  nav button:hover{color:var(--txt); background:var(--strip)}
+  nav button.on{color:var(--txt); background:var(--strip); border-left-color:var(--accent)}
+  nav button .k{width:14px; color:var(--txt3); text-align:center}
+  nav button.on .k{color:var(--accent)}
+
+  main{flex:1; min-width:0; overflow-y:auto; padding:14px 16px}
+  .ptitle{display:flex; align-items:baseline; gap:12px; margin:2px 0 12px}
+  .ptitle h1{font-family:var(--mono); font-size:15px; font-weight:700; margin:0; letter-spacing:.02em}
+  .ptitle .note{color:var(--txt3); font-size:12px}
+
+  .panel{background:var(--panel); border:1px solid var(--line)}
+  .panel > .ph{display:flex; align-items:center; justify-content:space-between; padding:6px 10px; background:var(--strip); border-bottom:1px solid var(--line)}
+  .panel > .pc{padding:10px}
+
+  .device{background:var(--inset); border:1px solid var(--line2); padding:14px}
+  .devicewrap{aspect-ratio:5/1.35; width:100%}
+
+  .cols{display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:12px; margin-top:12px; align-items:start}
+  .col{display:flex; flex-direction:column; gap:12px}
+
+  .row{display:flex; align-items:center; gap:10px; margin:9px 0}
+  label.lab{color:var(--txt2); min-width:84px}
+  input[type=text]{flex:1; min-width:0; background:var(--inset); border:1px solid var(--line2); color:var(--txt); font-family:var(--mono); font-size:13px; padding:6px 9px}
+  input[type=text]:focus{outline:none; border-color:var(--accent)}
+  .seg{display:inline-flex; border:1px solid var(--line2)}
+  .seg button{font-family:var(--mono); font-size:11.5px; color:var(--txt2); background:transparent; border:0; border-right:1px solid var(--line2); padding:5px 11px; cursor:pointer}
+  .seg button:last-child{border-right:0}
+  .seg button.on{color:var(--accent); background:var(--accent-bg)}
+  .btn{font-family:var(--mono); font-size:12px; color:var(--txt); background:transparent; border:1px solid var(--line2); padding:6px 12px; cursor:pointer}
+  .btn:hover{border-color:var(--accent)}
+  .btn.primary{color:var(--accent); border-color:var(--accent)}
+  input[type=range]{-webkit-appearance:none; appearance:none; height:3px; background:var(--line2); flex:1}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:13px; height:13px; background:var(--accent); border:0; cursor:pointer}
+
+  dl.rt{margin:0; display:grid; grid-template-columns:auto 1fr}
+  dl.rt dt{color:var(--txt2); padding:4px 0; border-bottom:1px solid var(--line)}
+  dl.rt dd{margin:0; padding:4px 0; text-align:right; color:var(--txt); border-bottom:1px solid var(--line); font-family:var(--mono); font-variant-numeric:tabular-nums}
+  dl.rt dt:last-of-type, dl.rt dd:last-of-type{border-bottom:0}
+  dd .u{color:var(--txt3); font-size:11px} dd.good{color:var(--lock)}
+
+  .sig{display:grid; grid-template-columns:42px 1fr 30px; gap:7px 9px; align-items:center; font-family:var(--mono); font-size:11.5px}
+  .sig .prn{color:var(--txt)}
+  .sig .track{height:9px; background:var(--inset); border:1px solid var(--line); position:relative}
+  .sig .fill{position:absolute; inset:0 auto 0 0}
+  .sig .val{text-align:right; color:var(--txt2)}
+
+  .mon{font-family:var(--mono); font-size:11px; line-height:1.55; color:var(--txt2); background:var(--inset); border:1px solid var(--line); padding:8px 10px; max-height:110px; overflow:auto}
+  .mon .t{color:var(--txt3)} .mon .rx{color:var(--txt)} .mon .tx{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <span class="wordmark">PCC<span class="tag">web serial</span></span>
+    <span class="spacer"></span>
+    <span class="conn">
+      <span class="led"></span><span class="v">LOCKED</span>
+      <span class="sep">·</span><span class="v">cu.usbmodem1101</span>
+      <span class="sep">·</span>115200 8N1
+      <span class="sep">·</span>fix <span class="v">0.3s</span>
+      <span class="sep">·</span><span class="v">3D</span>/12
+    </span>
+    <button class="tbtn" id="themeBtn">light</button>
+  </header>
+
+  <div class="body">
+    <nav>
+      <div class="grp micro">Control</div>
+      <button class="on"><span class="k">▦</span>Display</button>
+      <button><span class="k">⏚</span>Connect</button>
+      <div class="grp micro">GNSS</div>
+      <button><span class="k">✶</span>Satellites</button>
+      <button><span class="k">∿</span>Signal</button>
+      <button><span class="k">⊕</span>Position</button>
+      <button><span class="k">◵</span>Globe</button>
+      <div class="grp micro">Data</div>
+      <button><span class="k">☁</span>Weather</button>
+      <button><span class="k">≣</span>Monitor</button>
+      <button><span class="k">↧</span>Export</button>
+    </nav>
+
+    <main>
+      <div class="ptitle">
+        <h1>Display</h1>
+        <span class="note">drive the clock face · live mirror of what it shows</span>
+      </div>
+
+      <div class="panel">
+        <div class="ph"><span class="micro">Clock face · live</span><span class="micro" id="devmode">mode · time</span></div>
+        <div class="pc"><div class="device"><div class="devicewrap"><canvas id="dev"></canvas></div></div></div>
+      </div>
+
+      <div class="cols">
+        <div class="col">
+          <div class="panel">
+            <div class="ph"><span class="micro">Mode</span></div>
+            <div class="pc">
+              <div class="row">
+                <label class="lab">Active</label>
+                <div class="seg"><button class="on">Time</button><button>Text</button><button>Countdown</button></div>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="ph"><span class="micro">Text</span></div>
+            <div class="pc">
+              <div class="row"><input type="text" value="HELLO WORLD" spellcheck="false"><button class="btn primary">Send</button><button class="btn">Stop</button></div>
+              <div class="row"><label class="lab">Scroll</label><div class="seg"><button>Slow</button><button class="on">Normal</button><button>Fast</button></div></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="ph"><span class="micro">Brightness</span></div>
+            <div class="pc">
+              <div class="row"><label class="lab">Manual</label><input type="range" min="0" max="100" value="62"><span class="mono" style="color:var(--txt2); width:36px; text-align:right">62%</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col">
+          <div class="panel">
+            <div class="ph"><span class="micro">GPS fix</span><span class="micro" style="color:var(--lock)">● 3D</span></div>
+            <div class="pc">
+              <dl class="rt">
+                <dt>Latitude</dt><dd>51.40438° N</dd>
+                <dt>Longitude</dt><dd>2.32323° W</dd>
+                <dt>Altitude</dt><dd>59.6 <span class="u">m</span></dd>
+                <dt>HDOP</dt><dd class="good">0.9</dd>
+                <dt>Sats used</dt><dd>12 / 27</dd>
+                <dt>Grid</dt><dd>IO81uj</dd>
+              </dl>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="ph"><span class="micro">Signal · C/N₀</span><span class="micro">dB-Hz</span></div>
+            <div class="pc"><div class="sig" id="sig"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:12px">
+        <div class="ph"><span class="micro">Serial monitor</span><span class="micro">command echo</span></div>
+        <div class="pc"><div class="mon" id="mon"></div></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+(function(){
+  function v(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+  var SEG = {
+    '0':'abcdef','1':'bc','2':'abged','3':'abgcd','4':'fgbc','5':'afgcd',
+    '6':'afgecd','7':'abc','8':'abcdefg','9':'abcdfg','-':'g',' ':'','':''
+  };
+  function drawDigit(ctx,x,y,W,H,segs,on,off){
+    var T=Math.max(2,W*0.16), vh=(H-3*T)/2;
+    var rects={a:[x+T,y,W-2*T,T], g:[x+T,y+T+vh,W-2*T,T], d:[x+T,y+2*T+2*vh,W-2*T,T],
+      f:[x,y+T,T,vh], b:[x+W-T,y+T,T,vh], e:[x,y+2*T+vh,T,vh], c:[x+W-T,y+2*T+vh,T,vh]};
+    for(var k in rects){ var lit=segs.indexOf(k)>=0; ctx.fillStyle=lit?on:off;
+      ctx.shadowColor=lit?on:'transparent'; ctx.shadowBlur=lit?7:0;
+      var r=rects[k]; ctx.fillRect(r[0],r[1],r[2],r[3]); }
+    ctx.shadowBlur=0;
+  }
+  function drawColon(ctx,x,y,W,H,on){ var T=Math.max(2,W*0.16), d=T*1.05, cx=x+W/2-d/2;
+    ctx.fillStyle=on; ctx.shadowColor=on; ctx.shadowBlur=7;
+    ctx.fillRect(cx,y+H*0.32,d,d); ctx.fillRect(cx,y+H*0.62,d,d); ctx.shadowBlur=0; }
+  function drawDot(ctx,x,y,W,H,on){ var T=Math.max(2,W*0.16);
+    ctx.fillStyle=on; ctx.shadowColor=on; ctx.shadowBlur=7; ctx.fillRect(x+W/2-T/2,y+H-T,T,T); ctx.shadowBlur=0; }
+
+  function lay(str,dw,gap){ var x=0,out=[]; for(var i=0;i<str.length;i++){ var ch=str[i];
+    if(ch===':'||ch==='.'){ var ww=dw*0.42; out.push([ch,x,ww]); x+=ww+gap; }
+    else { out.push([ch,x,dw]); x+=dw+gap; } } return {items:out,width:x-gap}; }
+
+  var cv=document.getElementById('dev'), ctx=cv.getContext('2d');
+  function draw(){
+    var dpr=window.devicePixelRatio||1, w=cv.clientWidth, h=cv.clientHeight;
+    cv.width=w*dpr; cv.height=h*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
+    var on=v('--led'), off=v('--led-off');
+    var now=new Date(), p=function(n,wd){return String(n).padStart(wd||2,'0');};
+    var dateStr=now.getFullYear()+'-'+p(now.getMonth()+1)+'-'+p(now.getDate());
+    var timeStr=p(now.getHours())+':'+p(now.getMinutes())+':'+p(now.getSeconds())+'.'+p(now.getMilliseconds(),3);
+    // two rows; time row larger
+    var rowGap=h*0.10;
+    var hT=(h-rowGap)*0.42, hB=(h-rowGap)*0.58;
+    function row(str,H,yTop){ var dw=H*0.62, gap=dw*0.28, m=lay(str,dw,gap),
+      x0=(w-m.width)/2, by=yTop;
+      m.items.forEach(function(it){ var ch=it[0],x=x0+it[1],ww=it[2];
+        if(ch===':') drawColon(ctx,x,by,ww,H,on);
+        else if(ch==='.') drawDot(ctx,x,by,ww,H,on);
+        else drawDigit(ctx,x,by,ww,H,SEG[ch]||'',on,off); }); }
+    row(dateStr,hT,0);
+    row(timeStr,hB,hT+rowGap);
+  }
+  function loop(){ draw(); requestAnimationFrame(loop); } loop();
+
+  var sats=[{prn:'R08',s:50,c:'--glo'},{prn:'G12',s:48,c:'--gps'},{prn:'E11',s:45,c:'--gal'},
+    {prn:'C22',s:44,c:'--bds'},{prn:'G24',s:42,c:'--gps'},{prn:'E03',s:38,c:'--gal'},
+    {prn:'C34',s:36,c:'--bds'},{prn:'G02',s:31,c:'--gps'},{prn:'R15',s:29,c:'--glo'},{prn:'G19',s:24,c:'--gps'}];
+  var sig=document.getElementById('sig');
+  function bars(){ sig.innerHTML=''; sats.forEach(function(s){ var r=document.createElement('div'); r.style.display='contents';
+    r.innerHTML='<span class="prn">'+s.prn+'</span><span class="track"><span class="fill" style="width:'+Math.round(s.s/55*100)+'%; background:'+v(s.c)+'"></span></span><span class="val">'+s.s+'</span>'; sig.appendChild(r); }); }
+  bars();
+
+  document.getElementById('mon').innerHTML=[
+    '<span class="t">12:09:24.118</span> <span class="tx">&rarr; mode_text = 1</span>',
+    '<span class="t">12:09:24.121</span> <span class="rx">ok</span>',
+    '<span class="t">12:09:24.355</span> <span class="tx">&rarr; text = HELLO WORLD</span>',
+    '<span class="t">12:09:24.358</span> <span class="rx">ok</span>',
+    '<span class="t">12:09:25.004</span> <span class="rx">$GNGGA,120925.00,5124.263,N,00219.394,W,1,12,0.9,59.6,M,,*5E</span>',
+    '<span class="t">12:09:25.140</span> <span class="tx">&rarr; brightness = 0.62</span>',
+    '<span class="t">12:09:25.143</span> <span class="rx">ok</span>',
+  ].join('<br>');
+
+  var btn=document.getElementById('themeBtn');
+  btn.onclick=function(){ var r=document.documentElement, dark=r.getAttribute('data-theme')==='dark';
+    r.setAttribute('data-theme', dark?'light':'dark'); btn.textContent=dark?'dark':'light'; bars(); };
+
+  window.addEventListener('resize', draw);
+})();
+</script>
+</body>
+</html>
