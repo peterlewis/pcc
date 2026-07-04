@@ -419,6 +419,18 @@ private struct GlobeWebView: NSViewRepresentable {
                 //     incrementally stable.
                 let opacityQ = Int((alpha * 200).rounded())
                 let strokeQ = Int((stroke * 20).rounded())
+                // Decimation contract: the globe's per-pass point budget is a
+                // constant function of `tier` (via `globeMaxPoints(for:)`), and
+                // `decimate` is a pure function of (budget, run.count, total).
+                // So the decimated polyline is fully determined by
+                // (observations.count, tier). `observations.count` is the first
+                // version component; tier is an age bucket whose boundaries the
+                // continuous `opacityQ`/`strokeQ` already cross — so any tier
+                // change also moves those. The version therefore still reflects
+                // the points ACTUALLY sent: a closed pass (constant count, fixed
+                // tier) keeps a stable version and is skipped by the delta diff;
+                // a tier transition bumps opacityQ/strokeQ and re-sends. No new
+                // version component is needed for the budget.
                 let version = "\(pass.observations.count):\(opacityQ):\(strokeQ)"
 
                 // Age-based desaturation (FIX #4). Alpha alone separates ages
@@ -447,8 +459,21 @@ private struct GlobeWebView: NSViewRepresentable {
                 // concatenating them into one polyline let globe.gl draw a
                 // great-circle chord across the gap through unobserved sky,
                 // which is the "spiral" artefact (issue #8).
+                //
+                // The GLOBE gets its own bounded point budget (see
+                // `globeMaxPoints(for:)`) instead of the tier's full-resolution
+                // `.max`. At whole-globe scale an arc is only a few hundred
+                // pixels long, so ~40–200 points per pass is visually identical
+                // to the raw ~400+ — but globe.gl tube-tessellates every point
+                // (×~4 again from `pathResolution`), so the unbounded version
+                // was the dominant first-load and steady GPU cost. The raw data
+                // and the polar/map renderers are untouched; this only bounds
+                // what the globe TESSELLATES. The budget is a constant per tier,
+                // so a closed pass decimates to a byte-identical polyline every
+                // tick — see the version-key note below.
+                let budget = globeMaxPoints(for: tier)
                 let segments = geometryCache.groundSegments(for: pass, observerLat: lat, observerLon: lon,
-                                                            maxPoints: tier.maxPoints,
+                                                            maxPoints: budget,
                                                             smoothingWindow: smoothTrails ? 0 : 1)
                 for (segmentIndex, segment) in segments.enumerated() {
                     guard segment.count >= 2 else { continue }
@@ -664,6 +689,37 @@ private struct GlobeWebView: NSViewRepresentable {
     private func satAltitude(forElevation elDeg: Double) -> Double {
         let clamped = max(0.0, min(90.0, elDeg))
         return 0.02 + (clamped / 90.0) * 0.08
+    }
+
+    /// The GLOBE's per-pass point budget, bounded per age tier — deliberately
+    /// distinct from `PassAgeTier.maxPoints` (which stays `.max` so the polar
+    /// and map renderers keep full resolution).
+    ///
+    /// Why bound it only here: globe.gl tessellates every path point into tube
+    /// geometry and then subdivides each chord again via `pathResolution`, so
+    /// the per-vertex cost is multiplied. With ~107k observations across ~259
+    /// passes at full resolution that tessellation dominated both first-load
+    /// time and steady GPU cost. At whole-globe scale a ground track spans only
+    /// a few hundred screen pixels, so a few dozen-to-a-couple-hundred points
+    /// per arc is visually indistinguishable from the raw data while collapsing
+    /// the geometry globe.gl must build.
+    ///
+    /// The ladder mirrors the fade tiers: the live/recent arcs the eye actually
+    /// tracks keep enough points for a smooth sweep; older, fainter, mostly
+    /// cool-grey tracks — which are also the bulk of the count — are thinned
+    /// hardest. Returned values are CONSTANT per tier, which is what keeps the
+    /// decimated polyline deterministic for a given (observations.count, tier)
+    /// and so keeps the incremental path-delta version key honest (see the
+    /// version note in `buildUpdateJS`). Tuned for arcs that still look full at
+    /// globe scale; raise a tier's value if a specific arc ever reads sparse.
+    private func globeMaxPoints(for tier: PassAgeTier) -> Int {
+        switch tier {
+        case .live:    return 200
+        case .recent:  return 120
+        case .today:   return 80
+        case .week:    return 60
+        case .archive: return 40
+        }
     }
 
     private func jsonString(_ obj: Any) -> String? {

@@ -4,16 +4,14 @@
       brew install chrony      (and disable the built-in timed if it conflicts)
   Install this agent:
       sudo cp clock-chrony-bridge.py /usr/local/bin/ && sudo chmod +x /usr/local/bin/clock-chrony-bridge.py
-      sudo cp launchd/ws.ptrl.clock-chrony-bridge.plist /Library/LaunchDaemons/
-      sudo launchctl load /Library/LaunchDaemons/ws.ptrl.clock-chrony-bridge.plist
-  Note: on macOS you'd usually just run the Precision Clock app's built-in NTP
-  server instead of this bridge — see the README.
+      sudo cp launchd/is.peterlew.chrony-bridge.plist /Library/LaunchDaemons/
+      sudo launchctl load /Library/LaunchDaemons/is.peterlew.chrony-bridge.plist
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>ws.ptrl.clock-chrony-bridge</string>
+    <string>is.peterlew.pcc.chrony-bridge</string>
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/python3</string>

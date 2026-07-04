@@ -204,6 +204,65 @@ try {
 
         (document.getElementById('globe'));
 
+    // ---- Render-on-demand (pause-when-idle) ---------------------------
+    // globe.gl runs a continuous 60fps WebGL render loop. A STATIC globe —
+    // no pointer interaction, no new data — has nothing to redraw, yet the
+    // loop kept the GPU busy every frame (a big chunk of the measured idle
+    // cost). globe.gl exposes pauseAnimation()/resumeAnimation(); we stop
+    // the loop when idle and wake it briefly on any interaction or data push.
+    //
+    // wake(): resume rendering, then arm a one-shot timer to re-pause after a
+    // short idle window. Called from EVERY pointer handler and EVERY data
+    // entry point (updateElements / applyPathDelta / updatePaths /
+    // setSunDirection / updateRings / focusOn). This is critical: if we paused
+    // without waking on data pushes, the live satellite dots, terminator, and
+    // new trails would freeze on a stale frame. The idle window also lets
+    // camera damping (drag/zoom inertia) settle before the loop stops.
+    let idleT = null;
+    let renderingPaused = false;
+    // Gate so we never pause before the globe has drawn its first frame AND
+    // received its first data. `pauseAnimation` is a no-op until armed.
+    let firstRenderDone = false;
+    const IDLE_MS = 500;
+
+    function pauseRender() {
+        if (!firstRenderDone || renderingPaused) return;
+        if (typeof myGlobe.pauseAnimation === 'function') {
+            myGlobe.pauseAnimation();
+            renderingPaused = true;
+        }
+    }
+    function resumeRender() {
+        if (renderingPaused && typeof myGlobe.resumeAnimation === 'function') {
+            myGlobe.resumeAnimation();
+            renderingPaused = false;
+        }
+    }
+    function wake() {
+        resumeRender();
+        if (idleT) clearTimeout(idleT);
+        // Only schedule a re-pause once the first frame + data have landed;
+        // before that we leave the loop running so initial textures, the
+        // shader install, and the first trails all paint.
+        if (firstRenderDone) {
+            idleT = setTimeout(pauseRender, IDLE_MS);
+        }
+    }
+
+    // Pointer interaction with the canvas keeps the loop alive so drag/zoom
+    // (and their damping) stay smooth. Capture phase + passive so we never
+    // interfere with globe.gl's own pointer handling. globe.gl's onZoom (wired
+    // below) also calls wake() to cover momentum/programmatic camera moves.
+    const globeEl = document.getElementById('globe');
+    if (globeEl) {
+        ['pointerdown', 'pointermove', 'pointerup', 'wheel'].forEach(function(ev) {
+            globeEl.addEventListener(ev, wake, { capture: true, passive: true });
+        });
+    }
+    if (typeof myGlobe.onZoom === 'function') {
+        myGlobe.onZoom(wake);
+    }
+
     // ---- Day/night shader via onBeforeCompile -------------------------
     // Instead of replacing the material wholesale with a ShaderMaterial
     // we patch the existing MeshPhongMaterial's shader after three.js
@@ -327,12 +386,30 @@ try {
     // Kick off the shader install once the globe's own day-texture
     // load settles. `.onGlobeReady` fires after three-globe has loaded
     // + applied the globeImageUrl image.
+    //
+    // This is also where we ARM the render-on-demand gate: the globe has now
+    // drawn its first textured frame. We wait a short settle window before the
+    // first pause so the night-texture swap, the shader recompile, and the
+    // first Swift data push (which races in around the same time via the
+    // `globeReady` round-trip) all paint at least once. After that, idleness
+    // re-pauses the loop normally; any later data push or interaction wakes it.
+    function armRenderGate() {
+        firstRenderDone = true;
+        if (idleT) clearTimeout(idleT);
+        // Generous first-idle window: the very first frame involves texture
+        // decodes and a shader compile, so give it room before idling.
+        idleT = setTimeout(pauseRender, 1500);
+    }
     if (typeof myGlobe.onGlobeReady === 'function') {
-        myGlobe.onGlobeReady(installDayNightShader);
+        myGlobe.onGlobeReady(function() {
+            installDayNightShader();
+            armRenderGate();
+        });
     } else {
         // Fallback — older builds: just poll until the material's
-        // map populates.
+        // map populates, and arm the gate after the same settle delay.
         setTimeout(installDayNightShader, 50);
+        setTimeout(armRenderGate, 200);
     }
 
     // ---- Sun direction ------------------------------------------------
@@ -347,10 +424,16 @@ try {
         sunUniform.value.x = Math.sin(phi) * Math.cos(theta);
         sunUniform.value.y = Math.cos(phi);
         sunUniform.value.z = Math.sin(phi) * Math.sin(theta);
+        // The terminator moves with the sun vector; wake the loop so the
+        // shader re-renders the new day/night boundary, then idle again.
+        wake();
     };
 
-    window.updateElements = function(data) { myGlobe.htmlElementsData(data); };
-    window.updateRings    = function(data) { myGlobe.ringsData(data); };
+    // Each data entry point wakes the render loop so the change actually paints
+    // before the loop idles again — otherwise a paused globe would freeze on a
+    // stale frame and the moving dots / new trails / terminator would stop.
+    window.updateElements = function(data) { myGlobe.htmlElementsData(data); wake(); };
+    window.updateRings    = function(data) { myGlobe.ringsData(data); wake(); };
 
     // ---- Incremental path store ---------------------------------------
     // three-globe diffs incoming `pathsData` by OBJECT IDENTITY (its
@@ -385,6 +468,8 @@ try {
             for (const p of delta.upsert) pathStore.set(p.id, p);
         }
         myGlobe.pathsData(Array.from(pathStore.values()));
+        // New / changed / removed trails must paint before we idle again.
+        wake();
     };
 
     // Fallback full-replace entry point. Kept for the web (iframe) host,
@@ -403,6 +488,7 @@ try {
             }
         }
         myGlobe.pathsData(Array.from(pathStore.values()));
+        wake();
     };
 
     // ---- Clock overlay ------------------------------------------------
@@ -454,9 +540,26 @@ try {
             + '.' + pad(now.getMilliseconds(), 3);
     }
 
-    function tickClock() {
+    // The clock loop is independent of the WebGL render loop — it only writes
+    // DOM text (no globe.gl call), so it never forces a scene re-render. But a
+    // full-rate rAF still drives compositor work every frame. When the globe is
+    // paused (idle), throttle the clock to ~16fps: still smooth enough for the
+    // millisecond field to read as live while cutting idle compositing. When
+    // the globe is actively rendering anyway, run the clock every frame so it
+    // stays perfectly in step with the moving scene. The throttle gates only
+    // the DOM WRITE; rAF itself stays the timing source so we never lag the
+    // tab's frame clock.
+    const CLOCK_IDLE_INTERVAL_MS = 62; // ~16fps
+    let lastClockPaint = 0;
+    function tickClock(ts) {
         if (clockEl && window.__clockVisible) {
-            clockEl.textContent = formatClock(new Date());
+            const now = (typeof ts === 'number') ? ts : performance.now();
+            // Throttle only while the render loop is paused; otherwise paint
+            // every frame to match the live scene.
+            if (!renderingPaused || (now - lastClockPaint) >= CLOCK_IDLE_INTERVAL_MS) {
+                lastClockPaint = now;
+                clockEl.textContent = formatClock(new Date());
+            }
         }
         requestAnimationFrame(tickClock);
     }
@@ -486,6 +589,12 @@ try {
         if (hasFocused) return;
         hasFocused = true;
         myGlobe.pointOfView({ lat: lat, lng: lng, altitude: 1.8 }, 1000);
+        // The 1s camera fly-in is animated; keep the loop running long enough
+        // to render it. A single wake() (500ms idle) would re-pause mid-flight,
+        // so push the re-pause out past the transition.
+        wake();
+        if (idleT) clearTimeout(idleT);
+        idleT = setTimeout(pauseRender, 1200);
     };
 
     postHost('globeReady', 'ok');
