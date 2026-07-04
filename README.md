@@ -9,17 +9,14 @@ A browser app that drives the [Precision Clock Mk IV](https://mitxela.com/projec
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Deploys from CI](https://img.shields.io/badge/deploy-GitHub%20Pages%20(CI)-blue) ![Web Serial](https://img.shields.io/badge/Web%20Serial-Chromium-orange)
 
-<p align="center"><img src="assets/native-vs-web.svg" alt="Native macOS app vs web app — a Venn diagram: same clock, one of these ships itself" width="660"></p>
-
 ## Why a website, and not the Mac app?
 
-There *was* a native macOS menu-bar app. It still exists — it's just [paused](#the-macos-app-paused). Honestly:
+There *was* a native macOS menu-bar app — it still exists, just [paused](#the-macos-app-paused). A few practical reasons the web version won out:
 
-- **Apple signing is a tax on shipping.** A Developer Program membership ($99/yr), code-signing and notarizing *every* build, and Gatekeeper still greeting new users with "unidentified developer" — all to hand someone a `.dmg`. A URL has none of that.
-- **A browser reaches everyone.** macOS, Windows, Linux, a Chromebook — anyone on a Chromium browser can just open it. No install, no per-platform build, no updates to push.
-- **Web Serial does the hard part.** The one thing a "real app" used to be *needed* for — talking to the USB serial device — [the browser now does natively](https://developer.mozilla.org/docs/Web/API/Web_Serial_API).
-- **It's tech I understand better.** I iterate faster in HTML / JS / Canvas than in Swift / AppKit, so the web version simply gets more love.
-- **CBA** to keep fighting the native toolchain for a hobby project. The web app does ~everything and redeploys itself on `git push`.
+- **Distribution.** A native Mac app means a Developer Program membership ($99/yr), signing + notarizing each build, and a first-launch Gatekeeper prompt. A web app is a URL — nothing to install or sign.
+- **Reach.** Anyone on a Chromium browser can open it — macOS, Windows, Linux, a Chromebook. No per-platform build, no updates to push.
+- **Web Serial does the hard part.** Talking to the USB serial device — the one thing a native app used to be needed for — [the browser now does natively](https://developer.mozilla.org/docs/Web/API/Web_Serial_API).
+- **It's the stack I know better.** I move faster in HTML / JS / Canvas than in Swift / AppKit, so the web version simply gets more attention.
 
 A few things stay Mac-only by nature (acting as a system NTP server, native WeatherKit, on-device AI) — those live in the paused app, not here.
 
