@@ -7,19 +7,25 @@ import * as ASTRO from './astro-fw.js?v=90';
 import * as DS from './datasources.js?v=90';
 import { TelemetryLog } from './telemetrylog.js?v=3';
 import { prepReview, drawReview, sampleAt, tAtX } from './review.js?v=1';
+import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=2';
+
+// config.txt is the single source of truth: the clock-behaviour defaults (enabled modes, colon,
+// astro dwell, …) are DERIVED from the canonical golden config, not hand-written here. See
+// default-config.js. UI-only state (theme, panels, sim, gamma, marquee) stays app-owned below.
+const CONFIG_DEFAULTS = configToState(DEFAULT_CONFIG);
 
 class Component extends DcLite {
   state = {
     phase: 'boot', entryVisible: true, docked: false, drawerOpen: false, hdrClockOpen: true,
     section: 'display', theme: 'dark', scenario: 'locked',
-    mode: 'time', dateFormat: 'iso8601', weekdayFmt: 'off', timeRow: 'std',
-    // Multi-select display modes — faithful to the firmware's modes_enabled[]: enable MANY at once,
-    // the buttons cycle the enabled set. Toggling one ON enables + JUMPS to it (emu + connected clock).
-    modesEnabled: { iso8601: true }, currentMode: 'iso8601',
+    mode: 'time',
+    // Clock-behaviour defaults (dateFormat, weekdayFmt, timeRow, modesEnabled, astroFmt, colon,
+    // astroDwell) are SEEDED from config.txt — the single source of truth — not hand-written here.
+    ...CONFIG_DEFAULTS,
+    currentMode: 'iso8601',
     precision: 3, brightness: 0.85, brightLock: false, gamma: 1.0,
-    colon: 'heartbeat', utc: false, standby: false, diag: 'off',
+    utc: false, standby: false, diag: 'off',
     text: 'HELLO', marqueeSpeed: 'std', countdownTo: 0,
-    astroFmt: 'off', astroDwell: 5500,
     // 5-point ambient-light DAC curve (ADC→DAC, 0..4095). Default = Rev D (VTT9812FH), the
     // firmware/macOS default. Edited by dragging in the Brightness tab; committed via BS1..BS5.
     dacCurve: [{ adc: 0, dac: 0 }, { adc: 131, dac: 365 }, { adc: 1076, dac: 1422 }, { adc: 2774, dac: 2665 }, { adc: 3849, dac: 4095 }],
@@ -1859,6 +1865,10 @@ class Component extends DcLite {
         if (!this.emu || !this.els.emuCfg) return;
         const txt = this.els.emuCfg.value;
         this.emu.applyConfig(txt);                    // reboot the emulator with the new config.txt
+        // config.txt is the source of truth: reflect the applied config back into the UI controls
+        // (toggles/selectors) via the one table, so editing the text drives the whole app, not just
+        // the emulator. syncFaces reconciles the face rendering with the new state.
+        this.setState(configToState(txt), () => this.syncFaces());
         const n = this.mirrorConfigToDevice(txt);     // 0 if no clock attached
         this._emuCfgNote = n
           ? ('✓ MIRRORED ' + n + ' SETTINGS TO THE CONNECTED CLOCK (LIVE / RUNTIME). EXPORT config.txt TO PERSIST ACROSS A POWER-CYCLE.')
@@ -1866,7 +1876,9 @@ class Component extends DcLite {
         this.setState({ tick: this.state.tick });     // re-render the sync note
       },
       onEmuCfgExport: () => {
-        const txt = (this.els.emuCfg && this.els.emuCfg.value) || (this.emu ? this.emu.getConfig() : '');
+        // The curated golden config.txt (every firmware option, annotated) with the CURRENT UI
+        // settings substituted in — drop straight on the CLOCK drive. Single source of truth.
+        const txt = stateToConfig(this.state);
         const blob = new Blob([txt], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
