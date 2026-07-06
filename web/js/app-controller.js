@@ -78,7 +78,7 @@ class Component extends DcLite {
       hdrBar: localStorage.getItem('pccweb.hdrbar') === '1',
     });
     this.reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=104'), import('./sim.js?v=91'), import('./charts.js?v=91'), import('./realdev.js?v=91'), import('./emu-driver.js?v=14')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=104'), import('./sim.js?v=92'), import('./charts.js?v=91'), import('./realdev.js?v=92'), import('./emu-driver.js?v=14')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -552,14 +552,17 @@ class Component extends DcLite {
         else if (/PMTXTS/.test(it.text)) { m = it.text.match(/PMTXTS,\d+,(\d+)/); if (m) ppsSec = String(+m[1] % 60).padStart(2, '0'); }
         if (ppsSec !== null && ppsSec !== this._lastPpsSec) { this._lastPpsSec = ppsSec; this.emu.pulsePps(); }
       }
-      // The observer follows the clock: mirror its own GPS fix into the emulator location so the
-      // panel + astronomy use the ACTUAL position, not the browser/default. Only on a real move.
+      // The observer follows the clock: mirror its own GPS fix into BOTH the emulator location
+      // (drives the face + panel) AND the session observer S.obs (drives astronomy — sat trails,
+      // globe, sidereal/solar), so the whole app uses the ACTUAL position, not the browser/default.
+      // Only on a real move, and only if the user hasn't deliberately pinned the observer.
       const S = this.session.S;
-      if (S.fix && S.fix.valid && isFinite(S.fix.lat) && isFinite(S.fix.lon) &&
+      if (S.fix && S.fix.valid && isFinite(S.fix.lat) && isFinite(S.fix.lon) && !S.obsUserSet &&
           this.emu.state().geo !== 'manual' &&   // a deliberate manual pin still wins
           (this._emuFixLat == null || Math.abs(S.fix.lat - this._emuFixLat) > 1e-4 || Math.abs(S.fix.lon - this._emuFixLon) > 1e-4)) {
         this._emuFixLat = S.fix.lat; this._emuFixLon = S.fix.lon;
         this.emu.setLocation(S.fix.lat, S.fix.lon, 'device');
+        S.obs.lat = S.fix.lat; S.obs.lon = S.fix.lon;   // astronomy reference frame tracks the fix
         this.syncEmuLocInputs();
       }
     } else if (this._emuLive) {                 // leaving CONNECTED for SIMULATION: back to the virtual GPS
@@ -652,9 +655,11 @@ class Component extends DcLite {
     const tz = this.emu && this.emu.tz ? this.emu.tz() : null;
     const zone = tz && tz.utc ? 'Etc/UTC' : (tz && tz.zone) || null;
     if (zone) { this.devSend('zone_override = ' + zone); n++; }
-    // Enabling modes over serial jumps the device through them and lands on the LAST one;
-    // re-assert the ISO clock last so the physical face lands where the emulator boots (mode 0).
-    if (n) this.devSend('MODE_ISO8601_STD = enabled');
+    // Enabling modes over serial jumps the device through them, landing on the LAST enabled one.
+    // Re-assert the config's OWN last-enabled mode (NOT a hardcoded ISO) so the physical face lands
+    // on the mode the config actually selects — matching the emulator, instead of overriding it.
+    const modeLines = lines.filter((l) => /^MODE_[A-Z0-9_]+\s*=\s*(enabled|on|1|yes|true)\b/i.test(l));
+    if (modeLines.length) this.devSend(modeLines[modeLines.length - 1].split('=')[0].trim() + ' = enabled');
     return n;
   }
 
@@ -1751,7 +1756,9 @@ class Component extends DcLite {
     const names = { iso8601: 'ISO 8601', ordinal: 'ISO ORDINAL', isoweek: 'ISO WEEK', unix: 'UNIX', julian: 'JULIAN', mjd: 'MOD JULIAN', weekday: 'WEEKDAY', wdy_mm_dd: 'WDY MM-DD', weekda_dd: 'WEEKDAY DD', text: 'TEXT', countdown: 'COUNTDOWN', offset: 'UTC OFFSET', standby: 'STANDBY', displaytest: 'DISPLAY TEST', vbat: 'BATTERY', satview: 'SAT VIEW' };
     const _mode = this.appMode();
     const _modeLbl = _mode === 'connected' ? 'LIVE' : _mode === 'simulation' ? 'SIMULATION' : 'STANDBY';
-    const _pl = _mode === 'standby' ? 'NO FIX' : (_mode === 'simulation' && this.emu && this.emu.precision ? this.emu.precision().level : 'P' + st.precision);
+    // Both simulation AND connected drive the firmware, so both read the REAL precision ladder from
+    // the emulator; only standby (host time, no fix) has no honest precision to show.
+    const _pl = _mode === 'standby' ? 'NO FIX' : (this.emu && this.emu.precision ? this.emu.precision().level : 'P' + st.precision);
     const _dispName = _mode === 'standby' ? 'SYSTEM TIME' : (st.standby ? 'STANDBY' : (names[em.m] || em.m.toUpperCase()));
     const acc = st.accessoryOpen || {};
     return {
@@ -1793,9 +1800,14 @@ class Component extends DcLite {
         this.setState({ hdrBar: v });
       },
       ssModeTime: this.seg(st.mode === 'time', true), ssModeText: this.seg(st.mode === 'text', false), ssModeCd: this.seg(st.mode === 'countdown', false),
+      // DATE ROW SOURCE only means something when the firmware is rendering the row (simulation or a
+      // connected clock). In STANDBY the face is plain host time, so the control is inert — grey it
+      // out + block clicks instead of letting a button light up with no effect on the face.
+      modeSelDisabled: this.appMode() === 'standby',
+      modeSelWrapStyle: 'display:flex;border:1px solid var(--line);border-radius:var(--r-1);overflow:hidden' + (this.appMode() === 'standby' ? ';opacity:.4;pointer-events:none' : ''),
       onModeTime: () => this.set2({ mode: 'time' }),
       onModeText: () => { this.marqOff = 0; this.set2({ mode: 'text', standby: false, diag: 'off' }); },
-      onModeCd: () => this.set2({ mode: 'countdown', countdownTo: st.countdownTo || Date.now() + 600e3, standby: false, diag: 'off' }),
+      onModeCd: () => this.set2({ mode: 'countdown', countdownTo: st.countdownTo || Date.now() + 7 * 864e5, standby: false, diag: 'off' }),
       modeIsText: st.mode === 'text', modeIsCd: st.mode === 'countdown',
       onSendText: () => { const v = this.els.textInput ? this.els.textInput.value : ''; this.marqOff = 0; this.set2({ mode: 'text', text: v || ' ' }); },
       onClearText: () => { if (this.els.textInput) this.els.textInput.value = ''; this.marqOff = 0; this._mq = 0; this.set2({ mode: 'time', text: '' }); },
@@ -1870,6 +1882,11 @@ class Component extends DcLite {
       emuLonVal: this.emu ? this.emu.state().lon.toFixed(4) : '-0.0015',
       emuObserverTag: this.emuObserverTag(),
       emuTzTag: this.emuTzTag(),
+      // In CONNECTED mode the observer IS the clock's own GPS fix — the app reflects it, it can't
+      // override it. Lock the location controls (device drives location); editable in sim/standby.
+      obsCtrlDisabled: this.appMode() === 'connected',
+      obsGeoStyle: 'display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--face-led,#ff4530);background:transparent;border:1px solid var(--face-led,#ff4530);border-radius:5px;padding:8px 13px;cursor:' + (this.appMode() === 'connected' ? 'not-allowed;opacity:.4' : 'pointer'),
+      obsSetStyle: 'font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--txt);background:var(--well);border:1px solid var(--line2);padding:6px 12px;margin-left:4px;cursor:' + (this.appMode() === 'connected' ? 'not-allowed;opacity:.4' : 'pointer'),
       onGeolocate: () => this.geolocate(false),
       onSetLoc: () => {
         const la = parseFloat(this.els.emuLat && this.els.emuLat.value);
@@ -2026,7 +2043,7 @@ class Component extends DcLite {
       cPort: this.portName(S),
       cDevice: conn ? (S.real ? 'Precision Clock Mk IV · STM32 CDC' : 'Emulated Mk IV · no hardware') : '—',
       cSession: S ? this.fmtDur(Date.now() / 1000 - S.t0) : '—',
-      cFix: S && S.fix.valid ? '3D · HDOP ' + S.fix.hdop.toFixed(2) : (conn ? (S.scenario === 'acquiring' ? 'ACQUIRING' : 'NO FIX') : '—'),
+      cFix: S && S.fix.valid ? '3D · HDOP ' + S.fix.hdop.toFixed(2) : (conn ? (S.scenario === 'nofix' ? 'NO FIX' : 'ACQUIRING') : '—'),
       cSats: S && conn ? S.fix.sats + ' / ' + S.sats.filter((x) => x.visible).length : '—',
       cAge: S && S.fix.valid && S.fixAgeT ? ((Date.now() - S.fixAgeT) / 1000).toFixed(1) + ' s' : '—',
       // Real Mk IV over Web Serial (requires a genuine user gesture for requestPort).
@@ -2081,8 +2098,8 @@ class Component extends DcLite {
       cfgHasFile: !!this.cfgHandle,
       cfgSaveDisabled: !(st.cfgDirty && st.cfgWrite && this.cfgHandle),
       cfgSaveStyle: this.btn(false, !(st.cfgDirty && st.cfgWrite && this.cfgHandle)),
-      readCfgDisabled: !(typeof window !== 'undefined' && 'showOpenFilePicker' in window),
-      readCfgStyle: this.btn(false, !(typeof window !== 'undefined' && 'showOpenFilePicker' in window)),
+      readCfgDisabled: this.appMode() === 'standby' || !(typeof window !== 'undefined' && 'showOpenFilePicker' in window),
+      readCfgStyle: this.btn(false, this.appMode() === 'standby' || !(typeof window !== 'undefined' && 'showOpenFilePicker' in window)),
       // SIMULATE is a toggle, never greyed by history — only blocked while a real device is live.
       realDisabled: conn || !serialOk, connectDisabled: !!(S && S.real), discDisabled: !conn,
       btnRealStyle: this.btn(true, conn || !serialOk), btnConnStyle: this.btn(false, !!(S && S.real)), btnDiscStyle: this.btn(false, !conn),
@@ -2187,6 +2204,7 @@ class Component extends DcLite {
     // merged upstream. The banner reflects where the stream is coming from right now.
     const streaming = !!(S && S.pps && S.pps.list && S.pps.list.length);
     const noPps = !!(S && S.real && !streaming); // real hardware, no PPS stream yet → dash the timing KPIs
+    const noData = !streaming;                   // NO live PPS at all (standby, or real-without-stream) → nothing honest to show
     const banner = S && S.real
       ? (streaming ? '$PMTXTS · LIVE · DRAFT FW (pps=on)' : '$PMTXTS · SEND "pps = on" TO STREAM')
       : (S && S.connected ? '$PMTXTS · SIMULATED STREAM' : '$PMTXTS · DRAFT-FIRMWARE FEATURE — pps=on');
@@ -2196,10 +2214,10 @@ class Component extends DcLite {
       // Real device with no $PMTXTS yet (stock FW, or before `pps = on`): the KPIs
       // have no honest value — dash them rather than show stale sim scalars or 0s.
       // In sim mode `streaming` is true (sim fills pps.list), so tiles show as before.
-      tJitter: noPps ? '—' : (T.rms || 0).toFixed(1), tP2p: noPps ? '—' : (T.p2p || 0).toFixed(0),
-      tDrift: noPps ? '—' : (T.ppm || 0).toFixed(2), tHold: noPps ? '—' : (T.locked ? '0' : String(T.hold || 0)),
-      tHoldSub: T.locked ? 'GPS DISCIPLINED' : 'FREE-RUNNING — LSE (TEMP COMP HOST-SIDE)',
-      tTemp: noPps ? '—' : (T.temp || 0).toFixed(1), tSeq: noPps ? '—' : String(T.seq || 0), tDrop: noPps ? '—' : String(T.drop || 0),
+      tJitter: noData ? '—' : (T.rms || 0).toFixed(1), tP2p: noData ? '—' : (T.p2p || 0).toFixed(0),
+      tDrift: noData ? '—' : (T.ppm || 0).toFixed(2), tHold: noData ? '—' : (T.locked ? '0' : String(T.hold || 0)),
+      tHoldSub: noData ? 'NO PPS — CONNECT A CLOCK OR SIMULATE' : (T.locked ? 'GPS DISCIPLINED' : 'FREE-RUNNING — LSE (TEMP COMP HOST-SIDE)'),
+      tTemp: noData ? '—' : (T.temp || 0).toFixed(1), tSeq: noData ? '—' : String(T.seq || 0), tDrop: noData ? '—' : String(T.drop || 0),
       fitK0: fit ? fit.k0.toFixed(4) : '—', fitK1: fit ? fit.k1.toFixed(5) : '—', fitK2: fit ? fit.k2.toFixed(6) : '—',
       fitSpread: fit ? fit.spread.toFixed(1) + ' °C' : '—',
       fitRms: fit ? fit.rms.toFixed(2) + ' ppm' : '—',
@@ -2207,8 +2225,8 @@ class Component extends DcLite {
       fitStatus: fit ? (fit.ready ? (fit.lineOnly ? 'READY — LINE FIT' : 'READY — QUADRATIC') : 'COLLECTING — NEED ≥30 SAMPLES / ≥8 °C') : 'AWAITING SAMPLES',
       fitStatusC: fit && fit.ready ? 'var(--lock)' : 'var(--acq)',
       // The firmware doesn't consume temp_comp yet, so we never claim to be steering.
-      compState: fit && fit.ready ? 'FIT READY — PASTE temp_comp INTO config.txt' : 'CHARACTERISING — FIRMWARE APPLY PENDING',
-      compStateC: fit && fit.ready ? 'var(--lock)' : 'var(--txt2)',
+      compState: noData ? 'IDLE — NO TIMING STREAM' : (fit && fit.ready ? 'FIT READY — PASTE temp_comp INTO config.txt' : 'CHARACTERISING — FIRMWARE APPLY PENDING'),
+      compStateC: noData ? 'var(--txt3)' : (fit && fit.ready ? 'var(--lock)' : 'var(--txt2)'),
       compLine: fit ? 'temp_comp = ' + fit.k0.toFixed(4) + ',' + fit.k1.toFixed(5) + ',' + fit.k2.toFixed(6) : 'temp_comp = off',
     };
   }
@@ -2489,7 +2507,17 @@ class Component extends DcLite {
   enterReview() {
     if (this._reviewing || !this._review) return;
     const S = this.session.S;
-    this._liveSnap = { sats: S.sats, fix: S.fix, posHist: S.posHist, dopHist: S.dopHist, fixHist: S.fixHist, cn0Hist: S.cn0Hist, trails: S.trails, pps: S.pps };
+    // Snapshot COPIES, not references: review reconstruction mutates the live buffers in place, so a
+    // reference snapshot let those edits leak — corrupting the live PPS/position stream on exit.
+    // Copying the arrays/Maps/pps.list means exitReview's Object.assign truly restores them untouched.
+    const cpArr = (a) => (Array.isArray(a) ? a.slice() : a);
+    this._liveSnap = {
+      sats: cpArr(S.sats), fix: { ...S.fix },
+      posHist: cpArr(S.posHist), dopHist: cpArr(S.dopHist), fixHist: cpArr(S.fixHist),
+      cn0Hist: S.cn0Hist instanceof Map ? new Map(S.cn0Hist) : S.cn0Hist,
+      trails: S.trails instanceof Map ? new Map(S.trails) : S.trails,
+      pps: S.pps ? { ...S.pps, list: cpArr(S.pps.list) } : S.pps,
+    };
     this._reviewing = true;
     this.applyReviewFrame(this._review.playT);
   }

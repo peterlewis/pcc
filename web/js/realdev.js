@@ -349,10 +349,13 @@ export function createRealDevice(session) {
             if (Array.isArray(S.dopHist)) S.dopHist.length = 0;
             if (Array.isArray(S.fixHist)) S.fixHist.length = 0;
             lastHistT = 0; lastCn0T = 0;
-            // Allow one observer seed from the device's first fix; remember the
-            // current observer so disconnect() can restore it.
+            // Allow one observer seed from the device's first fix; remember the current observer
+            // (and whether it was a deliberate user pin) so disconnect() can restore it. Clearing
+            // obsUserSet here is essential: without it a manual pin set earlier (e.g. in a prior
+            // simulation) would block the real device's own fix from ever seeding the observer.
             obsSeeded = false;
-            obsAtConnect = { lat: S.obs.lat, lon: S.obs.lon };
+            obsAtConnect = { lat: S.obs.lat, lon: S.obs.lon, userSet: S.obsUserSet };
+            S.obsUserSet = false;
             S.realConnectedAt = Date.now(); // to distinguish "still connecting" from "not a clock"
             S.deviceTimeMs = 0;             // no device time until an RMC lands
             S.portLabel = clock.describe(); // honest USB id — no invented cu.usbmodem path
@@ -389,7 +392,7 @@ export function createRealDevice(session) {
             lastHistT = 0; lastCn0T = 0;
             // Restore the observer we adopted from the device fix back to whatever
             // it was before connecting, so the sim resumes from the honest default.
-            if (obsAtConnect) { S.obs.lat = obsAtConnect.lat; S.obs.lon = obsAtConnect.lon; obsAtConnect = null; }
+            if (obsAtConnect) { S.obs.lat = obsAtConnect.lat; S.obs.lon = obsAtConnect.lon; S.obsUserSet = !!obsAtConnect.userSet; obsAtConnect = null; }
             S.portLabel = '';
         },
 

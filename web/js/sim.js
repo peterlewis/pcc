@@ -450,7 +450,18 @@ export function createSession(opts = {}) {
     tick(nowMs) { tick(nowMs, false); },
     setScenario(s) { S.scenario = s; },
     connect() { S.connected = true; doPreroll(); },
-    disconnect() { S.connected = false; S.fix.valid = false; S.fix.type = 0; },
+    disconnect() {
+      S.connected = false; S.fix.valid = false; S.fix.type = 0; S.fix.sats = 0; S.sats = [];
+      // Clear every history buffer the sim populated, so LEAVING a simulation doesn't leave ghost
+      // sat trails in the SKY/globe rooms or stale scalars in the TIMING room (mirrors realdev.disconnect).
+      if (S.gtrails && S.gtrails.clear) S.gtrails.clear();
+      if (S.trails && S.trails.clear) S.trails.clear();
+      if (S.cn0Hist && S.cn0Hist.clear) S.cn0Hist.clear();
+      if (Array.isArray(S.posHist)) S.posHist.length = 0;
+      if (Array.isArray(S.dopHist)) S.dopHist.length = 0;
+      if (Array.isArray(S.fixHist)) S.fixHist.length = 0;
+      if (S.pps && Array.isArray(S.pps.list)) S.pps.list.length = 0;   // → TIMING KPIs go honest (no stale stream)
+    },
     reboot() {
       S.rebooting = true;
       log('tx', wrap('PMTX,REBOOT'));
