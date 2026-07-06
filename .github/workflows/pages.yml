@@ -24,6 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true   # fetch the real tzmap.bin (12 MB ZoneDetect map), not the LFS pointer
       - uses: actions/setup-node@v4
         with:
           node-version: 20
