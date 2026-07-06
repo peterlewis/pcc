@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
-# Rebuild the byte-faithful clock4 WASM emulator -> ../clock-fw.{mjs,wasm}
-# Compiles main_wrap.c (which #includes the real firmware main.c) + shims, links with
-# prebuilt astro.o / zonedetect.o. Run from phase1/.
+# Rebuild the byte-faithful clock4 WASM emulator -> ../clock-fw.mjs
+# Builds ENTIRELY FROM SOURCE (no committed .o): compiles the firmware objects
+# (astro / zonedetect from the clock4-megabuild submodule) + the emulator shims
+# (emu_data / hal_behav / stm32_shim) + main_wrap.c (which #includes the real
+# firmware main.c), then links to a SINGLE_FILE ES module. Run from phase1/.
+# Needs emscripten (emcc) on PATH and the clock4-megabuild submodule checked out.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-FW=../../../clock4-megabuild/mk4-time
+# Firmware source: the pinned submodule (web/emu/firmware, used by CI) if it's checked out,
+# else the local clock4-megabuild dev worktree. Either produces the same byte-identical WASM.
+if   [ -d ../firmware/mk4-time ];                 then FW=../firmware/mk4-time
+elif [ -d ../../../clock4-megabuild/mk4-time ];   then FW=../../../clock4-megabuild/mk4-time
+else echo "ERROR: firmware source not found — run: git submodule update --init web/emu/firmware" >&2; exit 1; fi
+echo "firmware source: $FW"
 INCS=(
   -I.                        # shim_redirect.h
   -Icmsis-shim               # shadows CMSIS asm intrinsics — must precede real CMSIS/Include
@@ -34,11 +42,18 @@ EXPORTS='["_emu_boot","_emu_boot_cold","_emu_tick","_emu_poll","_emu_now","_emu_
 "_emu_register_file","_emu_load_zone","_emu_offset_at","_emu_set_systick","_emu_zone_from_pos",
 "_emu_flags","_emu_data_valid","_emu_had_pps","_emu_since_pps","_emu_satcount","_malloc","_free"]'
 
-echo "[1/2] compile main_wrap.c -> main_redir.o"
-emcc -c main_wrap.c -o main_redir.o "${INCS[@]}" "${DEFS[@]}" -O2 \
-  -Wno-implicit-function-declaration
+CFLAGS=("${INCS[@]}" "${DEFS[@]}" -O2 -Wno-implicit-function-declaration)
 
-echo "[2/2] link -> ../clock-fw.mjs"
+echo "[1/3] compile firmware + shim objects from source"
+emcc -c "$FW/Core/Src/astro.c"      -o astro.o      "${CFLAGS[@]}"
+emcc -c "$FW/Core/Src/zonedetect.c" -o zonedetect.o "${CFLAGS[@]}"
+emcc -c emu_data.c                  -o emu_data.o   "${CFLAGS[@]}"
+emcc -c hal_behav.c                 -o hal_behav.o  "${CFLAGS[@]}"
+
+echo "[2/3] compile main_wrap.c -> main_redir.o"
+emcc -c main_wrap.c -o main_redir.o "${CFLAGS[@]}"
+
+echo "[3/3] link -> ../clock-fw.mjs"
 emcc main_redir.o astro.o zonedetect.o stm32_shim.c emu_data.o hal_behav.o \
   "${INCS[@]}" "${DEFS[@]}" -O2 \
   --js-library stubs.js \

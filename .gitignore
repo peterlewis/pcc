@@ -38,3 +38,6 @@ web/emu/phase1/*.o
 web/emu/phase1/*.wasm
 web/emu/phase1/conform/*.snap
 web/emu/phase1/conform/conform_native
+
+# firmware WASM — compiled from source at build time (web/emu/phase1/build.sh)
+web/emu/clock-fw.mjs

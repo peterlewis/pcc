@@ -1,0 +1,4 @@
+[submodule "web/emu/firmware"]
+	path = web/emu/firmware
+	url = https://github.com/peterlewis/clock4.git
+	branch = rollup

@@ -6,10 +6,27 @@ import esbuild from 'esbuild';
 import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync, existsSync, statSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
 
 const web = dirname(fileURLToPath(import.meta.url));
 const docs = resolve(web, '..', 'docs');
 const kb = (s) => Math.round(s / 1024);
+
+// 0. Compile the firmware WASM (emu/clock-fw.mjs) FROM SOURCE with emscripten, so the shipped
+//    emulator can never drift from the clock4 firmware. CI installs emsdk + checks out the
+//    web/emu/firmware submodule; locally it uses your emcc + the submodule (or the dev worktree).
+//    The build is byte-deterministic (verified: identical output run-to-run).
+const fwOut = resolve(web, 'emu', 'clock-fw.mjs');
+const hasEmcc = (() => { try { execSync('emcc --version', { stdio: 'ignore' }); return true; } catch { return false; } })();
+if (hasEmcc) {
+  console.log('[fw] emcc → emu/clock-fw.mjs (compiling firmware from source)');
+  execSync('bash build.sh', { cwd: resolve(web, 'emu', 'phase1'), stdio: 'inherit' });
+} else if (existsSync(fwOut)) {
+  console.warn('[fw] emcc not found — using the existing emu/clock-fw.mjs (install emscripten to rebuild from source)');
+} else {
+  console.error('[fw] FATAL: no emcc and no prebuilt emu/clock-fw.mjs. Install emscripten and run: git submodule update --init web/emu/firmware');
+  process.exit(1);
+}
 
 // Dev builds carry `?v=N` cache-busters on the dynamic imports; strip the query so
 // esbuild resolves the real files.

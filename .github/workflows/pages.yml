@@ -25,16 +25,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: true   # fetch the real tzmap.bin (12 MB ZoneDetect map), not the LFS pointer
+          lfs: true              # fetch the real tzmap.bin (12 MB ZoneDetect map), not the LFS pointer
+          submodules: recursive  # web/emu/firmware = clock4 source, compiled to WASM at build time
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.2                    # matches the local toolchain the WASM was verified against
+          actions-cache-folder: emsdk-cache
       - name: Install build deps
         working-directory: web
         run: npm install --no-audit --no-fund
       - name: Build site
         working-directory: web
-        run: node build.mjs
+        run: node build.mjs   # compiles emu/clock-fw.mjs from the firmware submodule, then bundles
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
