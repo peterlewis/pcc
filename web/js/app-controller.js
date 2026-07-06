@@ -327,7 +327,7 @@ class Component extends DcLite {
     if (s.diag === 'vbat') return { m: 'vbat', ctx: { vbat: this.vbat || 4.032 } };
     if (s.diag === 'satview') return { m: 'satview', ctx: { gps: String(this.session ? this.session.S.fix.sats : '-') } };
     if (s.mode === 'text') return { m: 'text', ctx: { text: this.marqueeWindow() } };
-    if (s.mode === 'countdown') return { m: 'countdown', ctx: { countdownTo: s.countdownTo || Date.now() + 3600e3 } };
+    if (s.mode === 'countdown') return { m: 'countdown', ctx: { countdownTo: s.countdownTo || Date.now() + 7 * 864e5 } };
     // Astro date-row modes: date row = astro readout, time row = running clock (SATVIEW-style).
     if (s.astroFmt !== 'off') return { m: s.astroFmt, ctx: this.astroCtx() };
     if (s.timeRow === 'offset') return { m: 'offset', ctx: {} };
@@ -1839,8 +1839,10 @@ class Component extends DcLite {
       onSpdSlow: () => this.setState({ marqueeSpeed: 'slow' }), onSpdStd: () => this.setState({ marqueeSpeed: 'std' }), onSpdFast: () => this.setState({ marqueeSpeed: 'fast' }),
       marqueeNote: (st.text || '').length > 10 ? 'SCROLLING — ' + (st.text || '').length + ' CHARS' : 'AUTO WHEN >10 CHARS',
       onSetCd: () => { const v = this.els.cdInput && this.els.cdInput.value; const t = v ? new Date(v).getTime() : NaN; if (!isNaN(t)) this.set2({ countdownTo: t, mode: 'countdown', standby: false, diag: 'off' }); },
-      onCd10m: () => this.setCdTarget(Date.now() + 600e3),
-      onCd1h: () => this.setCdTarget(Date.now() + 3600e3),
+      // Countdown targets are events (New Year, a launch, a deadline) — long-term, not minutes away.
+      onCd1w: () => this.setCdTarget(Date.now() + 7 * 864e5),
+      onCd1mo: () => { const d = new Date(); d.setMonth(d.getMonth() + 1); this.setCdTarget(d.getTime()); },
+      onCd1y: () => { const d = new Date(); d.setFullYear(d.getFullYear() + 1); this.setCdTarget(d.getTime()); },
       onCdNye: () => { const y = new Date().getFullYear(); this.setCdTarget(new Date(y + 1, 0, 1, 0, 0, 0).getTime()); }, // local midnight, next Jan 1
       cdTargetLabel: st.countdownTo ? this.msToLocalInput(st.countdownTo).replace('T', ' ') : '— NOT SET',
       // MULTI-SELECT display modes — checkboxes = the firmware's modes_enabled[]. Toggling one
