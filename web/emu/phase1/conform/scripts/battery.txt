@@ -1,0 +1,145 @@
+# Canonical conformance battery (step 2). Drives both conform_native (clang) and
+# runner_wasm.mjs (emcc); traces must be byte-identical. NOTE: excludes the raw 'pps'
+# verb — the native twin faults on a NULL-base peripheral write in PPS()/loadNextTimestamp
+# that the WASM build tolerates as a benign low-linear-memory store (documented follow-up).
+bootcold 1783200000
+enable 0
+tick 300
+snap cold
+setpos 51.404 -2.323
+nmea $GNRMC,230353.00,A,5124.26246,N,00219.40006,W,0.004,,050726,,,A,V*0E
+nmea $GNGGA,230353.00,5124.26246,N,00219.40006,W,1,12,1.35,45.5,M,48.2,M,,*64
+tick 1000
+snap fix1
+tick 1000
+snap fix2
+tick 60000
+snap minrollover
+tick 3600000
+snap hourrollover
+enable 0
+b1
+tick 400
+snap mode_e0
+enable 1
+b1
+tick 400
+snap mode_e1
+enable 2
+b1
+tick 400
+snap mode_e2
+enable 3
+b1
+tick 400
+snap mode_e3
+enable 4
+b1
+tick 400
+snap mode_e4
+enable 5
+b1
+tick 400
+snap mode_e5
+enable 6
+b1
+tick 400
+snap mode_e6
+enable 7
+b1
+tick 400
+snap mode_e7
+enable 8
+b1
+tick 400
+snap mode_e8
+enable 9
+b1
+tick 400
+snap mode_e9
+enable 10
+b1
+tick 400
+snap mode_e10
+enable 11
+b1
+tick 400
+snap mode_e11
+enable 12
+b1
+tick 400
+snap mode_e12
+enable 13
+b1
+tick 400
+snap mode_e13
+enable 14
+b1
+tick 400
+snap mode_e14
+enable 15
+b1
+tick 400
+snap mode_e15
+enable 16
+b1
+tick 400
+snap mode_e16
+enable 17
+b1
+tick 400
+snap mode_e17
+enable 18
+b1
+tick 400
+snap mode_e18
+enable 19
+b1
+tick 400
+snap mode_e19
+enable 20
+b1
+tick 400
+snap mode_e20
+enable 21
+b1
+tick 400
+snap mode_e21
+enable 22
+b1
+tick 400
+snap mode_e22
+enable 23
+b1
+tick 400
+snap mode_e23
+enable 24
+b1
+tick 400
+snap mode_e24
+enable 25
+b1
+tick 400
+snap mode_e25
+enable 26
+b1
+tick 400
+snap mode_e26
+b1
+tick 300
+snap ring1
+b1
+tick 300
+snap ring2
+b1
+tick 300
+snap ring3
+b1
+tick 300
+snap ring4
+b1
+tick 300
+snap ring5
+b1
+tick 300
+snap ring6

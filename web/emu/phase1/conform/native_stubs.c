@@ -1,0 +1,60 @@
+/* Native mirror of stubs.js: the same HAL/FATFS/firmware symbols the WASM build resolves to
+ * JS no-ops. Weak, so any real definition compiled into the twin overrides the stub. Untyped
+ * (K&R) params + int return: these are never inspected — callers ignore the result, exactly as
+ * the JS no-ops do. Keeps the native twin's stubbed surface identical to the WASM one. */
+
+__attribute__((weak)) int CDC_Copy_Transmit(){ return 0; }
+__attribute__((weak)) int doDateUpdate(){ return 0; }
+__attribute__((weak)) int f_close(){ return 0; }
+__attribute__((weak)) int f_lseek(){ return 0; }
+__attribute__((weak)) int f_open(){ return 0; }
+__attribute__((weak)) int f_read(){ return 0; }
+__attribute__((weak)) int f_stat(){ return 0; }
+__attribute__((weak)) int FATFS_remount(){ return 0; }
+__attribute__((weak)) int firmwareCheckOnEject(){ return 0; }
+__attribute__((weak)) int HAL_ADC_ConfigChannel(){ return 0; }
+__attribute__((weak)) int HAL_ADC_Init(){ return 0; }
+__attribute__((weak)) int HAL_ADC_PollForConversion(){ return 0; }
+__attribute__((weak)) int HAL_ADC_Start(){ return 0; }
+__attribute__((weak)) int HAL_ADCEx_Calibration_Start(){ return 0; }
+__attribute__((weak)) int HAL_ADCEx_MultiModeConfigChannel(){ return 0; }
+__attribute__((weak)) int HAL_CRC_Init(){ return 0; }
+__attribute__((weak)) int HAL_DAC_ConfigChannel(){ return 0; }
+__attribute__((weak)) int HAL_DAC_Init(){ return 0; }
+__attribute__((weak)) int HAL_DAC_SetValue(){ return 0; }
+__attribute__((weak)) int HAL_DAC_Start_DMA(){ return 0; }
+__attribute__((weak)) int HAL_DMA_Abort(){ return 0; }
+__attribute__((weak)) int HAL_DMA_Start(){ return 0; }
+__attribute__((weak)) int HAL_GPIO_Init(){ return 0; }
+__attribute__((weak)) int HAL_GPIO_WritePin(){ return 0; }
+__attribute__((weak)) int HAL_Init(){ return 0; }
+__attribute__((weak)) int HAL_NVIC_EnableIRQ(){ return 0; }
+__attribute__((weak)) int HAL_NVIC_SetPriority(){ return 0; }
+__attribute__((weak)) int HAL_PWR_EnableBkUpAccess(){ return 0; }
+__attribute__((weak)) int HAL_PWREx_ControlVoltageScaling(){ return 0; }
+__attribute__((weak)) int HAL_QSPI_Init(){ return 0; }
+__attribute__((weak)) int HAL_RCC_ClockConfig(){ return 0; }
+__attribute__((weak)) int HAL_RCC_OscConfig(){ return 0; }
+__attribute__((weak)) int HAL_RCCEx_EnableMSIPLLMode(){ return 0; }
+__attribute__((weak)) int HAL_RCCEx_PeriphCLKConfig(){ return 0; }
+__attribute__((weak)) int HAL_RTC_GetDate(){ return 0; }
+__attribute__((weak)) int HAL_RTC_GetTime(){ return 0; }
+__attribute__((weak)) int HAL_RTC_Init(){ return 0; }
+__attribute__((weak)) int HAL_TIM_Base_Init(){ return 0; }
+__attribute__((weak)) int HAL_TIM_Base_Start(){ return 0; }
+__attribute__((weak)) int HAL_TIM_ConfigClockSource(){ return 0; }
+__attribute__((weak)) int HAL_TIM_MspPostInit(){ return 0; }
+__attribute__((weak)) int HAL_TIM_OC_ConfigChannel(){ return 0; }
+__attribute__((weak)) int HAL_TIM_OC_Init(){ return 0; }
+__attribute__((weak)) int HAL_TIM_PWM_ConfigChannel(){ return 0; }
+__attribute__((weak)) int HAL_TIM_PWM_Init(){ return 0; }
+__attribute__((weak)) int HAL_TIM_PWM_Start(){ return 0; }
+__attribute__((weak)) int HAL_TIMEx_MasterConfigSynchronization(){ return 0; }
+__attribute__((weak)) int HAL_UART_AbortTransmit(){ return 0; }
+__attribute__((weak)) int HAL_UART_Init(){ return 0; }
+__attribute__((weak)) int HAL_UART_Receive_DMA(){ return 0; }
+__attribute__((weak)) int HAL_UART_Transmit(){ return 0; }
+__attribute__((weak)) int HAL_UART_Transmit_DMA(){ return 0; }
+__attribute__((weak)) int MX_FATFS_Init(){ return 0; }
+__attribute__((weak)) int MX_USB_DEVICE_Init(){ return 0; }
+__attribute__((weak)) int MX_USB_Stop(){ return 0; }
