@@ -211,6 +211,9 @@ export function createClockFaceSVG(container, opts = {}) {
     crispGroup = el('g', { class: 'cf-crisp' });
     svg.appendChild(glowGroup);
     svg.appendChild(crispGroup);
+    // In the hardware-calibration overlay, fade the lit digits back to 50% so the furniture
+    // handles and mm grid read clearly against them (build() re-runs on toggle, so no reset needed).
+    if (state.hwCalibrate) { glowGroup.style.opacity = '0.5'; crispGroup.style.opacity = '0.5'; }
 
     for (const row of layout.rows) {
       const rowCells = [];
@@ -237,30 +240,30 @@ export function createClockFaceSVG(container, opts = {}) {
   function buildHardware() {
     const g = el('g', { class: 'cf-hw' });
     const uw = 0.014;   // viewBox stroke width (~0.5 mm)
+    // Bauhaus / Jony-Ive furniture: flat, matte, monochrome. Pure geometric circles, a single hairline
+    // outline, no bevels, gloss or catch-lights — the parts read as precise dark forms, not shiny props.
+    const HW_MATTE = '#17191d';   // screw / sensor body — a flat step above the near-black board
+    const HW_CAP   = '#202329';   // button cap — a hair lighter so it reads as pressable
+    const HW_LINE  = '#2b2f38';   // single hairline outline (matches the clock bezel)
+    const HW_EYE   = '#0b0c0f';   // recessed sensor aperture (darker than the board)
     const screw = (x, y, r) => {
-      // Torx (hexalobular) head: metal disc + a 6-lobe star socket.
-      g.appendChild(el('circle', { cx: x, cy: y, r, fill: '#2a2e35', stroke: '#575d69', 'stroke-width': uw }));
-      g.appendChild(el('circle', { cx: x - r * 0.26, cy: y - r * 0.26, r: r * 0.62, fill: 'rgba(255,255,255,.045)' }));   // bevel sheen
-      const ro = r * 0.52, ri = r * 0.30, pts = [];
-      for (let i = 0; i < 12; i++) { const rad = i % 2 ? ri : ro, a = Math.PI / 6 * i; pts.push((x + rad * Math.cos(a)).toFixed(4) + ',' + (y + rad * Math.sin(a)).toFixed(4)); }
-      g.appendChild(el('polygon', { points: pts.join(' '), fill: '#0e1014' }));
+      g.appendChild(el('circle', { cx: x, cy: y, r, fill: HW_MATTE, stroke: HW_LINE, 'stroke-width': uw }));
+      g.appendChild(el('circle', { cx: x, cy: y, r: r * 0.5, fill: 'none', stroke: HW_LINE, 'stroke-width': uw * 0.85 }));  // one concentric fastener ring
     };
     const sensor = (x, y, r) => {
-      g.appendChild(el('circle', { cx: x, cy: y, r: r + uw, fill: '#1b1d21', stroke: '#3a3e47', 'stroke-width': uw }));   // black holder
-      g.appendChild(el('circle', { cx: x, cy: y, r: r * 0.66, fill: '#2b2f36' }));                                        // domed lens
-      g.appendChild(el('circle', { cx: x - r * 0.22, cy: y - r * 0.22, r: r * 0.16, fill: 'rgba(255,255,255,.14)' }));    // catch-light
+      g.appendChild(el('circle', { cx: x, cy: y, r, fill: HW_MATTE, stroke: HW_LINE, 'stroke-width': uw }));   // flat holder
+      g.appendChild(el('circle', { cx: x, cy: y, r: r * 0.42, fill: HW_EYE }));                                 // flat aperture — no lens dome
     };
     const button = (x, y, r, idx) => {
-      const ring = el('circle', { cx: x, cy: y, r: r * 1.18, fill: '#141519', stroke: '#3c414b', 'stroke-width': uw });  // recessed housing
-      const cap = el('circle', { cx: x, cy: y, r, fill: '#3b404a', stroke: '#585e6a', 'stroke-width': uw });               // raised tactile cap
-      const hi = el('circle', { cx: x, cy: y - r * 0.24, r: r * 0.58, fill: 'rgba(255,255,255,.11)' });                    // domed catch-light
-      g.appendChild(ring); g.appendChild(cap); g.appendChild(hi);
+      const ring = el('circle', { cx: x, cy: y, r: r * 1.15, fill: 'none', stroke: HW_LINE, 'stroke-width': uw });  // recess outline
+      const cap = el('circle', { cx: x, cy: y, r, fill: HW_CAP, stroke: HW_LINE, 'stroke-width': uw });              // flat tactile cap
+      g.appendChild(ring); g.appendChild(cap);
       if (state.onButton) {
         const hit = el('circle', { cx: x, cy: y, r: r * 1.5, fill: 'transparent' });   // generous tap target
         hit.style.cursor = 'pointer';
         hit.addEventListener('click', (e) => { e.stopPropagation(); state.onButton(idx); });
-        hit.addEventListener('pointerdown', () => cap.setAttribute('fill', '#4a505c'));
-        const up = () => cap.setAttribute('fill', '#3b404a');
+        hit.addEventListener('pointerdown', () => cap.setAttribute('fill', HW_MATTE));   // subtle matte press (darken, no gloss)
+        const up = () => cap.setAttribute('fill', HW_CAP);
         hit.addEventListener('pointerup', up); hit.addEventListener('pointerleave', up);
         g.appendChild(hit);
       }
@@ -273,7 +276,7 @@ export function createClockFaceSVG(container, opts = {}) {
     for (const it of items) {
       if (it.row !== rowType) continue;
       const x = HW_VBX(it.x), y = cy(it.y);
-      if (it.kind === 'screw') screw(x, y, HW_SCREW_R);
+      if (it.kind === 'screw') screw(x, y, HW_VBR(it.r || 2.5));   // r in mm (radius); 2.5 = 5 mm heads
       else if (it.kind === 'sensor') sensor(x, y, HW_VBR(it.r || 2.5));
       else if (it.kind === 'button') button(x, y, HW_VBR(it.r || 2.7), it.id);
       if (state.hwCalibrate) addHandle(g, x, y, it, rowTop);

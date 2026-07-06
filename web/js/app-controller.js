@@ -78,7 +78,7 @@ class Component extends DcLite {
       hdrBar: localStorage.getItem('pccweb.hdrbar') === '1',
     });
     this.reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=102'), import('./sim.js?v=91'), import('./charts.js?v=91'), import('./realdev.js?v=91'), import('./emu-driver.js?v=13')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=104'), import('./sim.js?v=91'), import('./charts.js?v=91'), import('./realdev.js?v=91'), import('./emu-driver.js?v=13')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -186,14 +186,19 @@ class Component extends DcLite {
         holder.style.cssText = 'position:absolute;inset:0';
         el.parentElement.appendChild(holder);
         const faceOpts = Object.assign({}, faceDefs[name], { tokens: this.faceTokens() });
-        // The big boards carry the real furniture: switch-cover buttons, edge screws, light sensor.
-        // (The tiny header clock stays clean.) The two buttons cycle the enabled display modes.
-        if (name === 'dispDate' || name === 'dispTime' || name === 'entryDate' || name === 'entryTime') {
+        // Every board carries the real furniture — switch-cover buttons, edge screws, light sensor —
+        // identically in ALL views (open display, folded entry, AND the menu-bar miniature), so the
+        // clock always reads as the same physical object. Interaction (button taps, calibration drag)
+        // is wired only on the full-size boards; the tiny header clock shows the furniture but is inert.
+        if (name === 'dispDate' || name === 'dispTime' || name === 'entryDate' || name === 'entryTime' ||
+            name === 'hdrDate' || name === 'hdrTime') {
           faceOpts.hardware = true;
-          faceOpts.onButton = (btn) => this.onFaceButton(btn);
           faceOpts.hwSpec = this.hwConfig;
-          faceOpts.hwCalibrate = !!this.state.hwCalibrate;
-          faceOpts.onHwMove = (id, mm) => this.onHwMove(id, mm);
+          if (name !== 'hdrDate' && name !== 'hdrTime') {
+            faceOpts.onButton = (btn) => this.onFaceButton(btn);
+            faceOpts.hwCalibrate = !!this.state.hwCalibrate;
+            faceOpts.onHwMove = (id, mm) => this.onHwMove(id, mm);
+          }
         }
         f = this.CFSVG.createClockFaceSVG(holder, faceOpts);
       } else {
@@ -925,7 +930,7 @@ class Component extends DcLite {
       L.style.width = (24 * k) + 'px';
       L.style.height = (12 * k) + 'px';
       L.style.borderRadius = (6 * k) + 'px';
-      const pd = Math.max(3, 3.2 * k);
+      const pd = 3.2 * k;   // pins scale with the bar (no px floor) — a min clamp made them chunky when small
       // dispLink has a 1px border; its abs-positioned pins anchor to the CONTENT box
       // (inside that border), which shoves the pair 1px off the seam — the left dot ends
       // up closer to the hinge than the right. Subtract the border so the two dots sit
@@ -955,7 +960,7 @@ class Component extends DcLite {
       const L = E.hdrLink;
       L.style.left = (Wk - 12 * k) + 'px'; L.style.top = '0px';
       L.style.width = (24 * k) + 'px'; L.style.height = (12 * k) + 'px'; L.style.borderRadius = (6 * k) + 'px';
-      const pd = Math.max(2, 3.2 * k), bw = 1;
+      const pd = 3.2 * k, bw = 1;   // pins scale with the bar (no px floor) — matches the display face
       const pinEl = (el, cx) => { if (!el) return; el.style.left = (cx - bw - pd / 2) + 'px'; el.style.top = (6 * k - bw - pd / 2) + 'px'; el.style.width = pd + 'px'; el.style.height = pd + 'px'; };
       pinEl(E.hdrPinA, 6 * k); pinEl(E.hdrPinB, 18 * k);
     }
@@ -1496,27 +1501,28 @@ class Component extends DcLite {
 
   // ---- hardware calibration: drag the on-screen buttons/screws/sensor, read the mm back --------
   defaultHwConfig() {
-    // GOSPEL positions — dialled in by hand against the corrected board geometry. Right-side furniture
-    // (buttons / brightness sensor / body screws) at x=265; hinge mounting bolts at x=9 beneath the
-    // pins, with d-hng-0 at x=19. Do not "tidy" these numbers — they are measured, not derived.
+    // GOSPEL positions — 100% measured by hand against the corrected board geometry. Right-side
+    // furniture (buttons / brightness sensor / body screws) at x=267; hinge mounting bolts at x=8,
+    // all three on their own board's row. Radii are in MILLIMETRES (r = radius): screws/sensor r=2,
+    // buttons r=1.5. Do not "tidy" these numbers — they are measured, not derived.
     return [
-      { id: 'd-btn-1', row: 'date', kind: 'button', x: 265, y: 0.4, r: 1.5 },
-      { id: 'd-btn-2', row: 'date', kind: 'button', x: 265, y: 0.6, r: 1.5 },
-      { id: 'd-scr-1', row: 'date', kind: 'screw', x: 265, y: 0.189 },
-      { id: 'd-scr-2', row: 'date', kind: 'screw', x: 265, y: 0.812 },
-      { id: 'd-hng-0', row: 'date', kind: 'screw', x: 19, y: 0.812 },
-      { id: 'd-hng-1', row: 'date', kind: 'screw', x: 9, y: 0.174 },
-      { id: 'd-hng-2', row: 'date', kind: 'screw', x: 9, y: 0.5 },
-      { id: 't-sensor', row: 'time', kind: 'sensor', x: 265, y: 0.5, r: 2 },
-      { id: 't-scr-1', row: 'time', kind: 'screw', x: 265, y: 0.189 },
-      { id: 't-scr-2', row: 'time', kind: 'screw', x: 265, y: 0.812 },
-      { id: 't-hng-0', row: 'date', kind: 'screw', x: 9, y: 0.812 },
-      { id: 't-hng-1', row: 'time', kind: 'screw', x: 9, y: 0.5 },
-      { id: 't-hng-2', row: 'time', kind: 'screw', x: 9, y: 0.826 },
+      { id: 'd-btn-1', row: 'date', kind: 'button', x: 267, y: 0.375, r: 1.5 },
+      { id: 'd-btn-2', row: 'date', kind: 'button', x: 267, y: 0.625, r: 1.5 },
+      { id: 'd-scr-1', row: 'date', kind: 'screw', x: 267, y: 0.16, r: 2 },
+      { id: 'd-scr-2', row: 'date', kind: 'screw', x: 267, y: 0.84, r: 2 },
+      { id: 'd-hng-0', row: 'date', kind: 'screw', x: 8, y: 0.84, r: 2 },
+      { id: 'd-hng-1', row: 'date', kind: 'screw', x: 8, y: 0.16, r: 2 },
+      { id: 'd-hng-2', row: 'date', kind: 'screw', x: 8, y: 0.5, r: 2 },
+      { id: 't-sensor', row: 'time', kind: 'sensor', x: 267, y: 0.5, r: 2 },
+      { id: 't-scr-1', row: 'time', kind: 'screw', x: 267, y: 0.16, r: 2 },
+      { id: 't-scr-2', row: 'time', kind: 'screw', x: 267, y: 0.84, r: 2 },
+      { id: 't-hng-1', row: 'time', kind: 'screw', x: 8, y: 0.5, r: 2 },
+      { id: 't-hng-0', row: 'time', kind: 'screw', x: 8, y: 0.84, r: 2 },
+      { id: 't-hng-2', row: 'time', kind: 'screw', x: 8, y: 0.16, r: 2 },
     ];
   }
   loadHwConfig() {
-    const VER = 2;   // bump whenever the GOSPEL defaults change → a pre-gospel saved config re-adopts them ONCE
+    const VER = 5;   // bump whenever the GOSPEL defaults change → a pre-gospel saved config re-adopts them ONCE
     let saved = null;
     try { const s = localStorage.getItem('pccweb.hwConfig'); const p = s && JSON.parse(s); if (Array.isArray(p) && p.length) saved = p; } catch (e) {}
     let ver = 0; try { ver = +(localStorage.getItem('pccweb.hwConfigVer') || 0); } catch (e) {}
@@ -1532,7 +1538,7 @@ class Component extends DcLite {
     for (const d of this.defaultHwConfig()) if (!have.has(d.id)) saved.push(d);
     return saved;
   }
-  HW_FACES = ['dispDate', 'dispTime', 'entryDate', 'entryTime'];
+  HW_FACES = ['dispDate', 'dispTime', 'entryDate', 'entryTime', 'hdrDate', 'hdrTime'];
   applyHwToFaces() { for (const k of this.HW_FACES) { const f = this.faces[k]; if (f && f.setHwSpec) f.setHwSpec(this.hwConfig); } }
   onHwMove(id, mm) {
     const it = this.hwConfig.find((f) => f.id === id); if (!it) return;
