@@ -191,7 +191,7 @@ void emu_force_holdover(unsigned secs){
   rtc_last_calibration = (uint32_t)currentTime - secs;
   had_pps = 1;
   setPrecision();
-  if (holdover_fade) computeHoldoverFade();   /* refresh digit_bright[] at the forced age */
+  if (significance_fade) computeHoldoverFade();   /* refresh digit_bright[] at the forced age */
 }
 /* Two-axis holdover: age the PPS and the RTC calibration INDEPENDENTLY. The precision ladder is
  * asymmetric — P3/P2 gate on last_pps_time, but P1 gates on rtc_last_calibration — so this is
@@ -201,7 +201,7 @@ void emu_force_holdover2(unsigned pps_secs, unsigned cal_secs){
   rtc_last_calibration = (uint32_t)currentTime - cal_secs;
   had_pps = 1;
   setPrecision();
-  if (holdover_fade) computeHoldoverFade();   /* refresh digit_bright[] at the forced age */
+  if (significance_fade) computeHoldoverFade();   /* refresh digit_bright[] at the forced age */
 }
 /* Active colon animation + the civil/alt references. LST/SOLAR install colonModeAlt so the alt
  * timebases read as "not civil time" at a glance (an intentional honesty feature). */

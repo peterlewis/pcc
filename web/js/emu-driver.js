@@ -69,7 +69,7 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
 
   let state = { lat, lon, configText: config, signal: true, vbus: true, adc: 2600, geo: 'default',
     tol: { t1: 1000, t10: 10000, t100: 100000 },   // precision-ladder thresholds (s since PPS)
-    holdoverFade: false, fadeAge: 0,   // holdover_fade demo: enabled? + swept holdover age (s) under time-lapse
+    holdoverFade: false, fadeAge: 0,   // significance_fade demo: enabled? + swept holdover age (s) under time-lapse
     utc: false, tzZone: 'UTC', tzSec: 0, tzAge: 0,   // timezone: local (browser IANA) unless forced UTC
     locZone: null,   // zone resolved from a manually-observed position (ZoneDetect); overrides browser zone
     live: false };   // LIVE = fed by a real device's NMEA (not the virtual GPS)
@@ -204,7 +204,7 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     // Holdover-fade per-digit intensity 0..1 for the three sub-second digits [ds, cs, ms] + the
     // decimal point. 1 = fully significant/lit; <1 = fading as it loses significance in holdover.
     // The real display fades by PWM dwell (invisible to a latched-segment read), so read it explicitly.
-    // Only meaningful when holdover_fade is enabled; otherwise the digits are simply full (the dash
+    // Only meaningful when significance_fade is enabled; otherwise the digits are simply full (the dash
     // ladder still blanks them, but that's carried by the segment bytes, not this intensity).
     const smallFade = state.holdoverFade ? [E.digitFade(0) / 255, E.digitFade(1) / 255, E.digitFade(2) / 255] : [1, 1, 1];
     const dpFade = state.holdoverFade ? E.digitFade(3) / 255 : 1;
@@ -298,9 +298,9 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     precision() {
       const hadPps = !!E.hadPps();
       const since = hadPps ? (E.sincePps() >>> 0) : null;
-      // holdover_fade on: significance is CONTINUOUS — each sub-second digit fades once the live 3σ
+      // significance_fade on: significance is CONTINUOUS — each sub-second digit fades once the live 3σ
       // time-interval-error bound U(τ) grows past its place value. Read the SAME quantity the digits
-      // fade by (U + which digits remain lit), not the dash-tolerance ladder that holdover_fade
+      // fade by (U + which digits remain lit), not the dash-tolerance ladder that significance_fade
       // overrides — so this panel can never contradict the face (e.g. "P0 · whole seconds" while a
       // decisecond is still lit). least-significant lit digit → the level; U(τ) → the ± uncertainty.
       if (state.holdoverFade && hadPps) {
@@ -332,14 +332,14 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
       E.configLine('Tolerance_time_100ms = ' + state.tol.t100);
     },
     timelapseOn() { return state.tol.t1 < 100; },
-    // --- SIGNIFICANCE FADE (holdover_fade): the firmware computes a live time-interval-error bound
+    // --- SIGNIFICANCE FADE (significance_fade): the firmware computes a live time-interval-error bound
     // from the disciplining residual + temperature model, and fades each sub-second digit out as it
     // stops being significant — a continuous replacement for the fixed dash ladder. Enabling it here
     // flips the real firmware key; the age-sweep above then makes it watchable. ---
     setHoldoverFade(on) {
       state.holdoverFade = !!on;
       state.fadeAge = 0;
-      E.configLine('holdover_fade = ' + (on ? 'on' : 'off'));
+      E.configLine('significance_fade = ' + (on ? 'on' : 'off'));
     },
     holdoverFadeOn() { return state.holdoverFade; },
     // --- config: twiddle / export / import (all via the real firmware parser) ---

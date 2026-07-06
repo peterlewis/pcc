@@ -78,7 +78,7 @@ class Component extends DcLite {
       hdrBar: localStorage.getItem('pccweb.hdrbar') === '1',
     });
     this.reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=105'), import('./sim.js?v=92'), import('./charts.js?v=91'), import('./realdev.js?v=92'), import('./emu-driver.js?v=21')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=105'), import('./sim.js?v=92'), import('./charts.js?v=91'), import('./realdev.js?v=92'), import('./emu-driver.js?v=22')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -147,7 +147,9 @@ class Component extends DcLite {
     }
   }
 
-  get SECTIONS() { return ['connect', 'devmodes', 'devbright', 'devconfig', 'devadvanced', 'devupdates', 'display', 'satellites', 'signal', 'position', 'timing', 'globe', 'map', 'weather', 'monitor', 'export', 'datalink']; }
+  // 'weather' retired from the routable sections while the feature is rebuilt (COMING SOON pill on
+  // the FACE-room accessory keeps the promise visible); a stale saved section falls back to display.
+  get SECTIONS() { return ['connect', 'devmodes', 'devbright', 'devconfig', 'devadvanced', 'devupdates', 'display', 'satellites', 'signal', 'position', 'timing', 'globe', 'map', 'monitor', 'export', 'datalink']; }
 
   // ---------- refs ----------
   ref(name) {
@@ -427,7 +429,7 @@ class Component extends DcLite {
     const hold = !p.hadPps ? 'NO FIX' : (p.since <= 0 ? 'PPS fresh' : 'holdover ' + p.since + ' s');
     // Meter: how far significance has decayed. On the dash ladder that's holdover age vs the 100 ms
     // threshold; with the significance-fade on it's driven by which digits remain (the ladder age is
-    // meaningless once holdover_fade overrides it), so map the fade level straight to the meter.
+    // meaningless once significance_fade overrides it), so map the fade level straight to the meter.
     const pct = p.fade ? ({ P3: 8, P2: 38, P1: 68, P0: 100 }[p.level] ?? 100)
       : (!p.hadPps ? 100 : Math.min(100, Math.round(100 * p.since / p.t100)));
     const cn = this.emu.colonName();
@@ -1405,7 +1407,7 @@ class Component extends DcLite {
     const host = this.els.datalink;   // populated once the section's sc-if renders the mount div
     if (!host) { setTimeout(() => this.mountDatalink(), 60); return; }
     this._dlMounted = true;
-    import('./datalink/datalink-ui.js?v=3').then((m) => m.mountDatalink(host));
+    import('./datalink/datalink-ui.js?v=4').then((m) => m.mountDatalink(host));
   }
   // The redesign collapses the ten sections into four rooms; each room routes to one or more
   // existing sections, surfaced as a sub-tab bar. Content is unchanged — this is IA only.
@@ -1751,6 +1753,7 @@ class Component extends DcLite {
     out.drawerXform = st.drawerOpen ? 'translateY(0)' : 'translateY(calc(100% + 2px))';
     out.drawerBtnStyle = 'display:flex;align-items:center;gap:8px;padding:0 15px;background:' + (st.drawerOpen ? 'var(--strip)' : 'transparent') + ';border:0;border-left:1px solid var(--line);cursor:pointer;font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:' + (st.drawerOpen ? 'var(--txt)' : 'var(--txt3)');
     // Sections keep driving their content (sec_X) and act as sub-tabs (go_X + a segmented style).
+    out.sec_weather = false;   // retired section (COMING SOON); keep the binding defined so its sc-if stays hidden
     for (const sec of this.SECTIONS) {
       const on = st.section === sec;
       out['go_' + sec] = () => this.go(sec);
@@ -1938,7 +1941,7 @@ class Component extends DcLite {
         (this.appMode() !== 'simulation' ? 'not-allowed;opacity:.38' : 'pointer'),
       onGpsSignal: () => { if (this.appMode() !== 'simulation' || !this.emu) return; this.emu.setSignal(!this.emu.state().signal); },
       onTimelapse: () => { if (this.appMode() !== 'simulation' || !this.emu) return; this.emu.setTimelapse(!(this.emu.timelapseOn && this.emu.timelapseOn())); },
-      // SIGNIFICANCE FADE toggle — flips the firmware's holdover_fade so sub-second digits fade out
+      // SIGNIFICANCE FADE toggle — flips the firmware's significance_fade so sub-second digits fade out
       // (continuous TIE-driven) instead of dashing (the fixed tolerance ladder). Sim-only, like the rest.
       onHoldoverFade: () => { if (this.appMode() !== 'simulation' || !this.emu) return; this.emu.setHoldoverFade(!(this.emu.holdoverFadeOn && this.emu.holdoverFadeOn())); },
       // DRILL disclosure — folds the sim-only demo toggles away so the honest readout leads.

@@ -733,27 +733,11 @@
                 <button onClick="{{accTogWx}}" class="pcc-acc-sum" style="width:100%;display:flex;align-items:center;gap:10px;height:44px;padding:0 var(--pad-panel-x);background:transparent;border:0;cursor:pointer;text-align:left">
                   <span class="pcc-acc-chev" style="color:var(--txt3);font-size:10px;width:9px;flex:none">{{accChevWx}}</span>
                   <span class="pcc-acc-title" style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">WEATHER</span>
+                  <span style="font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.16em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:3px;padding:3px 5px;line-height:1">COMING SOON</span>
                   <span style="flex:1"></span>
-                  <span style="font-family:var(--mono);font-size:var(--fs-micro);letter-spacing:var(--ls-micro);color:var(--txt3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:56%">{{accStatWx}}</span>
                 </button>
-                <div class="pcc-acc-body" data-open="{{accOpenWx}}" style="padding:2px var(--pad-panel-x) var(--pad-panel-x);display:flex;flex-direction:column;gap:10px">
-                  <sc-if value="{{wxOnline}}" hint-placeholder-val="{{true}}">
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 18px">
-                      <div style="display:flex;justify-content:space-between;gap:10px"><span style="font-size:12px;color:var(--txt2)">Temp</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{wTemp}}</span></div>
-                      <div style="display:flex;justify-content:space-between;gap:10px"><span style="font-size:12px;color:var(--txt2)">Humidity</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{wRh}}</span></div>
-                      <div style="display:flex;justify-content:space-between;gap:10px"><span style="font-size:12px;color:var(--txt2)">Sky</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{wCode}}</span></div>
-                      <div style="display:flex;justify-content:space-between;gap:10px"><span style="font-size:12px;color:var(--txt2)">Wind</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{wWind}}</span></div>
-                    </div>
-                    <div style="font-family:var(--mono);font-size:9px;letter-spacing:.05em;color:var(--txt3)">AT {{wPos}} · UPDATED {{wAsOf}}</div>
-                  </sc-if>
-                  <sc-if value="{{wxOffline}}" hint-placeholder-val="{{false}}">
-                    <div style="display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--none)"><span style="width:8px;height:8px;flex:none;background:var(--none)"></span>WEATHER UNAVAILABLE</div>
-                  </sc-if>
-                  <div style="display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);padding-top:10px;margin-top:auto">
-                    <button onClick="{{onWxPush}}" style="font-family:var(--sans);font-size:12px;padding:5px 14px;background:transparent;border:1px solid var(--led);color:var(--txt);cursor:pointer" style-hover="background:var(--led-fill)">PUSH TO DATE ROW</button>
-                    <span style="flex:1"></span>
-                    <button onClick="{{onWxRetry}}" style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;padding:5px 11px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">REFRESH</button>
-                  </div>
+                <div class="pcc-acc-body" data-open="{{accOpenWx}}" style="padding:2px var(--pad-panel-x) var(--pad-panel-x)">
+                  <div style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt3);line-height:var(--lh-body)">Weather at the fix — pushed to the date row — is being rebuilt and will return in a later release.</div>
                 </div>
               </section>
             </div>
@@ -1386,6 +1370,6 @@
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=173"></script>
+<script type="module" src="js/app-controller.js?v=174"></script>
 </body>
 </html>
