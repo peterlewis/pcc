@@ -21,7 +21,8 @@ export function mountDatalink(root) {
   root.__dlMounted = true;
 
   const state = {
-    sendTime: true, is24h: false, dateFormat: "%_m-%d-%y", zoneName: "",
+    // ISO-leaning defaults: 24-hour clock, y.m.d date — the watch may be American, we are not.
+    sendTime: true, is24h: true, dateFormat: "%y.%m.%d", zoneName: "",
     sendAlarm: false, alarmHour: 7, alarmMin: 0, alarmMsg: "wake up", alarmAudible: true,
     hourlyChime: false, buttonBeep: false, syncLength: 300,
   };
