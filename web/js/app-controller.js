@@ -301,8 +301,13 @@ class Component extends DcLite {
     const win = this.marqueeWindow();
     this.allFaces((f) => f.setModeCtx({ text: win }));
     // Emu-driven faces render from the firmware, not setModeCtx — so re-write the firmware's text
-    // buffer each tick to scroll the window on the emulator (and, when connected, the real clock).
+    // buffer each tick to scroll the window on the emulator.
     if (this.emu && this.emu.configLine) this.emu.configLine('text = ' + win);
+    // Scroll the PHYSICAL clock too. The Mk IV firmware shows text statically (no built-in scroll),
+    // so we drive the scroll app-side by pushing each window straight over serial. Sent unlogged
+    // (raw realdev.send, not devSend) — it's a high-frequency stream and would flood the monitor.
+    const S = this.session && this.session.S;
+    if (S && S.real && this.realdev) this.realdev.send('text = ' + win);
   }
   // Absolute ms → the "YYYY-MM-DDTHH:mm" local wall-clock string a datetime-local input wants
   // (and reads back the same way). One place so the input, the TARGET label and onSetCd agree.
