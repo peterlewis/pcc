@@ -46,8 +46,25 @@ EXPORTS='["_emu_boot","_emu_boot_cold","_emu_tick","_emu_poll","_emu_now","_emu_
 
 CFLAGS=("${INCS[@]}" "${DEFS[@]}" -O2 -Wno-implicit-function-declaration)
 
+# The sidereal alt_* staging has no header to __has_include on; probe the firmware source so a
+# lean branch (no LST/solar) still builds — main_wrap.c compiles out alt_update()/MODE_LST then.
+if ! grep -q "alt_update" "$FW/Core/Src/main.c"; then
+  CFLAGS+=(-DEMU_HAS_ALT=0)
+fi
+# Deferred config cleanup (delayedPostConfigCleanup) arrived with the hardening branch; older/leaner
+# branches run postConfigCleanup straight from the ISR and have no flag to acknowledge.
+if grep -q "delayedPostConfigCleanup" "$FW/Core/Src/main.c"; then
+  CFLAGS+=(-DEMU_HAS_DELAYED_CLEANUP=1)
+fi
+
 echo "[1/3] compile firmware + shim objects from source"
-emcc -c "$FW/Core/Src/astro.c"      -o astro.o      "${CFLAGS[@]}"
+# astro.c only exists on the astro-pack/rollup branches; building against a leaner branch
+# (e.g. the tempcomp PR branch) just skips it — main.c there makes no astro calls.
+ASTRO_O=""
+if [ -f "$FW/Core/Src/astro.c" ]; then
+  emcc -c "$FW/Core/Src/astro.c"    -o astro.o      "${CFLAGS[@]}"
+  ASTRO_O=astro.o
+fi
 emcc -c "$FW/Core/Src/zonedetect.c" -o zonedetect.o "${CFLAGS[@]}"
 emcc -c emu_data.c                  -o emu_data.o   "${CFLAGS[@]}"
 emcc -c hal_behav.c                 -o hal_behav.o  "${CFLAGS[@]}"
@@ -56,7 +73,7 @@ echo "[2/3] compile main_wrap.c -> main_redir.o"
 emcc -c main_wrap.c -o main_redir.o "${CFLAGS[@]}"
 
 echo "[3/3] link -> ../clock-fw.mjs"
-emcc main_redir.o astro.o zonedetect.o stm32_shim.c emu_data.o hal_behav.o \
+emcc main_redir.o $ASTRO_O zonedetect.o stm32_shim.c emu_data.o hal_behav.o \
   "${INCS[@]}" "${DEFS[@]}" -O2 \
   --js-library stubs.js \
   -sERROR_ON_UNDEFINED_SYMBOLS=0 \

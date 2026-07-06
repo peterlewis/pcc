@@ -7,7 +7,18 @@
 #include "qspi_drv.h"
 #include "zonedetect.h"
 #include "chainloader.h"
-#include "astro.h"
+/* Feature guards: the emulator also builds against LEANER clock4 branches (e.g. the tempcomp PR
+ * branch) for conformance testing. astro is detected by its header; the sidereal alt_* staging has
+ * no header of its own, so build.sh probes the firmware source and defines EMU_HAS_ALT. */
+#if __has_include("astro.h")
+#  include "astro.h"
+#  define EMU_HAS_ASTRO 1
+#else
+#  define EMU_HAS_ASTRO 0
+#endif
+#ifndef EMU_HAS_ALT
+#  define EMU_HAS_ALT 1
+#endif
 #include "shim_redirect.h"
 
 #ifdef EMU_NATIVE64
@@ -90,9 +101,13 @@ void emu_tick(void){
 /* main-loop housekeeping the emulator needs each frame. Mirrors the firmware while(1): the astro
  * date-row modes recompute their payload via astro_update(); the alt time-row staging is always. */
 void emu_poll(void){
+#if EMU_HAS_ASTRO
   if (displayMode==MODE_SUN || displayMode==MODE_SUN_AZEL || displayMode==MODE_MOON
       || displayMode==MODE_GRID || displayMode==MODE_LATLON) astro_update();
+#endif
+#if EMU_HAS_ALT
   alt_update();
+#endif
   monitor_vbus();          /* process any VBUS (fold/power) connect/disconnect this pass */
 }
 
@@ -102,8 +117,13 @@ void emu_button2(void){ button2pressed(); }   /* nextMode back */
 void emu_enable_mode(int m){ if (m>=0 && m<NUM_DISPLAY_MODES) config.modes_enabled[m] = 1; }
 void emu_set_pos(float lat, float lon){ latitude = lat; longitude = lon; }
 int  emu_mode(void){ return displayMode; }
+#if EMU_HAS_ALT
 int  emu_MODE_LST(void){ return MODE_LST; }
 int  emu_MODE_SOLAR(void){ return MODE_SOLAR; }
+#else
+int  emu_MODE_LST(void){ return -1; }     /* lean branch: sidereal modes absent */
+int  emu_MODE_SOLAR(void){ return -1; }
+#endif
 
 /* --- brightness inject: firmware reads ADC1 (phototransistor); make it settable --- */
 static uint32_t emu_adc = 2048;
@@ -195,17 +215,29 @@ int emu_colon_step(void){
   if ((uint32_t)currentTime & 1) s += 100;     /* odd second = 2nd half of the 2 s window */
   return s % 200;
 }
+#if EMU_HAS_ALT
 int emu_colon_civil(void){ return colonModeCivil; }
 int emu_colon_alt(void){ return colonModeAlt; }
+#else
+int emu_colon_civil(void){ return colonMode; }   /* lean branch: one colon mode, no alt staging */
+int emu_colon_alt(void){ return colonMode; }
+#endif
 /* Named mode ids — reference these instead of magic numbers that rot if the enum reorders. */
 int emu_MODE_UNIX(void){ return MODE_UNIX; }
 int emu_MODE_ISO_ORDINAL(void){ return MODE_ISO_ORDINAL; }
 int emu_MODE_ISO_WEEK(void){ return MODE_ISO_WEEK; }
 int emu_MODE_WEEKDAY(void){ return MODE_WEEKDAY; }
+#if EMU_HAS_ASTRO
 int emu_MODE_MOON(void){ return MODE_MOON; }
 int emu_MODE_GRID(void){ return MODE_GRID; }
 int emu_MODE_LATLON(void){ return MODE_LATLON; }
 int emu_MODE_SUN(void){ return MODE_SUN; }
+#else
+int emu_MODE_MOON(void){ return -1; }     /* lean branch: astro pack absent */
+int emu_MODE_GRID(void){ return -1; }
+int emu_MODE_LATLON(void){ return -1; }
+int emu_MODE_SUN(void){ return -1; }
+#endif
 int emu_MODE_JULIAN_DATE(void){ return MODE_JULIAN_DATE; }
 int emu_MODE_MODIFIED_JD(void){ return MODE_MODIFIED_JD; }
 
@@ -353,7 +385,9 @@ void emu_config_line(const char* line){
   for (const char* p = line; *p; p++) rxConfigString(*p);
   rxConfigString('\n');            /* terminate the line -> parseConfigString + defer cleanup */
   postConfigCleanup();             /* thread-context: nextMode/sendDate/colon/tolerances */
-  delayedPostConfigCleanup = 0;
+#if EMU_HAS_DELAYED_CLEANUP
+  delayedPostConfigCleanup = 0;    /* hardened branches defer cleanup out of the ISR; ack it */
+#endif
 }
 
 /* --- TIMEZONE shim. The real device populates rules[] two ways: loadRules() reading the DST
