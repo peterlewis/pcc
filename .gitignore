@@ -27,3 +27,15 @@ clock4*/
 design_handoff_precision_clock_companion/
 Emulator design files/
 *.zip
+
+# design-return / reference bundle, kept local (like design_handoff_precision_clock_companion/)
+design_handoff_pcc_return/
+
+# emulator: commit the C/JS source, the runtime clock-fw.* + tzrules.bin, and the conformance suite —
+# but NOT the compiler build artifacts, the experiment/debug wasm, or the 12 MB ZoneDetect map
+# (large binary; lazy-loaded with a graceful fallback — decide on LFS vs commit separately)
+web/emu/phase1/*.o
+web/emu/phase1/*.wasm
+web/emu/phase1/conform/*.snap
+web/emu/phase1/conform/conform_native
+web/emu/tzmap.bin
