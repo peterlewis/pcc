@@ -164,7 +164,7 @@ void emu_boot_cold(unsigned int t){
   tc_cfg_hse[0]=tc_cfg_hse[1]=tc_cfg_hse[2]=NAN; tc_cfg_lse[0]=tc_cfg_lse[1]=tc_cfg_lse[2]=NAN;
   tc_hse_tmin=tc_hse_tmax=tc_lse_tmin=tc_lse_tmax=0;
   tc_hse_resid=tc_lse_resid=0; tc_n_hse=tc_n_lse=0;
-  tc_seed=0; tc_seed_lo=tc_seed_hi=0; tc_learn=tc_apply=tc_rtc=0; tc_disp_state='-';
+  tc_seed=0; tc_seed_pending=0; tc_seed_lo=tc_seed_hi=0; tc_learn=tc_apply=tc_rtc=0; tc_disp_state='-';
   for (int i=0;i<40;i++){ tc_bins[i].hse_sum=tc_bins[i].lse_sum=0; tc_bins[i].hse_n=tc_bins[i].lse_n=0; }
   setNextTimestamp(currentTime);
   SetPPS( &PPS );          /* PPS_Init's job: COUNT_NORMAL setPrecision never installs one */
