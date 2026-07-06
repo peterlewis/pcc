@@ -78,7 +78,7 @@ class Component extends DcLite {
       hdrBar: localStorage.getItem('pccweb.hdrbar') === '1',
     });
     this.reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=104'), import('./sim.js?v=91'), import('./charts.js?v=91'), import('./realdev.js?v=91'), import('./emu-driver.js?v=13')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=104'), import('./sim.js?v=91'), import('./charts.js?v=91'), import('./realdev.js?v=91'), import('./emu-driver.js?v=14')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -406,8 +406,10 @@ class Component extends DcLite {
   precUi() {
     const off = { level: '—', style: '', unc: '—', digits: '—', hold: '—', pct: 0, colon: '', gps: 'GPS SIGNAL: ON', tl: 'HOLDOVER TIME-LAPSE: OFF' };
     // Standby has no GPS discipline — say so plainly instead of showing a precision ladder that
-    // isn't backed by any fix. (Connected real-precision panel is a later step.)
-    if (this.appMode() !== 'simulation') {
+    // isn't backed by any fix. CONNECTED and SIMULATION both drive the firmware (real NMEA / virtual
+    // GPS) so both fall through to the live precision ladder below — a connected clock shows its REAL
+    // holdover precision, not this placeholder.
+    if (this.appMode() === 'standby') {
       return { ...off, level: 'P0', style: 'display:inline-flex;align-items:center;justify-content:center;min-width:46px;height:36px;font-family:var(--mono);font-size:15px;font-weight:700;color:var(--txt3);border:1.5px solid var(--line2);border-radius:7px',
         unc: 'no fix', digits: 'whole seconds', hold: 'SYSTEM TIME', colon: 'no PPS — start a simulation or connect a clock' };
     }
@@ -468,11 +470,42 @@ class Component extends DcLite {
     if (on) {
       if (this.emu && this.emu.reboot) this.emu.reboot();                 // fresh cold-boot reveal
       if (this.session && !this.session.S.connected) { this.session.connect(); this.session.log && this.session.log('tx', 'SIMULATION START'); }
+      // Ask the browser for a location ONLY here — when the user opts into a simulation. Standby
+      // never prompts; a real clock brings its own GPS fix. Skip if already located (device/manual).
+      if (this.emu && this.emu.state && this.emu.state().geo === 'default') this.geolocate(true);
     } else {
       if (this.session && this.session.S.connected && !this.session.S.real) { this.session.disconnect(); this.session.log && this.session.log('tx', 'SIMULATION STOP'); }
       this.setState({ scenario: 'locked' });
     }
     this.syncFaces();
+  }
+
+  // --- Observer location cascade: DEFAULT (Greenwich) → BROWSER (on simulation start) → the
+  // connected clock's own GPS fix. One setter keeps the emulator state, the panel inputs and the
+  // observer tag in agreement, so the shown lat/lon always reflects the best-known source. ------
+  applyEmuLoc(la, lo, src) {
+    if (!this.emu || !isFinite(la) || !isFinite(lo)) return Promise.resolve(null);
+    const z = this.emu.setLocation(la, lo, src);   // manual → a promise resolving to the zone
+    this.syncEmuLocInputs();
+    this.setState({});                             // refresh the observer tag + precision panel now
+    return Promise.resolve(z);
+  }
+  // Ask the browser for the location. Fires only on a user action or when a simulation starts —
+  // never automatically at boot. Silent on refusal (flags DEFAULT · LOCATION DENIED honestly).
+  geolocate(auto) {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (p) => this.applyEmuLoc(p.coords.latitude, p.coords.longitude, 'device'),
+      () => { if (this.emu && this.emu.denyGeo) { this.emu.denyGeo(); this.setState({}); } },
+      { timeout: 8000, maximumAge: auto ? 600000 : 60000 });
+  }
+  // Mirror the emulator's current lat/lon into the panel inputs unless the user is editing them —
+  // so the displayed numbers follow the cascade (default/browser/actual) live.
+  syncEmuLocInputs() {
+    const s = this.emu && this.emu.state && this.emu.state(); if (!s) return;
+    const put = (el, v) => { if (el && document.activeElement !== el && el.value !== v) el.value = v; };
+    put(this.els.emuLat, s.lat.toFixed(4));
+    put(this.els.emuLon, s.lon.toFixed(4));
   }
 
   driveEmu() {
@@ -501,6 +534,7 @@ class Component extends DcLite {
         this._fedNmea = new WeakSet();
         for (const it of log) if (it && typeof it === 'object') this._fedNmea.add(it);   // skip the backlog; feed from now on
         this._lastPpsSec = null;
+        this._emuFixLat = null; this._emuFixLon = null;   // re-adopt the clock's own fix as the observer
       }
       for (let i = 0; i < log.length; i++) {
         const it = log[i];
@@ -517,6 +551,16 @@ class Component extends DcLite {
         if (m) ppsSec = m[1];
         else if (/PMTXTS/.test(it.text)) { m = it.text.match(/PMTXTS,\d+,(\d+)/); if (m) ppsSec = String(+m[1] % 60).padStart(2, '0'); }
         if (ppsSec !== null && ppsSec !== this._lastPpsSec) { this._lastPpsSec = ppsSec; this.emu.pulsePps(); }
+      }
+      // The observer follows the clock: mirror its own GPS fix into the emulator location so the
+      // panel + astronomy use the ACTUAL position, not the browser/default. Only on a real move.
+      const S = this.session.S;
+      if (S.fix && S.fix.valid && isFinite(S.fix.lat) && isFinite(S.fix.lon) &&
+          this.emu.state().geo !== 'manual' &&   // a deliberate manual pin still wins
+          (this._emuFixLat == null || Math.abs(S.fix.lat - this._emuFixLat) > 1e-4 || Math.abs(S.fix.lon - this._emuFixLon) > 1e-4)) {
+        this._emuFixLat = S.fix.lat; this._emuFixLon = S.fix.lon;
+        this.emu.setLocation(S.fix.lat, S.fix.lon, 'device');
+        this.syncEmuLocInputs();
       }
     } else if (this._emuLive) {                 // leaving CONNECTED for SIMULATION: back to the virtual GPS
       this.emu.setLive(false); this._emuLive = false;
@@ -1638,8 +1682,8 @@ class Component extends DcLite {
       hdrPopOn: !!st.hdrPop,
       hdrStatusHint: 'Connection status & controls',
       hdrStatusBg: (S && S.connected) ? '' : 'background:var(--beta-fill)',
-      onHdrConnect: () => { this.setState({ hdrPop: false }); if (S && S.connected) this.goRoom('device'); else this.connectRealDevice(); },
-      hdrConnectLabel: (S && S.connected) ? 'DEVICE ROOM →' : 'CONNECT MK IV',
+      onHdrConnect: () => { this.setState({ hdrPop: false }); if (S && S.real) this.goRoom('device'); else this.connectRealDevice(); },
+      hdrConnectLabel: (S && S.real) ? 'DEVICE ROOM →' : 'CONNECT MK IV',
       portLabel: this.portName(S),
       fixTypeLabel: S ? (S.fix.type === 3 ? '3D' : S.fix.type >= 1 ? '2D' : 'NONE') : '—',
       satsLabel: S ? (S.fix.sats + '/' + S.sats.filter((x) => x.visible).length) : '—',
@@ -1826,34 +1870,31 @@ class Component extends DcLite {
       emuLonVal: this.emu ? this.emu.state().lon.toFixed(4) : '-0.0015',
       emuObserverTag: this.emuObserverTag(),
       emuTzTag: this.emuTzTag(),
-      onGeolocate: () => {
-        if (typeof navigator === 'undefined' || !navigator.geolocation) return;
-        navigator.geolocation.getCurrentPosition((p) => {
-          if (this.emu) this.emu.setLocation(p.coords.latitude, p.coords.longitude, 'device');
-          if (this.els.emuLat) this.els.emuLat.value = p.coords.latitude.toFixed(4);
-          if (this.els.emuLon) this.els.emuLon.value = p.coords.longitude.toFixed(4);
-        }, () => {}, { timeout: 8000, maximumAge: 60000 });
-      },
+      onGeolocate: () => this.geolocate(false),
       onSetLoc: () => {
         const la = parseFloat(this.els.emuLat && this.els.emuLat.value);
         const lo = parseFloat(this.els.emuLon && this.els.emuLon.value);
-        if (this.emu && isFinite(la) && isFinite(lo)) {
-          // Resolve the observed location's zone (ZoneDetect) then, if a real clock is attached,
-          // mirror that zone to it so device and emulator agree — otherwise the device keeps the
-          // browser zone while the emulator shows the observed one.
-          Promise.resolve(this.emu.setLocation(la, lo, 'manual')).then((zone) => {
-            const S = this.session && this.session.S;
-            if (zone && S && S.real && this.realdev) this.devSend('zone_override = ' + zone);
-          });
-        }
+        // Resolve the observed location's zone (ZoneDetect) then, if a real clock is attached,
+        // mirror that zone to it so device and emulator agree — otherwise the device keeps the
+        // browser zone while the emulator shows the observed one.
+        this.applyEmuLoc(la, lo, 'manual').then((zone) => {
+          const S = this.session && this.session.S;
+          if (zone && S && S.real && this.realdev) this.devSend('zone_override = ' + zone);
+        });
       },
       // Honest-digits precision panel (recomputed each render; onTick re-renders at 1 Hz).
       ...(() => { const u = this.precUi(); return {
         precLevel: u.level, precLevelStyle: u.style, precUnc: u.unc, precDigits: u.digits,
         precHold: u.hold, precMeterPct: u.pct + '%', precColon: u.colon, gpsSignalLabel: u.gps, timelapseLabel: u.tl,
       }; })(),
-      onGpsSignal: () => { if (this.emu) this.emu.setSignal(!this.emu.state().signal); },
-      onTimelapse: () => { if (this.emu) this.emu.setTimelapse(!(this.emu.timelapseOn && this.emu.timelapseOn())); },
+      // The GPS-drop / time-lapse toggles are a SIMULATION-ONLY drill — you can't fake a real
+      // receiver's signal, and standby is plain host time. Enable them only in simulation; grey
+      // them out (not-allowed cursor + faded) everywhere else so they never read as clickable.
+      simDemoDisabled: this.appMode() !== 'simulation',
+      simDemoBtnStyle: 'font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--txt);background:var(--well);border:1px solid var(--line2);border-radius:var(--r-1);padding:6px 12px;cursor:' +
+        (this.appMode() !== 'simulation' ? 'not-allowed;opacity:.38' : 'pointer'),
+      onGpsSignal: () => { if (this.appMode() !== 'simulation' || !this.emu) return; this.emu.setSignal(!this.emu.state().signal); },
+      onTimelapse: () => { if (this.appMode() !== 'simulation' || !this.emu) return; this.emu.setTimelapse(!(this.emu.timelapseOn && this.emu.timelapseOn())); },
       // DRILL disclosure — folds the sim-only demo toggles away so the honest readout leads.
       onDrillTog: () => this.setState({ drillOpen: !this.state.drillOpen }),
       drillOpenStr: st.drillOpen ? 'true' : 'false', drillChev: st.drillOpen ? '▾' : '▸',

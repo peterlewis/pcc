@@ -602,8 +602,8 @@
                 </div>
                 <div class="pcc-acc-body" data-open="{{drillOpenStr}}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
                   <span style="font-family:var(--mono);font-size:var(--fs-micro);font-weight:700;letter-spacing:.14em;color:var(--beta)">SIMULATION ONLY</span>
-                  <button onClick="{{onGpsSignal}}" style="font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--txt);background:var(--well);border:1px solid var(--line2);border-radius:var(--r-1);padding:6px 12px;cursor:pointer">{{gpsSignalLabel}}</button>
-                  <button onClick="{{onTimelapse}}" style="font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--txt);background:var(--well);border:1px solid var(--line2);border-radius:var(--r-1);padding:6px 12px;cursor:pointer">{{timelapseLabel}}</button>
+                  <button onClick="{{onGpsSignal}}" disabled="{{simDemoDisabled}}" style="{{simDemoBtnStyle}}">{{gpsSignalLabel}}</button>
+                  <button onClick="{{onTimelapse}}" disabled="{{simDemoDisabled}}" style="{{simDemoBtnStyle}}">{{timelapseLabel}}</button>
                 </div>
               </div>
             </section>
@@ -1373,6 +1373,6 @@
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=156"></script>
+<script type="module" src="js/app-controller.js?v=158"></script>
 </body>
 </html>

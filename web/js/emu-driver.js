@@ -184,12 +184,10 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     return Promise.resolve(null);
   }
 
-  // Ask the browser for the real location on first use; fall back silently to the default.
-  if (typeof navigator !== 'undefined' && navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      (p) => setLoc(p.coords.latitude, p.coords.longitude, 'device'),
-      () => { state.geo = 'denied'; }, { timeout: 8000, maximumAge: 600000 });
-  }
+  // NOTE: the browser is NOT asked for a location at boot. Standby keeps the DEFAULT observer
+  // (Greenwich); the app requests geolocation only when a SIMULATION is started, and a connected
+  // clock overrides it with its own GPS fix. See app-controller: geolocate() / driveEmu (connected).
+  function denyGeo() { if (state.geo === 'default') state.geo = 'denied'; }
 
   // Decode the firmware's latched segment buffers into a device frame for the faces.
   function frame() {
@@ -239,6 +237,7 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     button2() { E.button2(); drain(); },
     setBrightness(v01) { state.adc = Math.max(0, Math.min(4095, Math.round(v01*4095))); E.setAdc(state.adc); },
     setLocation(la, lo, src = 'manual') { return setLoc(la, lo, src); },   // returns a promise → resolved zone (manual)
+    denyGeo,   // browser refused / failed geolocation → keep DEFAULT but flag it honestly
     // real sats currently reported (with az/el/cn0) — for the app to plot the true constellation
     sats() { return gps ? gps.shownSats : []; },
     satsLoaded() { return tracker.loaded; },
