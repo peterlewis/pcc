@@ -6,6 +6,7 @@
 :root, :root[data-theme="dark"] {
   --inset:#040506; --bg:#08090b; --panel:#0e0f13; --strip:#121419; --well:#07080a;
   --line:#1c1f26; --line2:#2b2f38;
+  --clock-bezel:#2b2f38; /* LED-panel edge — dark in BOTH themes (physical object), never the light --line2 */
   --txt:#c9cdd5; --txt2:#7f8590; --txt3:#767c86;
   --led:#ff3b2e; --led-dim:#5a1c16; --led-glow:rgba(255,59,46,.55); --led-fill:rgba(255,59,46,.09);
   --lock:#36c98b; --acq:#f5b53d; --none:#ff6a3d;
@@ -17,7 +18,7 @@
 }
 :root[data-theme="light"] {
   --bg:#e0dfdb; --panel:#f2f1ed; --strip:#e7e5e0; --inset:#0b0c0e; --well:#fbfaf7;
-  --line:#d1cfc8; --line2:#b2b0a8;
+  --line:#d1cfc8; --line2:#b2b0a8; --clock-bezel:#23262d;
   --txt:#16181d; --txt2:#575b63; --txt3:#8b8e94;
   --led:#a81a10; --led-dim:#d8b9b5; --led-glow:rgba(168,26,16,.3); --led-fill:rgba(168,26,16,.07);
   --lock:#0f8f5c; --acq:#a86f10; --none:#c23a2b;
@@ -42,7 +43,13 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance:none; width:9px; 
 input[type="range"]:disabled::-webkit-slider-thumb { background:var(--txt3); box-shadow:none; }
 input[type="datetime-local"]::-webkit-calendar-picker-indicator { filter:invert(.6); }
 @keyframes pcc-caret { 0%,100% { opacity:1; } 50% { opacity:0; } }
-@keyframes pcc-in { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:none; } }
+@keyframes pcc-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+@keyframes pcc-disclose { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+/* Accessory tier (Move 5): folded panels hide their body; open bodies fade + 4px rise. */
+.pcc-acc-body[data-open="false"] { display:none !important; }
+.pcc-acc-body[data-open="true"] { animation: pcc-disclose var(--t-disclose) var(--ease-ui) both; }
+.pcc-acc-sum:hover .pcc-acc-title { color:var(--txt); }
+.pcc-acc-sum:hover .pcc-acc-chev { color:var(--txt2); }
 
 /* ---- responsive safety net ---------------------------------------------------------------
    Rooms declare a min-width for their instrument layouts; below it that forced width caused
@@ -54,4 +61,38 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator { filter:invert(
 }
 @media (max-width: 720px) {
   [data-screen-label] { padding: 10px !important; }
+}
+
+/* ---- phone layout -------------------------------------------------------------------------
+   The 186px side nav eats half a phone. Turn it into a fixed bottom tab bar (icons stacked over
+   short labels), give the content the full width, let the dense header wrap, and pad the bottom
+   so the bar never covers content. */
+@media (max-width: 640px) {
+  nav[data-screen-label="Nav rail"] {
+    position: fixed !important; left: 0; right: 0; bottom: 0; top: auto;
+    width: auto !important; height: 56px; flex-direction: row !important;
+    border-right: 0 !important; border-top: 1px solid var(--line);
+    background: var(--panel); z-index: 150; overflow: visible;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  nav[data-screen-label="Nav rail"] > div { display: none !important; } /* ROOMS label · spacer · footer */
+  nav[data-screen-label="Nav rail"] > button {
+    flex: 1 1 0 !important; flex-direction: column !important; gap: 4px !important;
+    justify-content: center !important; align-items: center !important;
+    padding: 7px 2px !important; font-size: 8.5px !important; letter-spacing: .1em !important;
+  }
+  nav[data-screen-label="Nav rail"] > button > span { display: none !important; }   /* left edge bar + right dot */
+  nav[data-screen-label="Nav rail"] > button > svg { width: 17px; height: 17px; }
+
+  main { padding-bottom: 64px !important; }
+
+  /* header: wrap instead of clipping. The dense readout columns are gone (H2 folded them into
+     the status popover), so the status pill + its popover stay reachable on a phone; only drop
+     the theme switch (least-used on mobile) to save a row. */
+  header { height: auto !important; min-height: 52px; flex-wrap: wrap !important; }
+  header > div[style*="border-left"]:last-of-type { display: none !important; }
+
+  /* stack every inline 2-column grid the room layouts build with flex/grid */
+  .pcc-cards { grid-template-columns: 1fr !important; }
+  [data-screen-label] { min-width: 0 !important; }
 }

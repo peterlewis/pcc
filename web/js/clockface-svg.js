@@ -26,6 +26,54 @@ const GLOW_R = 0.04;
 // follows alpha, not colour — made every off-segment cast a full red halo: the "unlit digits
 // glow too strong" bug.)
 const DIM_ALPHA = 0.5;
+
+// ---- physical board furniture (buttons / edge screws / light sensor) --------------------------
+// The digit cells put physical x=18 mm at viewBox 0, and 34.2 mm = 1 viewBox unit, so any feature
+// from precision-clock.scad maps straight in. Features live in the letterbox gaps the board panel
+// already leaves either side of the digits — no board resize. y is a fraction of the 34.56 mm pane.
+const HW_VBX = (mm) => (mm - 18) / 34.2;      // board-frame mm → viewBox x
+const HW_VBR = (mm) => mm / 34.2;             // mm radius → viewBox
+const HW_SCREW_R = HW_VBR(3.0);               // 6 mm across — Torx heads, one size everywhere
+// SYMMETRIC board: each half draws a 12 mm nubbin + 240 mm of digits (x 18→258) + 12 mm nubbin,
+// i.e. x=6→270 (264 mm). Digits are already centred (30…246 = 24 mm from each board edge), so both
+// end nubbins are a clean 12 mm — no "extra bit". The two 12 mm inner nubbins meet at the centre as a
+// 24 mm strip that the 24 mm hinge link-plate covers exactly, so the seam still reads tight (no gap).
+const HW_BOARD_L = HW_VBX(6), HW_BOARD_R = HW_VBX(270);
+const HW_BOARD_ASPECT = 264 / 34.56;          // = M.W / M.H of the rendered 264 mm board (no letterbox)
+// Data-driven furniture — a flat, editable list (x in board mm, y as 0..1 of the 34.56 mm pane).
+// The calibration overlay drags these and reports mm back so the positions can be dialled in.
+const DEFAULT_HW = [
+  { id: 'd-btn-1', row: 'date', kind: 'button', x: 268, y: 0.4, r: 1.5 },
+  { id: 'd-btn-2', row: 'date', kind: 'button', x: 268, y: 0.6, r: 1.5 },
+  { id: 'd-scr-1', row: 'date', kind: 'screw', x: 268, y: 0.189 },
+  { id: 'd-scr-2', row: 'date', kind: 'screw', x: 268, y: 0.812 },
+  { id: 'd-hng-0', row: 'date', kind: 'screw', x: 8, y: 0.812 },  // hinge mounting bolts (beneath the pins)
+  { id: 'd-hng-1', row: 'date', kind: 'screw', x: 8, y: 0.174 },
+  { id: 'd-hng-2', row: 'date', kind: 'screw', x: 8, y: 0.5 },
+  { id: 't-sensor', row: 'time', kind: 'sensor', x: 268, y: 0.5, r: 2 },
+  { id: 't-scr-1', row: 'time', kind: 'screw', x: 268, y: 0.189 },
+  { id: 't-scr-2', row: 'time', kind: 'screw', x: 268, y: 0.812 },
+  { id: 't-hng-0', row: 'date', kind: 'screw', x: 9, y: 0.812 },
+  { id: 't-hng-1', row: 'time', kind: 'screw', x: 9, y: 0.5 },
+  { id: 't-hng-2', row: 'time', kind: 'screw', x: 9, y: 0.826 },
+];
+const HW_SPEC = {
+  // DATE board: 2 tactile buttons in the switch cover + edge screws (outer); + the hinge-end pins
+  // (x=12) which, after the date half's 180° flip, land at the seam / centre of the display.
+  date: {
+    coverX: HW_VBX(262), screwX: HW_VBX(265.365), hingeX: HW_VBX(12),
+    buttons: [{ y: 0.34 }, { y: 0.66 }],
+    coverScrews: [{ y: 0.11 }, { y: 0.89 }],
+    hingeScrews: [{ y: 0.174 }, { y: 0.500 }],
+  },
+  // TIME board: the VTT9812FH phototransistor (light sensor, dead-centre) + edge + hinge screws
+  time: {
+    sensorX: HW_VBX(265.365), screwX: HW_VBX(265.365), hingeX: HW_VBX(12),
+    sensor: { y: 0.500, r: 2.5 },
+    coverScrews: [{ y: 0.189 }, { y: 0.812 }],
+    hingeScrews: [{ y: 0.500 }, { y: 0.826 }],
+  },
+};
 // Lit-only glow layer. The bloom is a GPU-composited CSS drop-shadow on the GLOW group (whose
 // polys are shown only where a segment is lit), NOT an feGaussianBlur (which re-rasterises
 // every frame and tanks paint) and NOT on the crisp layer (which would halo off-segments too).
@@ -49,7 +97,13 @@ export function createClockFaceSVG(container, opts = {}) {
     inverted: !!opts.inverted,
     utc: !!opts.utc,
     deviceFrame: null,
+    hardware: !!opts.hardware,   // render the physical board furniture (buttons / screws / light sensor)
+    onButton: opts.onButton || null,
+    hwSpec: opts.hwSpec || null,        // flat list [{id,row,kind,x(mm),y(0..1 of pane),r?}] — data-driven
+    hwCalibrate: !!opts.hwCalibrate,    // calibration overlay: mm grid + draggable handles + readout
+    onHwMove: opts.onHwMove || null,    // (id, {x_mm, y_frac}) as a feature is dragged
   };
+  let vbParams = null;   // last viewBox {x,y,w,h} — for pointer→mm mapping while calibrating
   let layout = buildLayout(state.rows);
   let colonTbl = buildColonTables(state.colonMode);
   let tokens = resolveTokens(opts.tokens);
@@ -114,7 +168,17 @@ export function createClockFaceSVG(container, opts = {}) {
     container.innerHTML = '';
     cellEls = [];
 
-    const vbX = -PAD, vbY = -PAD, vbW = layout.W + 2 * PAD, vbH = layout.H + 2 * PAD;
+    let vbX = -PAD, vbW = layout.W + 2 * PAD, vbY = -PAD, vbH = layout.H + 2 * PAD;
+    // Hardware faces render the symmetric board (x 6..270 = 12mm nubbin + digits + 12mm nubbin) at
+    // exactly the half-div aspect, so the SVG fills the div with no letterbox and the digits stay where
+    // they physically sit — the furniture lands in the 12mm end nubbins, single width, no doubling.
+    if (state.hardware) {
+      vbX = HW_BOARD_L; vbW = HW_BOARD_R - HW_BOARD_L;
+      vbH = vbW / HW_BOARD_ASPECT;
+      const rowMidY = (layout.rows[0] ? layout.rows[0].top : 0) + GEO.cellH / 2;
+      vbY = rowMidY - vbH / 2;
+    }
+    vbParams = { x: vbX, y: vbY, w: vbW, h: vbH };
     svg = el('svg', {
       viewBox: `${vbX} ${vbY} ${vbW} ${vbH}`,
       preserveAspectRatio: 'xMidYMid meet',
@@ -160,12 +224,110 @@ export function createClockFaceSVG(container, opts = {}) {
       cellEls.push(rowCells);
     }
 
+    if (state.hardware) buildHardware();
+
     container.appendChild(svg);
     // refs are wired; caller renders next.
     refs.bg = bg;
   }
 
   const refs = { bg: null };
+
+  // Physical board furniture, drawn into the letterbox gaps (no glow — it isn't an LED).
+  function buildHardware() {
+    const g = el('g', { class: 'cf-hw' });
+    const uw = 0.014;   // viewBox stroke width (~0.5 mm)
+    const screw = (x, y, r) => {
+      // Torx (hexalobular) head: metal disc + a 6-lobe star socket.
+      g.appendChild(el('circle', { cx: x, cy: y, r, fill: '#2a2e35', stroke: '#575d69', 'stroke-width': uw }));
+      g.appendChild(el('circle', { cx: x - r * 0.26, cy: y - r * 0.26, r: r * 0.62, fill: 'rgba(255,255,255,.045)' }));   // bevel sheen
+      const ro = r * 0.52, ri = r * 0.30, pts = [];
+      for (let i = 0; i < 12; i++) { const rad = i % 2 ? ri : ro, a = Math.PI / 6 * i; pts.push((x + rad * Math.cos(a)).toFixed(4) + ',' + (y + rad * Math.sin(a)).toFixed(4)); }
+      g.appendChild(el('polygon', { points: pts.join(' '), fill: '#0e1014' }));
+    };
+    const sensor = (x, y, r) => {
+      g.appendChild(el('circle', { cx: x, cy: y, r: r + uw, fill: '#1b1d21', stroke: '#3a3e47', 'stroke-width': uw }));   // black holder
+      g.appendChild(el('circle', { cx: x, cy: y, r: r * 0.66, fill: '#2b2f36' }));                                        // domed lens
+      g.appendChild(el('circle', { cx: x - r * 0.22, cy: y - r * 0.22, r: r * 0.16, fill: 'rgba(255,255,255,.14)' }));    // catch-light
+    };
+    const button = (x, y, r, idx) => {
+      const ring = el('circle', { cx: x, cy: y, r: r * 1.18, fill: '#141519', stroke: '#3c414b', 'stroke-width': uw });  // recessed housing
+      const cap = el('circle', { cx: x, cy: y, r, fill: '#3b404a', stroke: '#585e6a', 'stroke-width': uw });               // raised tactile cap
+      const hi = el('circle', { cx: x, cy: y - r * 0.24, r: r * 0.58, fill: 'rgba(255,255,255,.11)' });                    // domed catch-light
+      g.appendChild(ring); g.appendChild(cap); g.appendChild(hi);
+      if (state.onButton) {
+        const hit = el('circle', { cx: x, cy: y, r: r * 1.5, fill: 'transparent' });   // generous tap target
+        hit.style.cursor = 'pointer';
+        hit.addEventListener('click', (e) => { e.stopPropagation(); state.onButton(idx); });
+        hit.addEventListener('pointerdown', () => cap.setAttribute('fill', '#4a505c'));
+        const up = () => cap.setAttribute('fill', '#3b404a');
+        hit.addEventListener('pointerup', up); hit.addEventListener('pointerleave', up);
+        g.appendChild(hit);
+      }
+    };
+    const rowType = layout.rows[0] && layout.rows[0].type;
+    const rowTop = layout.rows[0] ? layout.rows[0].top : 0;
+    const cy = (frac) => rowTop + frac * GEO.cellH;
+    if (state.hwCalibrate) drawCalibGrid(g, uw, rowTop);
+    const items = (state.hwSpec && state.hwSpec.length) ? state.hwSpec : DEFAULT_HW;
+    for (const it of items) {
+      if (it.row !== rowType) continue;
+      const x = HW_VBX(it.x), y = cy(it.y);
+      if (it.kind === 'screw') screw(x, y, HW_SCREW_R);
+      else if (it.kind === 'sensor') sensor(x, y, HW_VBR(it.r || 2.5));
+      else if (it.kind === 'button') button(x, y, HW_VBR(it.r || 2.7), it.id);
+      if (state.hwCalibrate) addHandle(g, x, y, it, rowTop);
+    }
+    svg.appendChild(g);
+  }
+
+  // pointer → board coords (mm x, 0..1 pane-frac y), undoing the date board's 180° container flip.
+  function pointerToBoard(clientX, clientY, rowTop) {
+    const rect = svg.getBoundingClientRect();
+    let fx = (clientX - rect.left) / rect.width, fy = (clientY - rect.top) / rect.height;
+    if (state.inverted) { fx = 1 - fx; fy = 1 - fy; }
+    const vx = vbParams.x + fx * vbParams.w, vy = vbParams.y + fy * vbParams.h;
+    return { x: Math.round((vx * 34.2 + 18) * 10) / 10, y: Math.round(((vy - rowTop) / GEO.cellH) * 1000) / 1000, vx, vy };
+  }
+  // Calibration mm grid: faint lines every 6 mm, board edges + hinge + digit-cell markers.
+  function drawCalibGrid(g, uw, rowTop) {
+    const gc = 'var(--beta,#f5b53d)';
+    // Faint, uniform measurement grid (6 mm ticks) — no digit-cell 'centre line' emphasis. The
+    // reference lines that matter are the per-component separators drawn in addHandle(), so the
+    // furniture aligns to the actual parts (and the hinge), not to cell centres.
+    for (let mm = 6; mm <= 271; mm += 6) {
+      const x = HW_VBX(mm);
+      g.appendChild(el('line', { x1: x, y1: rowTop - 0.02, x2: x, y2: rowTop + GEO.cellH + 0.02, stroke: gc, 'stroke-width': uw * 0.35, opacity: 0.14 }));
+    }
+    for (let f = 0; f <= 1.0001; f += 0.1) g.appendChild(el('line', { x1: HW_VBX(6), y1: rowTop + f * GEO.cellH, x2: HW_VBX(270), y2: rowTop + f * GEO.cellH, stroke: gc, 'stroke-width': uw * 0.35, opacity: 0.12 }));
+    // hinge line — the one physical reference kept (seam of the unfolded clock, x = 12 mm)
+    g.appendChild(el('line', { x1: HW_VBX(12), y1: rowTop, x2: HW_VBX(12), y2: rowTop + GEO.cellH, stroke: gc, 'stroke-width': uw * 1.0, opacity: 0.55 }));
+  }
+  // A draggable handle + live mm label on a feature (calibration only).
+  function addHandle(g, x, y, it, rowTop) {
+    const gc = 'var(--beta,#f5b53d)';
+    // Per-component separator: a full-height reference line through THIS part's centre, so every
+    // piece is aligned to the real components (and the hinge), not to abstract cell centres.
+    const refLine = el('line', { x1: x, y1: rowTop - 0.02, x2: x, y2: rowTop + GEO.cellH + 0.02, stroke: gc, 'stroke-width': 0.01, opacity: 0.55, 'stroke-dasharray': '0.055 0.045' });
+    const ring = el('circle', { cx: x, cy: y, r: HW_VBR(4.6), fill: 'rgba(245,181,61,.10)', stroke: gc, 'stroke-width': 0.02 });
+    ring.style.cursor = 'move';
+    const label = el('text', { x, y: y - HW_VBR(6.2), fill: gc, 'font-size': '0.085', 'text-anchor': 'middle', 'font-family': 'monospace', 'paint-order': 'stroke', stroke: '#000', 'stroke-width': 0.01 });
+    const setLabel = (mx, my) => { label.textContent = it.id + '  ' + mx.toFixed(0) + ',' + Math.round(my * 34.56); };
+    setLabel(it.x, it.y);
+    let dragging = false;
+    ring.addEventListener('pointerdown', (e) => { dragging = true; e.stopPropagation(); try { ring.setPointerCapture(e.pointerId); } catch (x2) {} });
+    ring.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const b = pointerToBoard(e.clientX, e.clientY, rowTop);
+      ring.setAttribute('cx', b.vx); ring.setAttribute('cy', b.vy);
+      refLine.setAttribute('x1', b.vx); refLine.setAttribute('x2', b.vx);
+      label.setAttribute('x', b.vx); label.setAttribute('y', b.vy - HW_VBR(6.2)); setLabel(b.x, b.y);
+      if (state.onHwMove) state.onHwMove(it.id, { x: b.x, y: b.y, final: false });
+    });
+    const end = (e) => { if (!dragging) return; dragging = false; const b = pointerToBoard(e.clientX, e.clientY, rowTop); if (state.onHwMove) state.onHwMove(it.id, { x: b.x, y: b.y, final: true }); };
+    ring.addEventListener('pointerup', end); ring.addEventListener('pointercancel', end);
+    g.appendChild(refLine); g.appendChild(ring); g.appendChild(label);
+  }
 
   // One digit cell → 7 crisp polys + 7 glow polys (behind) + a DP dot (crisp + glow).
   function buildDigit(row, cell) {
@@ -198,20 +360,25 @@ export function createClockFaceSVG(container, opts = {}) {
     return { kind: 'digit', row, cell, box, glowSegs, crispSegs, dpGlow, dpCrisp };
   }
 
-  // One colon cell → two dots (top + bottom), each with a crisp + glow circle.
+  // One colon cell → two dots (top + bottom), each with a crisp + glow circle. The dots ride the
+  // same 10° italic lean as the digits: shear each dot's x by its height about the cell centre
+  // (matches the canvas face's colon shear).
   function buildColon(row, cell) {
-    const cx = row.offX + cell.cx;
+    const cxBase = row.offX + cell.cx;
     const r = GEO.colonDotDia / 2;
-    const yTop = row.top + GEO.colonTopY;
-    const yBot = row.top + GEO.colonBotY;
-    const mk = (cy) => {
+    const shear = (cy) => cxBase + (GEO.cellH / 2 - cy) * (GLYPH.slant || 0);
+    const mk = (cx, cy) => {
       const glow = el('circle', { cx, cy, r, fill: tokens.led, opacity: '0' });
       const crisp = el('circle', { cx, cy, r, fill: tokens.ledDim, opacity: '1' });
       glowGroup.appendChild(glow);
       crispGroup.appendChild(crisp);
       return { glow, crisp };
     };
-    return { kind: 'colon', which: cell.which, top: mk(yTop), bot: mk(yBot) };
+    return {
+      kind: 'colon', which: cell.which,
+      top: mk(shear(GEO.colonTopY), row.top + GEO.colonTopY),
+      bot: mk(shear(GEO.colonBotY), row.top + GEO.colonBotY),
+    };
   }
 
   // ----------------------------------------------------------------------------------------
@@ -244,8 +411,10 @@ export function createClockFaceSVG(container, opts = {}) {
 
     const timeModel = !model.time ? { mode: 'cells', ...std } : model.time;
 
-    // Colon phase: firmware DMA index (10 ms/step, 200-entry table = 2 s cycle).
-    const step = Math.floor(ms / 10) % 200;
+    // Colon phase: firmware DMA index (10 ms/step, 200-entry table = 2 s cycle). When the source
+    // provides the firmware's REAL phase (emulator/device deviceFrame), lock to it so the colon
+    // animates with the PPS-disciplined second, not free-running host ms.
+    const step = (timeModel && timeModel.colonStep != null) ? (timeModel.colonStep % 200) : (Math.floor(ms / 10) % 200);
 
     // keep the inset in sync if tokens changed via CSS
     if (refs.bg) refs.bg.setAttribute('fill', tokens.inset);
@@ -351,21 +520,24 @@ export function createClockFaceSVG(container, opts = {}) {
     }
   }
 
-  // Set a colon's two dots to intensity b (0..1); mirrors the canvas drawDot: dim ghost
-  // always shown, lit copy + glow scaled by brightness*intensity.
+  // Set a colon's two dots to intensity b (0..1). The colon must never dim BELOW the ghost floor
+  // that unlit segments sit at (ledDim @ DIM_ALPHA) — a real colon LED at minimum brightness looks
+  // like any other unlit segment, not darker. So above the floor it's lit red scaled by b; at or
+  // below the floor it rests on the SAME ghost as unlit segments.
   function setColon(desc, b) {
-    const on = b > 0.01;
-    const key = on ? Math.round(state.brightness * b * 200) : -1; // diff bucket
+    const litOp = state.brightness * b;
+    const on = litOp > DIM_ALPHA;
+    const key = on ? Math.round(litOp * 200) : -1; // diff bucket (-1 == resting on the floor)
     for (const dot of [desc.top, desc.bot]) {
       if (dot._k === key) continue; // intensity unchanged — skip DOM write
       dot._k = key;
       if (on) {
         dot.crisp.setAttribute('fill', tokens.led);
-        dot.crisp.setAttribute('opacity', String(state.brightness * b));
-        if (GLOW) dot.glow.setAttribute('opacity', String(state.brightness * b));
+        dot.crisp.setAttribute('opacity', String(litOp));
+        if (GLOW) dot.glow.setAttribute('opacity', String(litOp));
       } else {
         dot.crisp.setAttribute('fill', tokens.ledDim);
-        dot.crisp.setAttribute('opacity', '1');
+        dot.crisp.setAttribute('opacity', String(DIM_ALPHA)); // same floor as an unlit segment
         if (GLOW) dot.glow.setAttribute('opacity', '0');
       }
     }
@@ -393,6 +565,8 @@ export function createClockFaceSVG(container, opts = {}) {
     refreshTokens() { tokens = resolveTokens(); render(); },
     applyDeviceFrame(frame) { state.deviceFrame = frame; render(); },
     clearDeviceFrame() { state.deviceFrame = null; render(); },
+    setHwSpec(list) { state.hwSpec = list; if (state.hardware) { build(); render(); } },
+    setHwCalibrate(on) { state.hwCalibrate = !!on; if (state.hardware) { build(); render(); } },
     setClockOffset(ms) { clockOffsetMs = Number.isFinite(ms) ? ms : 0; },
     // Graceful standby: fade the lit digits to dark over ~0.8s (like the firmware's DAC
     // ramp) instead of a hard blank. The board bg stays; the digits keep updating under

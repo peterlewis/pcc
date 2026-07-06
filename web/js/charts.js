@@ -157,14 +157,14 @@ export function drawSky(canvas, tok, data, opts) {
 function frame(ctx, w, h, tok, o) {
   const m = { l: o.ml ?? 40, r: o.mr ?? 10, t: o.mt ?? 8, b: o.mb ?? 18 };
   const iw = w - m.l - m.r, ih = h - m.t - m.b;
-  ctx.strokeStyle = tok.line; ctx.lineWidth = 1;
+  ctx.strokeStyle = tok.lineSoft || tok.line; ctx.lineWidth = 1;   // chart well: 1px --line-soft (hairline economy)
   ctx.strokeRect(m.l + 0.5, m.t + 0.5, iw - 1, ih - 1);
   return { m, iw, ih, X: (f) => m.l + f * iw, Y: (f) => m.t + (1 - f) * ih };
 }
 
 function yTicks(ctx, tok, fr, vals, fmt) {
   ctx.font = F9; ctx.fillStyle = tok.txt3; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-  ctx.strokeStyle = tok.line;
+  ctx.strokeStyle = tok.lineSoft || tok.line;   // gridlines --line-soft (Comp B)
   for (const v of vals) {
     const y = fr.Y(v.f);
     ctx.globalAlpha = 0.55; ctx.beginPath(); ctx.moveTo(fr.m.l + 1, y); ctx.lineTo(fr.m.l + fr.iw - 1, y); ctx.stroke(); ctx.globalAlpha = 1;
@@ -206,11 +206,13 @@ export function drawCn0Elev(canvas, tok, sats, showMedian) {
       const arr = sats.filter((s) => s.el >= b * 10 && s.el < b * 10 + 10).map((s) => s.cn0).sort((a, c) => a - c);
       if (arr.length) bins.push({ el: b * 10 + 5, v: arr[Math.floor(arr.length / 2)] });
     }
-    ctx.strokeStyle = tok.txt; ctx.lineWidth = 1; ctx.beginPath();
+    // The binned-median is the ONLY white line in the room (Comp B): --txt-hi @ 85%, ~1.1px.
+    ctx.globalAlpha = 0.85; ctx.strokeStyle = tok.txtHi || tok.txt; ctx.lineWidth = 1.1; ctx.beginPath();
     bins.forEach((b, i) => { const x = X(b.el), y = Y(b.v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
     ctx.stroke();
-    ctx.fillStyle = tok.txt;
+    ctx.fillStyle = tok.txtHi || tok.txt;
     for (const b of bins) sq(ctx, X(b.el), Y(b.v), 3);
+    ctx.globalAlpha = 1;
   }
 }
 

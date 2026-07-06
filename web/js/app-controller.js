@@ -2,15 +2,20 @@
 // Claude-Design prototype (PCC Web.dc.html), reparented onto the vanilla DcLite
 // runtime. All state, the fold sequence, the 14 renderVals builders, and the 1 Hz
 // tick are unchanged; only 'extends DCLogic' -> 'extends DcLite' and the boot differ.
-import { DcLite } from './dc-lite.js?v=86';
-import * as ASTRO from './astro-fw.js?v=86';
-import * as DS from './datasources.js?v=86';
+import { DcLite } from './dc-lite.js?v=90';
+import * as ASTRO from './astro-fw.js?v=90';
+import * as DS from './datasources.js?v=90';
+import { TelemetryLog } from './telemetrylog.js?v=3';
+import { prepReview, drawReview, sampleAt, tAtX } from './review.js?v=1';
 
 class Component extends DcLite {
   state = {
     phase: 'boot', entryVisible: true, docked: false, drawerOpen: false, hdrClockOpen: true,
     section: 'display', theme: 'dark', scenario: 'locked',
     mode: 'time', dateFormat: 'iso8601', weekdayFmt: 'off', timeRow: 'std',
+    // Multi-select display modes — faithful to the firmware's modes_enabled[]: enable MANY at once,
+    // the buttons cycle the enabled set. Toggling one ON enables + JUMPS to it (emu + connected clock).
+    modesEnabled: { iso8601: true }, currentMode: 'iso8601',
     precision: 3, brightness: 0.85, brightLock: false, gamma: 1.0,
     colon: 'heartbeat', utc: false, standby: false, diag: 'off',
     text: 'HELLO', marqueeSpeed: 'std', countdownTo: 0,
@@ -24,6 +29,12 @@ class Component extends DcLite {
     // REST data sources (persisted to localStorage). dsMode = the add-form's extract mode.
     dataSources: (() => { try { return JSON.parse(localStorage.getItem('pccweb.dataSources') || '[]'); } catch (e) { return []; } })(),
     dsMode: 'json',
+    // Accessory tier (FACE room): TEXT/COUNTDOWN/DATA SOURCES/WEATHER fold to summary rows; open
+    // state persists per session. The instrument panels above always lead full-width.
+    accessoryOpen: (() => { try { return JSON.parse(localStorage.getItem('pccweb.accOpen') || '{}'); } catch (e) { return {}; } })(),
+    // The honest-digits panel's GPS-drop / time-lapse are a SIMULATION-ONLY demo ("drill"); folded away
+    // behind a chip by default so the panel leads with the readout, not a party trick. Session-only.
+    drillOpen: false,
     tzOverride: 'auto', matrixFreq: '1.6',
     skyHeatmap: false, skyHorizon: false, skyTrails: true, skyLabels: true,
     window: 900,
@@ -33,14 +44,25 @@ class Component extends DcLite {
     wxOffline: false, wxInterval: 'off',
     monPaused: false, monAutoscroll: true,
     hdrBar: false, rebootArm: false,
+    hdrPop: false,   // header connection/status popover (H2 — collapses the dense readout columns)
+    // The three-state model (see [[pcc-web-three-state-model]]). One renderer (clock4 firmware),
+    // one data source at a time. STANDBY (default) = the user's system time, no fix, no telemetry —
+    // an honest empty baseline that puts "connect your clock" front and centre. SIMULATION (opt-in)
+    // = firmware + VIRTUAL GPS, drenched in SIMULATION markers. CONNECTED = a real Mk IV over serial.
+    sim: false,   // is the (clearly-labelled) simulation running? default OFF — never greet an owner with fake data
+    hwCalibrate: false,   // hardware-furniture calibration overlay (drag buttons/screws/sensor)
     tick: 0,
   };
 
   componentDidMount() {
     this.els = this.els || {};
     this.faces = {};
-    this.MM = { W: 265.365, H: 34.56, PIN: 6 }; // real acrylic board (mm): 7.68:1, pins ±6mm about the seam
-    this.globeRot = { lon: 0.1218, lat: 52.2053 };
+    // Telemetry log — persists the CONNECTED real stream to IndexedDB for later scrub/rewind.
+    // Opt-in (default off); never records simulation. record() guards on its own _db, so no await.
+    try { this.telemetryLog = new TelemetryLog(); } catch (e) { this.telemetryLog = null; }
+    this.hwConfig = this.loadHwConfig();   // editable board-furniture positions (calibration overlay)
+    this.MM = { W: 264, H: 34.56, PIN: 6 }; // rendered board (mm): 12mm nubbin + 240mm digits + 12mm nubbin, symmetric; pins ±6mm about the seam
+    this.globeRot = { lon: -0.0015, lat: 51.4779 };   // Royal Observatory Greenwich — matches the emulator's default observer
     const savedTheme = localStorage.getItem('pccweb.theme') === 'light' ? 'light' : 'dark';
     document.documentElement.dataset.theme = savedTheme;
     const savedSec = localStorage.getItem('pccweb.section');
@@ -50,10 +72,20 @@ class Component extends DcLite {
       hdrBar: localStorage.getItem('pccweb.hdrbar') === '1',
     });
     this.reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    Promise.all([import('./clockface.js?v=86'), import('./clockface-svg.js?v=86'), import('./sim.js?v=86'), import('./charts.js?v=86'), import('./realdev.js?v=86')]).then(([CF, CFSVG, SIM, CH, RD]) => {
-      this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD;
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=102'), import('./sim.js?v=91'), import('./charts.js?v=91'), import('./realdev.js?v=91'), import('./emu-driver.js?v=12')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
+      this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
+      // The WASM firmware emulator drives the display faces (the emulator IS the clock). Async
+      // (loads wasm); the render loop guards on this.emu until it's ready.
+      ED.createEmuDriver().then((d) => {
+        this.emu = d; this._emuLast = performance.now();
+        // populate any already-mounted emulator controls now that the driver exists
+        if (this.els.emuCfg && !this.els.emuCfg.value) this.els.emuCfg.value = d.getConfig();
+        const est = d.state();
+        if (this.els.emuLat && !this.els.emuLat.value) this.els.emuLat.value = est.lat.toFixed(4);
+        if (this.els.emuLon && !this.els.emuLon.value) this.els.emuLon.value = est.lon.toFixed(4);
+      }).catch((e) => console.error('[pcc] emu init failed:', e));
       CH.loadLand().then((l) => { this.land = l; this.landTried = true; if (this.state.section === 'globe') this.drawChart('globe'); });
       this.ready = true;
       this.onTickStats();
@@ -66,6 +98,8 @@ class Component extends DcLite {
     this.onResize = () => this.handleResize();
     window.addEventListener('resize', this.onResize);
     this.onKey = (e) => {
+      const t0 = e.target, tag0 = t0 && t0.tagName;
+      const typing = tag0 === 'INPUT' || tag0 === 'TEXTAREA' || tag0 === 'SELECT' || (t0 && t0.isContentEditable);
       if ((e.key === 'Enter' || e.key === ' ') && this.state.phase === 'entry') { e.preventDefault(); this.beginFold(); return; }
       // 1..9,0 jump to nav item 1..10 (0 -> item 10 / Export), in the app only and
       // never while typing in a field.
@@ -145,7 +179,17 @@ class Component extends DcLite {
         holder.className = 'cf-svg';
         holder.style.cssText = 'position:absolute;inset:0';
         el.parentElement.appendChild(holder);
-        f = this.CFSVG.createClockFaceSVG(holder, Object.assign({}, faceDefs[name], { tokens: this.faceTokens() }));
+        const faceOpts = Object.assign({}, faceDefs[name], { tokens: this.faceTokens() });
+        // The big boards carry the real furniture: switch-cover buttons, edge screws, light sensor.
+        // (The tiny header clock stays clean.) The two buttons cycle the enabled display modes.
+        if (name === 'dispDate' || name === 'dispTime' || name === 'entryDate' || name === 'entryTime') {
+          faceOpts.hardware = true;
+          faceOpts.onButton = (btn) => this.onFaceButton(btn);
+          faceOpts.hwSpec = this.hwConfig;
+          faceOpts.hwCalibrate = !!this.state.hwCalibrate;
+          faceOpts.onHwMove = (id, mm) => this.onHwMove(id, mm);
+        }
+        f = this.CFSVG.createClockFaceSVG(holder, faceOpts);
       } else {
         f = this.CF.createClockFace(el, Object.assign({}, faceDefs[name], { tokens: this.faceTokens() }));
       }
@@ -156,6 +200,32 @@ class Component extends DcLite {
       if (name === 'hdrDate' || name === 'hdrTime') this.sizeHdrBar(); // faithful miniature — board aspect + hinge
       if (name === 'dispDate' || name === 'dispTime') this.sizeDispBar();
       f.render(Date.now());
+      return;
+    }
+    if (name === 'reviewCanvas') {
+      let dragging = false;
+      el.addEventListener('pointerdown', (e) => { dragging = true; try { el.setPointerCapture(e.pointerId); } catch (x) {} this._reviewPointer(e); });
+      el.addEventListener('pointermove', (e) => { if (dragging) this._reviewPointer(e); });
+      const up = () => { dragging = false; };
+      el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+      if (this._review) this.renderReview();
+      return;
+    }
+    if (name === 'hwJson') { el.value = JSON.stringify(this.hwConfig, null, 2); return; }
+    if (name === 'emuCfg') { if (this.emu && !el.value) el.value = this.emu.getConfig(); return; }
+    if (name === 'emuCfgFile') {
+      el.addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const txt = String(reader.result);
+          if (this.els.emuCfg) this.els.emuCfg.value = txt;
+          if (this.emu) this.emu.applyConfig(txt);   // align the emulator to the imported config
+        };
+        reader.readAsText(file);
+        e.target.value = ''; // allow re-importing the same filename
+      });
       return;
     }
     if (name === 'globe') { this.bindGlobe(el); this.drawChart('globe'); return; }
@@ -188,7 +258,7 @@ class Component extends DcLite {
       const g = (n) => cs.getPropertyValue(n).trim();
       this._tokCache = {
         inset: g('--inset'), bg: g('--bg'), panel: g('--panel'), strip: g('--strip'),
-        line: g('--line'), line2: g('--line2'), txt: g('--txt'), txt2: g('--txt2'), txt3: g('--txt3'),
+        line: g('--line'), line2: g('--line2'), lineSoft: g('--line-soft'), txt: g('--txt'), txt2: g('--txt2'), txt3: g('--txt3'), txtHi: g('--txt-hi'),
         led: g('--led'), lock: g('--lock'), acq: g('--acq'), none: g('--none'),
         gps: g('--gps'), glo: g('--glo'), gal: g('--gal'), bds: g('--bds'),
       };
@@ -217,7 +287,11 @@ class Component extends DcLite {
     if (this._mq && now - this._mq < sp) return;
     this._mq = now;
     this.marqOff = (this.marqOff || 0) + 1;
-    this.allFaces((f) => f.setModeCtx({ text: this.marqueeWindow() }));
+    const win = this.marqueeWindow();
+    this.allFaces((f) => f.setModeCtx({ text: win }));
+    // Emu-driven faces render from the firmware, not setModeCtx — so re-write the firmware's text
+    // buffer each tick to scroll the window on the emulator (and, when connected, the real clock).
+    if (this.emu && this.emu.configLine) this.emu.configLine('text = ' + win);
   }
   // Absolute ms → the "YYYY-MM-DDTHH:mm" local wall-clock string a datetime-local input wants
   // (and reads back the same way). One place so the input, the TARGET label and onSetCd agree.
@@ -277,6 +351,10 @@ class Component extends DcLite {
     return !!(S && S.connected && S.scenario !== 'locked');
   }
   applyFaceState(f) {
+    // Faces owned by the emulator get their content from device frames (driveEmu), not the JS
+    // mode pipeline — setMode here would null the deviceFrame and flash host time for a frame.
+    // (Standby for these faces is asserted per-frame in paintEmuFrame so it survives re-renders.)
+    if (this.isEmuDrivenFace(f)) return;
     const em = this.effectiveMode();
     f.setMode(em.m, em.ctx);
     f.setColonMode(this.noFixFreeze() ? 'solid' : this.state.colon);
@@ -287,11 +365,192 @@ class Component extends DcLite {
   }
   allFaces(fn) { for (const k of Object.keys(this.faces || {})) { const f = this.faces[k]; if (!f) continue; try { fn(f); } catch (e) {} } }
   syncFaces() { this.allFaces((f) => this.applyFaceState(f)); }
+
+  // EVERY clock face is a DEVICE-FRAME face owned by the WASM firmware emulator (the emulator IS
+  // the clock — landing, header mini, and the display board). applyFaceState/setMode is skipped
+  // for these (it would null the deviceFrame and flash host time); driveEmu re-asserts the frame,
+  // colon and brightness every rAF frame.
+  EMU_FACES = ['entryTime', 'entryDate', 'hdrDate', 'hdrTime', 'dispDate', 'dispTime'];
+  isEmuDrivenFace(f) { return this.EMU_FACES.some((k) => this.faces[k] === f); }   // these 6 faces are always frame-driven (standby/sim/connected), never setMode
+
+  // Honest caption for the standalone (no hardware) case — it's the real firmware in WASM driven
+  // by a virtual GPS, NOT host time. Reflects the live acquisition/lock state.
+  emuObserverTag() {
+    if (!this.emu) return '';
+    const s = this.emu.state();
+    const src = s.geo === 'device' ? 'DEVICE GPS' : s.geo === 'manual' ? 'MANUAL'
+      : s.geo === 'denied' ? 'DEFAULT · LOCATION DENIED' : 'DEFAULT';
+    const sats = s.satsReal ? (this.emu.sats().length + ' REAL SATS IN VIEW') : 'SIM SATS';
+    return s.lat.toFixed(3) + ', ' + s.lon.toFixed(3) + ' · ' + src + ' · ' + sats;
+  }
+  // Timezone tell — honest about which time the clock is showing. The real device auto-detects
+  // the zone from the GPS fix; the emulator sources the same offset from the browser's IANA zone.
+  emuTzTag() {
+    if (!this.emu || !this.emu.tz) return '';
+    const t = this.emu.tz();
+    return t.utc ? 'UTC · FORCED' : (t.zone + ' · ' + t.label);
+  }
+
+  // HONEST DIGITS: turn the firmware's precision ladder into a legible, self-teaching panel.
+  precUi() {
+    const off = { level: '—', style: '', unc: '—', digits: '—', hold: '—', pct: 0, colon: '', gps: 'GPS SIGNAL: ON', tl: 'HOLDOVER TIME-LAPSE: OFF' };
+    // Standby has no GPS discipline — say so plainly instead of showing a precision ladder that
+    // isn't backed by any fix. (Connected real-precision panel is a later step.)
+    if (this.appMode() !== 'simulation') {
+      return { ...off, level: 'P0', style: 'display:inline-flex;align-items:center;justify-content:center;min-width:46px;height:36px;font-family:var(--mono);font-size:15px;font-weight:700;color:var(--txt3);border:1.5px solid var(--line2);border-radius:7px',
+        unc: 'no fix', digits: 'whole seconds', hold: 'SYSTEM TIME', colon: 'no PPS — start a simulation or connect a clock' };
+    }
+    if (!this.emu || !this.emu.precision) return off;
+    const p = this.emu.precision();
+    const COL = { P3: '#3fd06a', P2: '#caa63a', P1: '#e08b3a', P0: '#e0503a' };
+    const col = COL[p.level] || '#888';
+    const unc = p.uUs == null ? 'unknown' : (p.uUs < 1000 ? (p.uUs < 1 ? '<1' : p.uUs) + ' µs' : (p.uUs / 1000).toFixed(p.uUs < 10000 ? 2 : 1) + ' ms');
+    const hold = !p.hadPps ? 'NO FIX' : (p.since <= 0 ? 'PPS fresh' : 'holdover ' + p.since + ' s');
+    const pct = !p.hadPps ? 100 : Math.min(100, Math.round(100 * p.since / p.t100));
+    const cn = this.emu.colonName();
+    const colon = cn === 'heartbeat' ? 'colon HEARTBEAT — PPS-disciplined (locked)'
+      : cn === 'alt_sawtooth' ? 'colon ALT — sidereal/solar, not civil'
+      : cn === 'solid' ? 'colon SOLID — free-running / holdover' : 'colon ' + cn.toUpperCase();
+    return {
+      level: p.level,
+      style: 'display:inline-flex;align-items:center;justify-content:center;min-width:46px;height:36px;font-family:var(--mono);font-size:17px;font-weight:700;letter-spacing:.04em;color:' + col + ';border:1.5px solid ' + col + ';border-radius:7px;transition:color .25s,border-color .25s',
+      unc, digits: p.digitsTo, hold, pct, colon,
+      gps: p.signal ? 'GPS SIGNAL: ON' : 'GPS SIGNAL: OFF',
+      tl: this.emu.timelapseOn && this.emu.timelapseOn() ? 'TIME-LAPSE: ON' : 'TIME-LAPSE: OFF',
+    };
+  }
+
+  emuSourceTag() {
+    const mode = this.appMode();
+    if (mode === 'connected') return 'LIVE · YOUR MK IV';
+    if (mode === 'standby') return 'SYSTEM TIME · NO CLOCK CONNECTED';
+    // simulation — always say so, never let it read as a real clock
+    if (!this.emu) return 'SIMULATION · MK IV FIRMWARE (WASM) — BOOTING';
+    const s = this.emu.state();
+    const gps = !s.signal ? 'GPS SIGNAL OFF · HOLDOVER'
+      : s.locked ? ('VIRTUAL GPS LOCKED · ' + s.sats + ' SATS')
+      : ('VIRTUAL GPS ACQUIRING · ' + s.sats + ' SATS');
+    return 'SIMULATION · ' + gps;
+  }
+
+  // Which of the three states are we in (see [[pcc-web-three-state-model]]). Exactly one data
+  // source drives the renderer: a real clock (connected), the virtual GPS (simulation), or nothing
+  // but the host clock (standby). A real device always wins — the firm rule: sim and real never mix.
+  appMode() {
+    const S = this.session && this.session.S;
+    if (S && S.real) return 'connected';
+    return this.state.sim ? 'simulation' : 'standby';
+  }
+  // STANDBY face: the user's own system time, no GPS fix. Big row = HH:MM:SS (24h), the three
+  // sub-second digits DASHED (honest "no fix" — exactly what a real Mk IV shows before it locks),
+  // decimal point off, colon steady (no PPS heartbeat to sync to). Same firmware-shaped frame the
+  // emulator emits, so it flows through applyDeviceFrame unchanged — no fabricated precision.
+  paintStandby() { this.paintFaceAt(new Date()); }
+  // Start / stop SIMULATION — one switch drives both data sources of the simulated world: the
+  // emulator's virtual GPS (the clock face) and the sim telemetry session (sats / charts). Never
+  // available while a real device is connected (sim and real never mix).
+  setSim(on) {
+    on = !!on;
+    if (this.session && this.session.S && this.session.S.real) return;   // real device owns the app
+    this.setState({ sim: on });
+    this._emuLast = performance.now();       // resume the emulator cleanly (no dt spike from the pause)
+    if (on) {
+      if (this.emu && this.emu.reboot) this.emu.reboot();                 // fresh cold-boot reveal
+      if (this.session && !this.session.S.connected) { this.session.connect(); this.session.log && this.session.log('tx', 'SIMULATION START'); }
+    } else {
+      if (this.session && this.session.S.connected && !this.session.S.real) { this.session.disconnect(); this.session.log && this.session.log('tx', 'SIMULATION STOP'); }
+      this.setState({ scenario: 'locked' });
+    }
+    this.syncFaces();
+  }
+
+  driveEmu() {
+    if (this._reviewing) {   // REVIEW: the face shows the historical wall-clock time at the playhead
+      this.paintFaceAt(new Date(((this._review && this._review.playT) || 0) * 1000));
+      return;
+    }
+    const mode = this.appMode();
+    if (mode === 'standby' || !this.emu) {   // STANDBY: honest host time, no GPS, no virtual anything
+      if (this._emuLive && this.emu) { this.emu.setLive(false); this._emuLive = false; }
+      this.paintStandby();
+      return;
+    }
+    if (mode === 'connected') {
+      // CONNECTED — feed the real Mk IV's own NMEA into the firmware renderer so it reconstructs
+      // the physical clock's display WITH its real fix. Switch the renderer off the virtual GPS.
+      const log = this.session.S.nmeaLog || [];
+      if (!this._emuLive) {
+        this.emu.setLive(true);
+        if (this.emu.reboot) this.emu.reboot();               // cold-boot, then let the real stream lock it
+        this._emuLive = true;
+        // Track fed sentences by OBJECT IDENTITY, not array index. S.nmeaLog is front-trimmed at 420
+        // (realdev), so an absolute cursor silently stops matching once the cap is hit — that froze the
+        // clock ~40 s after connect, looping the last second. A WeakSet feeds each sentence exactly
+        // once, survives the splice (GC-safe), and needs no per-item seq field (version-skew proof).
+        this._fedNmea = new WeakSet();
+        for (const it of log) if (it && typeof it === 'object') this._fedNmea.add(it);   // skip the backlog; feed from now on
+        this._lastPpsSec = null;
+      }
+      for (let i = 0; i < log.length; i++) {
+        const it = log[i];
+        if (!it || typeof it !== 'object' || this._fedNmea.has(it)) continue;
+        this._fedNmea.add(it);
+        if (it.dir !== 'rx' || it.err || typeof it.text !== 'string' || it.text[0] !== '$') continue;
+        this.emu.feedLine(it.text);
+        // Pulse PPS at MOST once per GPS second. The Mk IV emits SEVERAL RMC talkers per second
+        // (GPRMC + GNRMC …); pulsing on each resets the firmware's sub-second before it can climb past
+        // the .900 boundary that STAGES the next display — so the whole second freezes while the ms
+        // loop keeps running, even though currentTime still tracks from RMC (why it looked like it
+        // worked). Key the pulse on the fix's SECOND so multi-talker bursts collapse to one pulse.
+        let ppsSec = null, m = it.text.match(/RMC,\d{4}(\d{2})/);
+        if (m) ppsSec = m[1];
+        else if (/PMTXTS/.test(it.text)) { m = it.text.match(/PMTXTS,\d+,(\d+)/); if (m) ppsSec = String(+m[1] % 60).padStart(2, '0'); }
+        if (ppsSec !== null && ppsSec !== this._lastPpsSec) { this._lastPpsSec = ppsSec; this.emu.pulsePps(); }
+      }
+    } else if (this._emuLive) {                 // leaving CONNECTED for SIMULATION: back to the virtual GPS
+      this.emu.setLive(false); this._emuLive = false;
+    }
+    const t = performance.now();
+    this.emu.tick(t - (this._emuLast || t));
+    this._emuLast = t;
+    this.paintEmuFrame();
+  }
+
+  // Read the firmware's latched segment buffers and push them onto the six emulator-driven faces.
+  paintEmuFrame() {
+    const frame = this.emu.frame();
+    const colon = this.emu.colonName();
+    // boot reveal: multiply brightness by the driver's 0..1 fade so a reboot goes blank then fades in.
+    const bright = Math.pow(this.state.brightness, this.state.gamma) * (this.emu.reveal ? this.emu.reveal() : 1);
+    for (const k of this.EMU_FACES) {
+      const f = this.faces[k];
+      if (!f) continue;
+      // Track colon/brightness PER FACE: dc-lite may recreate a face (new object) whose colon
+      // defaults to heartbeat, so a global "changed?" gate would leave it flashing.
+      if (f._emuColon !== colon) { f.setColonMode(colon); f._emuColon = colon; }
+      if (f._emuBright !== bright) { f.setBrightness(bright); f._emuBright = bright; }
+      // Standby is a graceful crisp-group opacity fade; re-assert per face so a dc-lite-recreated
+      // face (opacity reset to 1) blanks again — same reason colon/brightness are tracked per face.
+      if (f._emuStandby !== this.state.standby) { if (f.setStandby) f.setStandby(this.state.standby); f._emuStandby = this.state.standby; }
+      f.applyDeviceFrame(frame);
+    }
+  }
+
   set2(patch) {
     // Picking a date format / weekday is mutually exclusive with an astro date-row mode —
     // clear astro so the chosen format actually shows (astro wins in effectiveMode otherwise).
     if (('dateFormat' in patch || 'weekdayFmt' in patch) && !('astroFmt' in patch)) patch = { ...patch, astroFmt: 'off' };
-    this.setState(patch, () => this.syncFaces()); this.devApply(patch);
+    this.setState(patch, () => this.syncFaces());
+    // The WASM emulator RENDERS the on-screen face, so mode/text/countdown/colon/standby changes must
+    // reach ITS firmware parser too — not only a connected clock. Mirror the SAME config lines the
+    // device gets (devCmdsFor) into emu.configLine. Exclude zone_override: the emu-driver's own tz
+    // engine (setUtc / loadZone / zoneFromPos) owns timezone and pushing it here would fight it.
+    if (this.emu && this.emu.configLine) {
+      // Skip zone_override (emu-driver's tz engine owns it) and MODE_STANDBY (emu standby is the
+      // face opacity fade above, so the firmware stays in its live mode and waking is instant).
+      for (const cmd of this.devCmdsFor(patch)) if (!/^(zone_override|MODE_STANDBY)\b/.test(cmd)) this.emu.configLine(cmd);
+    }
+    this.devApply(patch);
   }
 
   // ---------- device fidelity: mirror a control onto the connected Mk IV ----------
@@ -316,6 +575,32 @@ class Component extends DcLite {
     const S = this.session && this.session.S;
     if (!(S && S.real && this.realdev)) return;
     for (const cmd of this.devCmdsFor(patch)) this.devSend(cmd);
+  }
+
+  // STAGE E — hardware sync. Mirror the emulator's config.txt onto a connected Mk IV.
+  // Each `key = value` line goes over serial through the SAME write-only protocol the
+  // twiddles use (devSend). This is command-authoritative and RUNTIME-ONLY: the firmware
+  // applies the setting live but never rewrites its config.txt (verified over serial —
+  // the file is the boot-time store, changed only by editing the USB drive). So Apply
+  // makes the physical clock *look* like the emulator immediately; to persist across a
+  // power-cycle, EXPORT the config.txt and drop it on the clock's drive.
+  // Returns the number of settings pushed (0 if no clock is attached).
+  mirrorConfigToDevice(txt) {
+    const S = this.session && this.session.S;
+    if (!(S && S.real && this.realdev)) return 0;
+    const lines = String(txt || '').split('\n').map((s) => s.trim())
+      // Drop zone_override from the raw mirror — a stale/foreign one would disagree with the app's
+      // own timezone. We re-append a fresh one below, recomputed from current app/emulator state.
+      .filter((s) => s && !s.startsWith('#') && !/^reboot\b/i.test(s) && !/^zone_override\b/i.test(s));
+    let n = 0;
+    for (const line of lines) { this.devSend(line); n++; }
+    const tz = this.emu && this.emu.tz ? this.emu.tz() : null;
+    const zone = tz && tz.utc ? 'Etc/UTC' : (tz && tz.zone) || null;
+    if (zone) { this.devSend('zone_override = ' + zone); n++; }
+    // Enabling modes over serial jumps the device through them and lands on the LAST one;
+    // re-assert the ISO clock last so the physical face lands where the emulator boots (mode 0).
+    if (n) this.devSend('MODE_ISO8601_STD = enabled');
+    return n;
   }
 
   // Map an emulator state patch to the firmware config commands that reproduce it.
@@ -345,6 +630,10 @@ class Component extends DcLite {
     // Empty text is never sent: blanking happens by switching to date mode (above), and an
     // empty `text =` in TEXT mode is exactly what draws the stray dash on the device.
     if ('text' in patch && patch.text != null && patch.text !== '') c.push('text = ' + patch.text);
+    // The countdown TARGET (firmware key `countdown_to`, ISO `YYYY-MM-DDThh:mm:ssZ` UTC via mktime).
+    // Was never emitted, so COUNTDOWN switched mode but never got a target — on emu OR device.
+    if (patch.countdownTo != null && patch.countdownTo > 0)
+      c.push('countdown_to = ' + new Date(patch.countdownTo).toISOString().replace(/\.\d{3}Z$/, 'Z'));
     if (patch.standby === true) c.push('MODE_STANDBY = enabled');
     else if (patch.standby === false) {
       // Wake: re-send the active display mode so the device leaves standby (there is no
@@ -398,9 +687,25 @@ class Component extends DcLite {
     const AST = { MODE_SUN: 'sun', MODE_SUN_AZEL: 'sun_azel', MODE_MOON: 'moon', MODE_GRID: 'grid', MODE_LATLON: 'latlon' };
     for (const k of Object.keys(AST)) { if (cfg.modes && cfg.modes[k]) { patch.astroFmt = AST[k]; patch.mode = 'time'; break; } }
     if (Number.isFinite(cfg.astroPageMs) && cfg.astroPageMs > 0) patch.astroDwell = cfg.astroPageMs;
+    // Reflect ALL of the device's enabled modes into the multi-select toggles (keyed by MODE_DEFS.key)
+    // — this is how sidereal (MODE_LST) / solar (MODE_SOLAR) and every other mode surface on connect.
+    const me = {};
+    for (const d of this.MODE_DEFS) {
+      if (!cfg.modes) break;
+      const on = cfg.modes[d.mode] || (this.MODE_ALIASES[d.mode] || []).some((a) => cfg.modes[a]);
+      if (on) me[d.key] = true;
+    }
+    if (Object.keys(me).length) patch.modesEnabled = { ...this.state.modesEnabled, ...me };
+    // CAPABILITY DETECTION: a config.txt LISTS every MODE_* the firmware knows (enabled or disabled),
+    // so the set of keys = what this device supports. An older/stock clock simply omits the rollup
+    // modes (MODE_LST/MODE_SOLAR/…). Record it to gate PR-only commands; null elsewhere = assume full.
+    this._devCaps = (cfg.modes && Object.keys(cfg.modes).length) ? new Set(Object.keys(cfg.modes)) : null;
     // DAC brightness curve, if the config.txt carried BS1..BS5.
     if (cfg.bs) { const c = []; for (let i = 1; i <= 5; i++) { const p = cfg.bs['bs' + i]; if (p) c.push({ adc: p.adc, dac: p.dac }); } if (c.length === 5) patch.dacCurve = c; }
     this.setState(patch, () => this.syncFaces());
+    // Keep the emulator's own tz engine in sync with the device's config (a READ — emu.setUtc only
+    // moves the emulator, never echoes a command back to the device).
+    if (this.emu && 'utc' in patch && this.emu.setUtc) this.emu.setUtc(patch.utc);
     if (patch.dacCurve) this.drawChart('dacCurve');
   }
 
@@ -593,8 +898,8 @@ class Component extends DcLite {
       return;
     }
     const M = this.MM;
-    const avail = Math.max(320, wrap.clientWidth - 4);
-    const k = Math.max(1, avail / (2 * M.W)); // no cap — the panel column width is the natural bound
+    const avail = Math.max(120, wrap.clientWidth - 4);
+    const k = avail / (2 * M.W); // fill the available width; on phones this drops below 1 so the wide bar fits
     const Wk = M.W * k, Hk = M.H * k;
     for (const el of [E.dispDateHalf, E.dispTimeHalf]) { el.style.width = Wk + 'px'; el.style.height = Hk + 'px'; }
     // No column-gap: the two halves butt flush so their 1px borders meet as a single seam —
@@ -672,9 +977,10 @@ class Component extends DcLite {
         // Self-correcting: on any remount into Display the ref order can leave the halves
         // unsized. Detect the mismatch here (frame-driven, framework-agnostic) and re-run once.
         if (s.section === 'display' && s.phase === 'app' && this.els.dispWrap && this.els.dispDateHalf && this.els.dispWrap.clientWidth > 2) {
-          const M = this.MM, k = Math.max(1, (this.els.dispWrap.clientWidth - 4) / (2 * M.W)); // uncapped — MUST match sizeDispBar or this drift check thrashes
+          const M = this.MM, k = Math.max(120, this.els.dispWrap.clientWidth - 4) / (2 * M.W); // MUST match sizeDispBar or this drift check thrashes
           if (Math.abs((parseFloat(this.els.dispDateHalf.style.width) || 0) - M.W * k) > 1) this.sizeDispBar();
         }
+        this.driveEmu();
         this.allFaces((f) => f.render(now));
         if (s.section === 'globe' && s.phase === 'app' && (s.globeRotate || this._globeDrag)) {
           if (s.globeRotate && !this._globeDrag) this.globeRot.lon += 0.028;
@@ -699,10 +1005,34 @@ class Component extends DcLite {
 
   onTick() {
     if (!this.session) return;
+    // REVIEW: session.S is frozen to the playhead by the scrub — never advance live data over it.
+    if (this._reviewing) { this.onTickStats(); return; }
     // When a real device is streaming, its NMEA drives session.S — don't let the
     // simulator overwrite it. The sim only advances when not mirroring hardware.
     if (!this.session.S.real) this.session.tick(Date.now());
+    // Only in SIMULATION does the virtual GPS feed sats into the Sky / Globe / Map. In STANDBY the
+    // telemetry stays empty (no fake data); in CONNECTED the real device owns S.sats.
+    if (this.appMode() === 'simulation' && this.emu && this.emu.satsLoaded && this.emu.satsLoaded()) {
+      const rs = this.emu.sats();
+      if (rs && rs.length) {
+        this.session.S.sats = rs;
+        if (this.session.S.fix) this.session.S.fix.sats = rs.length;
+      }
+    }
     this.mirrorDeviceClock();
+    // Telemetry logging — CONNECTED real data only. Edge-detect connect/disconnect here (rather
+    // than importing the logger into realdev.js) so simulation can never reach the log.
+    if (this.telemetryLog) {
+      const S = this.session.S;
+      const real = !!(S && S.real && S.connected);
+      if (real && !this._wasReal) {
+        this.telemetryLog.beginSession({ observerLat: S.obs && S.obs.lat, observerLon: S.obs && S.obs.lon, portLabel: S.portLabel || '' });
+      } else if (!real && this._wasReal) {
+        this.telemetryLog.endSession();
+      }
+      this._wasReal = real;
+      if (real) this.telemetryLog.record(S);   // dedupes on the whole second; fire-and-forget
+    }
     this.vbat = 4.021 + 0.013 * Math.sin(Date.now() / 60000);
     if (this.state.diag === 'satview') this.allFaces((f) => f.setModeCtx({ gps: String(this.session.S.fix.sats) }));
     if (this.state.diag === 'vbat') this.allFaces((f) => f.setModeCtx({ vbat: this.vbat }));
@@ -994,6 +1324,7 @@ class Component extends DcLite {
     this.setState({ section: sec });
     localStorage.setItem('pccweb.section', sec);
     if (this.els.main) this.els.main.scrollTop = 0;
+    if (sec === 'export') { this.refreshTelStats(); this.openReview(); }   // log counts + load the scrub model
   }
   // The redesign collapses the ten sections into four rooms; each room routes to one or more
   // existing sections, surfaced as a sub-tab bar. Content is unchanged — this is IA only.
@@ -1035,7 +1366,7 @@ class Component extends DcLite {
   connInfo() {
     const S = this.session && this.session.S;
     if (!S) return { led: 'var(--txt3)', glow: 'transparent', state: 'INITIALISING', sub: 'LOADING MODULES' };
-    if (!S.connected) return { led: 'var(--line2)', glow: 'transparent', state: 'DISCONNECTED', sub: 'EMULATOR — HOST TIME' };
+    if (!S.connected) return { led: 'var(--line2)', glow: 'transparent', state: 'STANDBY', sub: 'SYSTEM TIME · NO CLOCK' };
     if (S.rebooting) return { led: 'var(--acq)', glow: 'rgba(245,181,61,.5)', state: 'REBOOT', sub: 'RE-ENUMERATING USB' };
     if (S.real) {
       // Real device: status comes from the actual NMEA, never the sim scenario.
@@ -1047,9 +1378,10 @@ class Component extends DcLite {
         ? { led: 'var(--acq)', glow: 'rgba(245,181,61,.5)', state: 'CONNECTING', sub: 'WAITING FOR NMEA…' }
         : { led: 'var(--none)', glow: 'rgba(255,106,61,.55)', state: 'NO SIGNAL', sub: 'NO NMEA — NOT A PRECISION CLOCK?' };
     }
-    if (S.scenario === 'locked') return { led: 'var(--lock)', glow: 'rgba(54,201,139,.55)', state: 'LOCKED', sub: '3D FIX · STREAM OK' };
-    if (S.scenario === 'acquiring') return { led: 'var(--acq)', glow: 'rgba(245,181,61,.5)', state: 'ACQUIRING', sub: 'SEARCHING SKY' };
-    return { led: 'var(--none)', glow: 'rgba(255,106,61,.55)', state: 'NO FIX', sub: 'SIGNAL LOST — COLONS HELD' };
+    // Simulation (connected, but not a real device): every readout says SIMULATION, never a bare lock.
+    if (S.scenario === 'locked') return { led: 'var(--lock)', glow: 'rgba(54,201,139,.55)', state: 'LOCKED', sub: 'SIMULATION · 3D FIX' };
+    if (S.scenario === 'acquiring') return { led: 'var(--acq)', glow: 'rgba(245,181,61,.5)', state: 'ACQUIRING', sub: 'SIMULATION' };
+    return { led: 'var(--none)', glow: 'rgba(255,106,61,.55)', state: 'NO FIX', sub: 'SIMULATION' };
   }
 
   // ---------- style helpers ----------
@@ -1068,6 +1400,174 @@ class Component extends DcLite {
     return on
       ? 'width:12px;height:12px;flex:none;background:var(--led);border:1px solid var(--led);box-shadow:inset 0 0 0 2px var(--panel), 0 0 6px var(--led-glow)'
       : 'width:12px;height:12px;flex:none;background:var(--well);border:1px solid var(--line2)';
+  }
+  // The firmware's cyclable display modes (modes_enabled[]). key = UI id, mode = config/serial key.
+  // Enabling one over serial jumps to it (set_mode_enabled -> requestMode).
+  get MODE_DEFS() {
+    return [
+      { key: 'iso8601', mode: 'MODE_ISO8601_STD', label: 'ISO 8601', group: 'DATE ROW' },
+      { key: 'ordinal', mode: 'MODE_ISO_ORDINAL', label: 'ISO ORDINAL', group: 'DATE ROW' },
+      { key: 'isoweek', mode: 'MODE_ISO_WEEK', label: 'ISO WEEK', group: 'DATE ROW' },
+      { key: 'unix', mode: 'MODE_UNIX', label: 'UNIX', group: 'DATE ROW' },
+      { key: 'julian', mode: 'MODE_JULIAN_DATE', label: 'JULIAN DATE', group: 'DATE ROW' },
+      { key: 'mjd', mode: 'MODE_MODIFIED_JD', label: 'MODIFIED JD', group: 'DATE ROW' },
+      { key: 'weekday', mode: 'MODE_WEEKDAY', label: 'WEEKDAY', group: 'WEEKDAY' },
+      { key: 'wdy_mm_dd', mode: 'MODE_WDY_MM_DD', label: 'WDY MM-DD', group: 'WEEKDAY' },
+      { key: 'weekda_dd', mode: 'MODE_WEEKDA_DD', label: 'WEEKDAY DD', group: 'WEEKDAY' },
+      { key: 'sidereal', mode: 'MODE_LST', label: 'SIDEREAL LST', group: 'TIME ROW' },
+      { key: 'solar', mode: 'MODE_SOLAR', label: 'SOLAR TIME', group: 'TIME ROW' },
+      { key: 'offset', mode: 'MODE_SHOW_OFFSET', label: 'UTC OFFSET', group: 'TIME ROW' },
+      { key: 'tz', mode: 'MODE_SHOW_TZ_NAME', label: 'TZ NAME', group: 'TIME ROW' },
+      { key: 'sun', mode: 'MODE_SUN', label: 'SUN RISE/SET', group: 'ASTRO' },
+      { key: 'sun_azel', mode: 'MODE_SUN_AZEL', label: 'SUN AZ·EL', group: 'ASTRO' },
+      { key: 'moon', mode: 'MODE_MOON', label: 'MOON PHASE', group: 'ASTRO' },
+      { key: 'grid', mode: 'MODE_GRID', label: 'MAIDENHEAD', group: 'ASTRO' },
+      { key: 'latlon', mode: 'MODE_LATLON', label: 'LAT·LON', group: 'ASTRO' },
+    ];
+  }
+  modeDef(key) { return this.MODE_DEFS.find((d) => d.key === key); }
+  enabledModeKeys() { return this.MODE_DEFS.map((d) => d.key).filter((k) => this.state.modesEnabled[k]); }
+  // Push a mode enable/disable to BOTH the emulator (its own parser) and a connected clock (serial).
+  // Does the CONNECTED device's firmware support this mode? Emulator (always the rollup) and an
+  // unknown/unread device → assume yes; a device whose config.txt was read → only if it listed the key.
+  // Known config-key aliases across firmware revisions — the SAME feature has been spelled two
+  // ways: apparent-solar time is MODE_SOLAR in the current firmware parser but shipped as
+  // MODE_SUNDIAL in older config.txt templates (the megabuild fwt.bin only matches "MODE_SOLAR",
+  // yet a device's on-disk config.txt can still carry a stale "MODE_SUNDIAL" line). Treat them as
+  // one capability so detection/reflection never false-alarms on the naming drift. Bidirectional.
+  get MODE_ALIASES() { return { MODE_SOLAR: ['MODE_SUNDIAL'], MODE_SUNDIAL: ['MODE_SOLAR'] }; }
+  // Is `modeConst` present in the read device caps (alias-aware)? Caller guards this._devCaps != null.
+  _devCapListed(modeConst) {
+    if (this._devCaps.has(modeConst)) return true;
+    const a = this.MODE_ALIASES[modeConst];
+    return !!(a && a.some((k) => this._devCaps.has(k)));
+  }
+  deviceSupportsMode(modeConst) {
+    const S = this.session && this.session.S;
+    if (!(S && S.real) || !this._devCaps) return true;
+    return this._devCapListed(modeConst);
+  }
+  pushMode(modeConst, on) {
+    const line = modeConst + (on ? ' = enabled' : ' = disabled');
+    if (this.emu && this.emu.configLine) this.emu.configLine(line);   // the emulator is always the full rollup
+    // Don't send a mode a stock clock can't honour (it would silently no-op and diverge the UI).
+    if (this.deviceSupportsMode(modeConst)) this.devSend(line);
+    else if (this.session && this.session.log) this.session.log('tx', '(skipped ' + modeConst + ' — device firmware lacks it)');
+  }
+  // Toggle a display mode in the enabled set. Enabling makes it current (jumps to it), exactly like
+  // the firmware; disabling the active one falls back to the first mode still enabled.
+  toggleMode(key) {
+    const def = this.modeDef(key); if (!def) return;
+    const on = !this.state.modesEnabled[key];
+    const modesEnabled = { ...this.state.modesEnabled, [key]: on };
+    const patch = { modesEnabled };
+    if (on) patch.currentMode = key;
+    else if (this.state.currentMode === key) {
+      const rest = this.MODE_DEFS.map((d) => d.key).filter((k) => modesEnabled[k]);
+      patch.currentMode = rest[0] || 'iso8601';
+      if (rest[0]) this.pushMode(this.modeDef(rest[0]).mode, true);   // re-assert so something stays on the face
+    }
+    this.setState(patch);
+    this.pushMode(def.mode, on);
+  }
+  // Cycle the enabled set forward/back — what the physical buttons do. Re-asserts the target's
+  // enable so the emulator AND a connected clock jump to it, keeping the "current" marker in sync.
+  cycleMode(dir) {
+    const on = this.enabledModeKeys();
+    if (on.length < 2) return;
+    let i = on.indexOf(this.state.currentMode); if (i < 0) i = 0;
+    i = (i + (dir < 0 ? -1 : 1) + on.length) % on.length;
+    const key = on[i];
+    this.setState({ currentMode: key });
+    this.pushMode(this.modeDef(key).mode, true);
+  }
+  // The two tactile buttons on the switch cover (clicked on the on-screen board). Like the real
+  // clock, they step through the enabled display modes — forward on 1, back on 2.
+  onFaceButton(btn) {
+    if (this.emu) { btn === 2 ? this.emu.button2() : this.emu.button1(); }
+    this.cycleMode(btn === 2 ? -1 : 1);
+  }
+
+  // ---- hardware calibration: drag the on-screen buttons/screws/sensor, read the mm back --------
+  defaultHwConfig() {
+    // GOSPEL positions — dialled in by hand against the corrected board geometry. Right-side furniture
+    // (buttons / brightness sensor / body screws) at x=265; hinge mounting bolts at x=9 beneath the
+    // pins, with d-hng-0 at x=19. Do not "tidy" these numbers — they are measured, not derived.
+    return [
+      { id: 'd-btn-1', row: 'date', kind: 'button', x: 265, y: 0.4, r: 1.5 },
+      { id: 'd-btn-2', row: 'date', kind: 'button', x: 265, y: 0.6, r: 1.5 },
+      { id: 'd-scr-1', row: 'date', kind: 'screw', x: 265, y: 0.189 },
+      { id: 'd-scr-2', row: 'date', kind: 'screw', x: 265, y: 0.812 },
+      { id: 'd-hng-0', row: 'date', kind: 'screw', x: 19, y: 0.812 },
+      { id: 'd-hng-1', row: 'date', kind: 'screw', x: 9, y: 0.174 },
+      { id: 'd-hng-2', row: 'date', kind: 'screw', x: 9, y: 0.5 },
+      { id: 't-sensor', row: 'time', kind: 'sensor', x: 265, y: 0.5, r: 2 },
+      { id: 't-scr-1', row: 'time', kind: 'screw', x: 265, y: 0.189 },
+      { id: 't-scr-2', row: 'time', kind: 'screw', x: 265, y: 0.812 },
+      { id: 't-hng-0', row: 'date', kind: 'screw', x: 9, y: 0.812 },
+      { id: 't-hng-1', row: 'time', kind: 'screw', x: 9, y: 0.5 },
+      { id: 't-hng-2', row: 'time', kind: 'screw', x: 9, y: 0.826 },
+    ];
+  }
+  loadHwConfig() {
+    const VER = 2;   // bump whenever the GOSPEL defaults change → a pre-gospel saved config re-adopts them ONCE
+    let saved = null;
+    try { const s = localStorage.getItem('pccweb.hwConfig'); const p = s && JSON.parse(s); if (Array.isArray(p) && p.length) saved = p; } catch (e) {}
+    let ver = 0; try { ver = +(localStorage.getItem('pccweb.hwConfigVer') || 0); } catch (e) {}
+    if (!saved || ver < VER) {
+      // Fresh install, or a saved config predating the current gospel positions → adopt the gospel and
+      // stamp the version so we don't clobber it again (subsequent drags/edits persist normally).
+      const def = this.defaultHwConfig();
+      try { localStorage.setItem('pccweb.hwConfig', JSON.stringify(def)); localStorage.setItem('pccweb.hwConfigVer', String(VER)); } catch (e) {}
+      return def;
+    }
+    // Same gospel version: respect the user's own calibration; fold in any new default items only.
+    const have = new Set(saved.map((f) => f.id));
+    for (const d of this.defaultHwConfig()) if (!have.has(d.id)) saved.push(d);
+    return saved;
+  }
+  HW_FACES = ['dispDate', 'dispTime', 'entryDate', 'entryTime'];
+  applyHwToFaces() { for (const k of this.HW_FACES) { const f = this.faces[k]; if (f && f.setHwSpec) f.setHwSpec(this.hwConfig); } }
+  onHwMove(id, mm) {
+    const it = this.hwConfig.find((f) => f.id === id); if (!it) return;
+    it.x = mm.x; it.y = mm.y;
+    if (mm.final) { localStorage.setItem('pccweb.hwConfig', JSON.stringify(this.hwConfig)); this.applyHwToFaces(); this.syncHwJson(); this.setState({}); }
+  }
+  // Mirror the current config into the JSON editor — but never while the user is typing in it.
+  syncHwJson() { const el = this.els && this.els.hwJson; if (el && document.activeElement !== el) el.value = JSON.stringify(this.hwConfig, null, 2); }
+  // Live-parse the JSON editor; on a valid furniture array, apply straight to the faces.
+  onHwJsonInput() {
+    const el = this.els && this.els.hwJson; if (!el) return;
+    let parsed = null;
+    try {
+      const p = JSON.parse(el.value);
+      if (!Array.isArray(p) || !p.length) throw 0;
+      for (const it of p) {
+        if (!it || typeof it.id !== 'string' || typeof it.x !== 'number' || typeof it.y !== 'number' ||
+            (it.row !== 'date' && it.row !== 'time') || typeof it.kind !== 'string') throw 0;
+      }
+      parsed = p;
+    } catch (e) { parsed = null; }
+    if (parsed) {
+      this.hwConfig = parsed;
+      localStorage.setItem('pccweb.hwConfig', JSON.stringify(parsed));
+      this.applyHwToFaces();
+      if (this._hwJsonErr) { this._hwJsonErr = false; this.setState({}); }
+      else this.setState({});   // refresh the mm readout live
+    } else if (!this._hwJsonErr) {
+      this._hwJsonErr = true; this.setState({});
+    }
+  }
+  toggleHwCalibrate() {
+    const on = !this.state.hwCalibrate;
+    this.setState({ hwCalibrate: on });
+    for (const k of this.HW_FACES) { const f = this.faces[k]; if (f && f.setHwCalibrate) f.setHwCalibrate(on); }
+  }
+  resetHwConfig() {
+    this.hwConfig = this.defaultHwConfig();
+    localStorage.removeItem('pccweb.hwConfig');
+    this._hwJsonErr = false;
+    this.applyHwToFaces(); this.syncHwJson(); this.setState({});
   }
   btn(primary, disabled) {
     return 'font-family:var(--sans);font-size:12px;padding:6px 16px;background:transparent;border:1px solid ' +
@@ -1095,6 +1595,11 @@ class Component extends DcLite {
     const st = this.state, ci = this.connInfo();
     const S = this.session && this.session.S;
     const out = {
+      // REVIEW banner — shown across ALL rooms while the scrub is driving the app, so it's never
+      // mistaken for live data. Carries the playhead time + a one-click exit back to live.
+      reviewBannerOn: !!this._reviewing,
+      reviewBannerTime: this._reviewing && this._review ? new Date(this._review.playT * 1000).toISOString().slice(0, 19).replace('T', ' ') + ' UTC' : '',
+      onExitReview: () => this.exitReview(),
       entryVisible: st.entryVisible, docked: st.docked,
       // One clock, one home: it lives in the Display panel while you're on Display, and
       // collapses into the header (menu bar) on every other section — where it can be closed
@@ -1113,12 +1618,16 @@ class Component extends DcLite {
       onEntryOut: () => { const h = this.els.hint; if (h && h.lastChild) { h.lastChild.style.color = 'var(--txt3)'; h.firstChild.style.background = 'var(--line2)'; } },
       onReplay: () => this.replayEntry(),
       connLed: ci.led, connGlow: ci.glow || 'transparent', connState: ci.state, connSub: ci.sub,
-      // Header status doubles as a connect affordance: click when disconnected to open the
-      // Web-Serial picker (the click is the required user gesture); when connected it jumps to
-      // the Device room. Subtle amber wash hints it's actionable while disconnected.
-      onHdrStatus: () => { if (S && S.connected) this.goRoom('device'); else this.connectRealDevice(); },
-      hdrStatusHint: (S && S.connected) ? 'Connection details' : 'Click to connect your Precision Clock',
+      // H2 — the status pill is now a disclosure: click to open a popover that holds the
+      // connection readouts (PORT / FRAMING / FIX·SATS / FIX AGE) and the SIM fix toggles,
+      // instead of spraying four dense columns across the menu bar. The primary connect/
+      // open-room action lives inside the popover.
+      onHdrStatus: () => this.setState({ hdrPop: !st.hdrPop }),
+      hdrPopOn: !!st.hdrPop,
+      hdrStatusHint: 'Connection status & controls',
       hdrStatusBg: (S && S.connected) ? '' : 'background:var(--beta-fill)',
+      onHdrConnect: () => { this.setState({ hdrPop: false }); if (S && S.connected) this.goRoom('device'); else this.connectRealDevice(); },
+      hdrConnectLabel: (S && S.connected) ? 'DEVICE ROOM →' : 'CONNECT MK IV',
       portLabel: this.portName(S),
       fixTypeLabel: S ? (S.fix.type === 3 ? '3D' : S.fix.type >= 1 ? '2D' : 'NONE') : '—',
       satsLabel: S ? (S.fix.sats + '/' + S.sats.filter((x) => x.visible).length) : '—',
@@ -1146,7 +1655,7 @@ class Component extends DcLite {
       const on = curRoom === room;
       out['goRoom_' + room] = () => this.goRoom(room);
       out['roomBg_' + room] = on ? 'var(--strip)' : 'transparent';
-      out['roomC_' + room] = on ? 'var(--txt)' : 'var(--txt2)';
+      out['roomC_' + room] = on ? 'var(--txt-hi)' : 'var(--txt2)';
       out['roomE_' + room] = on ? 'var(--led)' : 'transparent';
       out['roomI_' + room] = on ? 'var(--led)' : 'var(--line2)';
       out['roomDot_' + room] = dots[room];
@@ -1162,24 +1671,65 @@ class Component extends DcLite {
       const on = st.section === sec;
       out['go_' + sec] = () => this.go(sec);
       out['sec_' + sec] = on;
-      out['subStyle_' + sec] = 'flex:none;font-family:var(--mono);font-size:10px;letter-spacing:.12em;padding:7px 13px 8px;background:'
-        + (on ? 'var(--led-fill)' : 'transparent') + ';border:0;box-shadow:' + (on ? 'inset 0 -2px 0 var(--led)' : 'none')
-        + ';color:' + (on ? 'var(--txt)' : 'var(--txt3)') + ';cursor:pointer;white-space:nowrap';
+      out['subStyle_' + sec] = 'flex:none;font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.12em;padding:7px 13px 8px;background:transparent'
+        + ';border:0;box-shadow:' + (on ? 'inset 0 -2px 0 var(--led)' : 'none')
+        + ';color:' + (on ? 'var(--txt-hi)' : 'var(--txt2)') + ';cursor:pointer;white-space:nowrap';
     }
-    for (const r of ['EntryBg', 'FoldStage', 'TimeHalf', 'DateHalf', 'LinkWrap', 'LinkPlate', 'PinTop', 'PinBot', 'EntryTime', 'EntryDate', 'Hint', 'EntryCap', 'FloorShadow', 'DockSlot', 'HdrDate', 'HdrTime', 'Main', 'Drawer', 'DispWrap', 'DispBar', 'DispDateHalf', 'DispTimeHalf', 'DispDate', 'DispTime', 'DispLink', 'DispPinA', 'DispPinB', 'GammaCurve', 'TextInput', 'CdInput', 'LatIn', 'LonIn', 'Sky', 'Cn0elev', 'Cn0time', 'PosScatter', 'Dop', 'Cont', 'Phase', 'Stair', 'Ppmtemp', 'Globe', 'Map', 'MonLog', 'Cmd']) {
+    for (const r of ['EntryBg', 'FoldStage', 'TimeHalf', 'DateHalf', 'LinkWrap', 'LinkPlate', 'PinTop', 'PinBot', 'EntryTime', 'EntryDate', 'Hint', 'EntryCap', 'FloorShadow', 'DockSlot', 'HdrDate', 'HdrTime', 'Main', 'Drawer', 'DispWrap', 'DispBar', 'DispDateHalf', 'DispTimeHalf', 'DispDate', 'DispTime', 'DispLink', 'DispPinA', 'DispPinB', 'GammaCurve', 'TextInput', 'CdInput', 'LatIn', 'LonIn', 'EmuLat', 'EmuLon', 'EmuCfg', 'EmuCfgFile', 'Sky', 'Cn0elev', 'Cn0time', 'PosScatter', 'Dop', 'Cont', 'Phase', 'Stair', 'Ppmtemp', 'Globe', 'Map', 'MonLog', 'Cmd', 'ReviewCanvas']) {
       out['ref' + r] = this.ref(r[0].toLowerCase() + r.slice(1));
     }
     return out;
+  }
+
+  // Accessory tier (Move 5): fold/unfold a secondary FACE-room panel; persist open state per session.
+  toggleAccessory(key) {
+    const m = { ...(this.state.accessoryOpen || {}) };
+    m[key] = !m[key];
+    this.setState({ accessoryOpen: m });
+    try { localStorage.setItem('pccweb.accOpen', JSON.stringify(m)); } catch (e) {}
   }
 
   rvDisplay() {
     const st = this.state, em = this.effectiveMode();
     const S = this.session && this.session.S;
     const names = { iso8601: 'ISO 8601', ordinal: 'ISO ORDINAL', isoweek: 'ISO WEEK', unix: 'UNIX', julian: 'JULIAN', mjd: 'MOD JULIAN', weekday: 'WEEKDAY', wdy_mm_dd: 'WDY MM-DD', weekda_dd: 'WEEKDAY DD', text: 'TEXT', countdown: 'COUNTDOWN', offset: 'UTC OFFSET', standby: 'STANDBY', displaytest: 'DISPLAY TEST', vbat: 'BATTERY', satview: 'SAT VIEW' };
+    const _mode = this.appMode();
+    const _modeLbl = _mode === 'connected' ? 'LIVE' : _mode === 'simulation' ? 'SIMULATION' : 'STANDBY';
+    const _pl = _mode === 'standby' ? 'NO FIX' : (_mode === 'simulation' && this.emu && this.emu.precision ? this.emu.precision().level : 'P' + st.precision);
+    const _dispName = _mode === 'standby' ? 'SYSTEM TIME' : (st.standby ? 'STANDBY' : (names[em.m] || em.m.toUpperCase()));
+    const acc = st.accessoryOpen || {};
     return {
-      faceStatusLine: (st.standby ? 'STANDBY' : (names[em.m] || em.m.toUpperCase())) + ' · BRT ' + Math.round(st.brightness * 100) + '% · P' + st.precision + ' · ' + (st.utc ? 'UTC' : 'LOCAL'),
-      sourceTag: S && S.real ? 'MK IV — LIVE · CONTROLS COMMAND DEVICE · BUTTONS NOT REPORTED'
-        : (S && S.connected ? 'MK IV EMULATION — MIRRORING SIMULATED DEVICE' : 'MK IV EMULATION — HOST TIME · NO DEVICE'),
+      // Accessory tier (Move 5) — disclosure toggles + live glance summaries for the folded panels.
+      accTogText: () => this.toggleAccessory('text'), accOpenText: acc.text ? 'true' : 'false', accChevText: acc.text ? '▾' : '▸',
+      accStatText: st.text ? ('“' + String(st.text).slice(0, 16) + '” · ' + String(st.marqueeSpeed || 'std').toUpperCase()) : 'NO TEXT',
+      accTogCd: () => this.toggleAccessory('countdown'), accOpenCd: acc.countdown ? 'true' : 'false', accChevCd: acc.countdown ? '▾' : '▸',
+      accStatCd: st.countdownTo > 0 ? (new Date(st.countdownTo).toISOString().slice(0, 16).replace('T', ' ') + ' UTC') : 'NOT SET',
+      accTogDs: () => this.toggleAccessory('datasources'), accOpenDs: acc.datasources ? 'true' : 'false', accChevDs: acc.datasources ? '▾' : '▸',
+      accStatDs: (st.dataSources && st.dataSources.length) ? (st.dataSources.length + ' SOURCE' + (st.dataSources.length === 1 ? '' : 'S')) : 'NONE',
+      accTogWx: () => this.toggleAccessory('weather'), accOpenWx: acc.weather ? 'true' : 'false', accChevWx: acc.weather ? '▾' : '▸',
+      accStatWx: st.wxOffline ? 'UNAVAILABLE' : 'AT FIX',
+      faceStatusLine: _modeLbl + ' · ' + _dispName + ' · BRT ' + Math.round(st.brightness * 100) + '% · ' + _pl + ' · ' + (st.utc ? 'UTC' : 'LOCAL'),
+      faceRoomCap: _mode === 'connected' ? 'MK IV FACE — LIVE HARDWARE' : _mode === 'simulation' ? 'MK IV FACE — SIMULATION' : 'MK IV FACE — SYSTEM TIME',
+      // Hardware calibration overlay — drag the board furniture on the face, read the mm here.
+      hwCalibrateOn: !!st.hwCalibrate,
+      hwCalBtnLabel: st.hwCalibrate ? '● CALIBRATING — TAP TO FINISH' : 'CALIBRATE HARDWARE',
+      hwCalBtnStyle: 'font-family:var(--mono);font-size:9px;letter-spacing:.08em;border-radius:4px;padding:4px 9px;cursor:pointer;' + (st.hwCalibrate ? 'color:#000;background:var(--beta);border:1px solid var(--beta)' : 'color:var(--beta);background:transparent;border:1px solid var(--beta)'),
+      onHwCalibrate: () => this.toggleHwCalibrate(),
+      hwReadout: (this.hwConfig || []).map((f) => f.id.padEnd(9) + ' x=' + String(f.x).padStart(6) + ' mm   y=' + String(Math.round(f.y * 34.56)).padStart(2) + ' mm').join('\n'),
+      refHwJson: this.ref('hwJson'),
+      onHwJsonInput: () => this.onHwJsonInput(),
+      hwJsonBorder: this._hwJsonErr ? 'var(--none)' : 'var(--line2)',
+      hwJsonStatusColor: this._hwJsonErr ? 'var(--none)' : 'var(--lock)',
+      hwJsonStatus: this._hwJsonErr ? '✗ INVALID JSON — last valid edit still applied' : '✓ APPLIED LIVE TO THE CLOCK',
+      onHwCopy: () => { try { navigator.clipboard.writeText(JSON.stringify(this.hwConfig, null, 2)); } catch (e) {} },
+      onHwReset: () => this.resetHwConfig(),
+      // STANDBY front door: connect-first. A real Mk IV is the point; a simulation is the equal-but-
+      // quieter fallback for anyone without hardware. Shown only while in Standby.
+      standbyOn: _mode === 'standby',
+      onStandbyConnect: () => this.connectRealDevice(),
+      onStandbyExplore: () => this.setSim(true),
+      standbySerialNote: (typeof navigator !== 'undefined' && 'serial' in navigator) ? 'WEB SERIAL READY — CHROME, EDGE OR OPERA' : 'NEEDS CHROME, EDGE OR OPERA FOR WEB SERIAL',
+      sourceTag: (S && S.real) ? 'MK IV — LIVE · CONTROLS COMMAND DEVICE · BUTTONS NOT REPORTED' : this.emuSourceTag(),
       cbHdrBar: this.cb(st.hdrBar),
       oHdrBar: () => {
         const v = !st.hdrBar;
@@ -1220,37 +1770,110 @@ class Component extends DcLite {
       onCd1h: () => this.setCdTarget(Date.now() + 3600e3),
       onCdNye: () => { const y = new Date().getFullYear(); this.setCdTarget(new Date(y + 1, 0, 1, 0, 0, 0).getTime()); }, // local midnight, next Jan 1
       cdTargetLabel: st.countdownTo ? this.msToLocalInput(st.countdownTo).replace('T', ' ') : '— NOT SET',
-      rbIso: this.rb(st.dateFormat === 'iso8601' && st.weekdayFmt === 'off'), rbOrd: this.rb(st.dateFormat === 'ordinal' && st.weekdayFmt === 'off'), rbWeek: this.rb(st.dateFormat === 'isoweek' && st.weekdayFmt === 'off'), rbUnix: this.rb(st.dateFormat === 'unix' && st.weekdayFmt === 'off'), rbJul: this.rb(st.dateFormat === 'julian' && st.weekdayFmt === 'off'), rbMjd: this.rb(st.dateFormat === 'mjd' && st.weekdayFmt === 'off'),
-      oFmtIso: () => this.set2({ dateFormat: 'iso8601', weekdayFmt: 'off', timeRow: 'std', mode: 'time' }),
-      oFmtOrd: () => this.set2({ dateFormat: 'ordinal', weekdayFmt: 'off', timeRow: 'std', mode: 'time' }),
-      oFmtWeek: () => this.set2({ dateFormat: 'isoweek', weekdayFmt: 'off', timeRow: 'std', mode: 'time' }),
-      oFmtUnix: () => this.set2({ dateFormat: 'unix', weekdayFmt: 'off', timeRow: 'std', mode: 'time' }),
-      oFmtJul: () => this.set2({ dateFormat: 'julian', weekdayFmt: 'off', timeRow: 'std', mode: 'time' }),
-      oFmtMjd: () => this.set2({ dateFormat: 'mjd', weekdayFmt: 'off', timeRow: 'std', mode: 'time' }),
-      // Astro date-row modes (Device › Display Modes › ASTRO). Mutually exclusive with the date
-      // formats above (set2 clears astroFmt when a format is picked; each astro pick sets mode:time).
-      rbAstOff: this.rb(st.astroFmt === 'off'), rbAstSun: this.rb(st.astroFmt === 'sun'), rbAstAzel: this.rb(st.astroFmt === 'sun_azel'), rbAstMoon: this.rb(st.astroFmt === 'moon'), rbAstGrid: this.rb(st.astroFmt === 'grid'), rbAstLl: this.rb(st.astroFmt === 'latlon'),
-      oAstOff: () => this.set2({ astroFmt: 'off', mode: 'time' }),
-      oAstSun: () => this.set2({ astroFmt: 'sun', mode: 'time', standby: false, diag: 'off' }),
-      oAstAzel: () => this.set2({ astroFmt: 'sun_azel', mode: 'time', standby: false, diag: 'off' }),
-      oAstMoon: () => this.set2({ astroFmt: 'moon', mode: 'time', standby: false, diag: 'off' }),
-      oAstGrid: () => this.set2({ astroFmt: 'grid', mode: 'time', standby: false, diag: 'off' }),
-      oAstLl: () => this.set2({ astroFmt: 'latlon', mode: 'time', standby: false, diag: 'off' }),
+      // MULTI-SELECT display modes — checkboxes = the firmware's modes_enabled[]. Toggling one
+      // enables/disables it on the emulator AND a connected clock; enabling jumps to it. The mode
+      // shown on the face (the "current" of the cycle) gets an accent ring.
+      cbIso: this.cb(!!st.modesEnabled.iso8601), oFmtIso: () => this.toggleMode('iso8601'),
+      cbOrd: this.cb(!!st.modesEnabled.ordinal), oFmtOrd: () => this.toggleMode('ordinal'),
+      cbWeek: this.cb(!!st.modesEnabled.isoweek), oFmtWeek: () => this.toggleMode('isoweek'),
+      cbUnix: this.cb(!!st.modesEnabled.unix), oFmtUnix: () => this.toggleMode('unix'),
+      cbJul: this.cb(!!st.modesEnabled.julian), oFmtJul: () => this.toggleMode('julian'),
+      cbMjd: this.cb(!!st.modesEnabled.mjd), oFmtMjd: () => this.toggleMode('mjd'),
+      cbAstSun: this.cb(!!st.modesEnabled.sun), oAstSun: () => this.toggleMode('sun'),
+      cbAstAzel: this.cb(!!st.modesEnabled.sun_azel), oAstAzel: () => this.toggleMode('sun_azel'),
+      cbAstMoon: this.cb(!!st.modesEnabled.moon), oAstMoon: () => this.toggleMode('moon'),
+      cbAstGrid: this.cb(!!st.modesEnabled.grid), oAstGrid: () => this.toggleMode('grid'),
+      cbAstLl: this.cb(!!st.modesEnabled.latlon), oAstLl: () => this.toggleMode('latlon'),
+      cbWdFull: this.cb(!!st.modesEnabled.weekday), oWdFull: () => this.toggleMode('weekday'),
+      cbWdMmdd: this.cb(!!st.modesEnabled.wdy_mm_dd), oWdMmdd: () => this.toggleMode('wdy_mm_dd'),
+      cbWdDd: this.cb(!!st.modesEnabled.weekda_dd), oWdDd: () => this.toggleMode('weekda_dd'),
+      cbTrSid: this.cb(!!st.modesEnabled.sidereal), oTrSid: () => this.toggleMode('sidereal'),
+      cbTrSol: this.cb(!!st.modesEnabled.solar), oTrSol: () => this.toggleMode('solar'),
+      cbTrOff: this.cb(!!st.modesEnabled.offset), oTrOff: () => this.toggleMode('offset'),
+      cbTrTz: this.cb(!!st.modesEnabled.tz), oTrTz: () => this.toggleMode('tz'),
+      // Capability note: when a stock clock is connected whose firmware lacks some rollup modes,
+      // say so (they still work in the emulator). Empty for the emulator / an unread device = full.
+      modesCapNote: (() => {
+        if (!this._devCaps) return '';
+        const lack = this.MODE_DEFS.filter((d) => !this._devCapListed(d.mode)).map((d) => d.label);
+        return lack.length ? ('DEVICE FIRMWARE LACKS ' + lack.join(' · ') + ' — EMULATOR ONLY') : '';
+      })(),
+      modesCapOn: !!(this._devCaps && this.MODE_DEFS.some((d) => !this._devCapListed(d.mode))),
+      // Cycle the enabled set (what the buttons do) + the "currently on the face" read-out.
+      onModePrev: () => this.cycleMode(-1), onModeNext: () => this.cycleMode(1),
+      modeCurLabel: (this.modeDef(st.currentMode) || { label: '—' }).label,
+      modeEnabledCount: this.enabledModeKeys().length,
       astroDwellVal: String(st.astroDwell || 5500),
       onAstroDwell: () => { const v = this.els.astroDwellIn && this.els.astroDwellIn.value; const n = parseInt(v, 10); if (Number.isFinite(n)) this.set2({ astroDwell: Math.max(250, n || 5500) }); },
-      rbWdOff: this.rb(st.weekdayFmt === 'off'), rbWdFull: this.rb(st.weekdayFmt === 'weekday'), rbWdMmdd: this.rb(st.weekdayFmt === 'wdy_mm_dd'), rbWdDd: this.rb(st.weekdayFmt === 'weekda_dd'),
-      oWdOff: () => this.set2({ weekdayFmt: 'off', mode: 'time' }),
-      oWdFull: () => this.set2({ weekdayFmt: 'weekday', timeRow: 'std', mode: 'time' }),
-      oWdMmdd: () => this.set2({ weekdayFmt: 'wdy_mm_dd', timeRow: 'std', mode: 'time' }),
-      oWdDd: () => this.set2({ weekdayFmt: 'weekda_dd', timeRow: 'std', mode: 'time' }),
-      rbTrStd: this.rb(st.timeRow === 'std'), rbTrOff: this.rb(st.timeRow === 'offset'), rbTrTz: this.rb(st.timeRow === 'tz'),
-      oTrStd: () => this.set2({ timeRow: 'std', mode: 'time' }),
-      oTrOff: () => this.set2({ timeRow: 'offset', mode: 'time' }),
-      oTrTz: () => this.set2({ timeRow: 'tz', mode: 'time' }),
       ssP0: this.seg(st.precision === 0, true), ssP1: this.seg(st.precision === 1, false), ssP2: this.seg(st.precision === 2, false), ssP3: this.seg(st.precision === 3, false),
       oP0: () => this.set2({ precision: 0 }), oP1: () => this.set2({ precision: 1 }), oP2: () => this.set2({ precision: 2 }), oP3: () => this.set2({ precision: 3 }),
       brightVal: Math.round(st.brightness * 100), brightPctLabel: Math.round(st.brightness * 100) + '%', brightLock: st.brightLock,
       onBright: (e) => { const b = (+e.target.value) / 100; this.setState({ brightness: b }); this.allFaces((f) => f.setBrightness(Math.pow(b, this.state.gamma))); this.drawChart('gammaCurve'); this.devBright(b); },
+      // Observer location shim: drives the emulator's virtual GPS (sidereal/solar/grid + real sky).
+      emuLatVal: this.emu ? this.emu.state().lat.toFixed(4) : '51.4779',
+      emuLonVal: this.emu ? this.emu.state().lon.toFixed(4) : '-0.0015',
+      emuObserverTag: this.emuObserverTag(),
+      emuTzTag: this.emuTzTag(),
+      onGeolocate: () => {
+        if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+        navigator.geolocation.getCurrentPosition((p) => {
+          if (this.emu) this.emu.setLocation(p.coords.latitude, p.coords.longitude, 'device');
+          if (this.els.emuLat) this.els.emuLat.value = p.coords.latitude.toFixed(4);
+          if (this.els.emuLon) this.els.emuLon.value = p.coords.longitude.toFixed(4);
+        }, () => {}, { timeout: 8000, maximumAge: 60000 });
+      },
+      onSetLoc: () => {
+        const la = parseFloat(this.els.emuLat && this.els.emuLat.value);
+        const lo = parseFloat(this.els.emuLon && this.els.emuLon.value);
+        if (this.emu && isFinite(la) && isFinite(lo)) {
+          // Resolve the observed location's zone (ZoneDetect) then, if a real clock is attached,
+          // mirror that zone to it so device and emulator agree — otherwise the device keeps the
+          // browser zone while the emulator shows the observed one.
+          Promise.resolve(this.emu.setLocation(la, lo, 'manual')).then((zone) => {
+            const S = this.session && this.session.S;
+            if (zone && S && S.real && this.realdev) this.devSend('zone_override = ' + zone);
+          });
+        }
+      },
+      // Honest-digits precision panel (recomputed each render; onTick re-renders at 1 Hz).
+      ...(() => { const u = this.precUi(); return {
+        precLevel: u.level, precLevelStyle: u.style, precUnc: u.unc, precDigits: u.digits,
+        precHold: u.hold, precMeterPct: u.pct + '%', precColon: u.colon, gpsSignalLabel: u.gps, timelapseLabel: u.tl,
+      }; })(),
+      onGpsSignal: () => { if (this.emu) this.emu.setSignal(!this.emu.state().signal); },
+      onTimelapse: () => { if (this.emu) this.emu.setTimelapse(!(this.emu.timelapseOn && this.emu.timelapseOn())); },
+      // DRILL disclosure — folds the sim-only demo toggles away so the honest readout leads.
+      onDrillTog: () => this.setState({ drillOpen: !this.state.drillOpen }),
+      drillOpenStr: st.drillOpen ? 'true' : 'false', drillChev: st.drillOpen ? '▾' : '▸',
+      // Emulator config.txt: APPLY through the real firmware parser + reboot; EXPORT/IMPORT a file.
+      // Stage E — when a real Mk IV is attached, APPLY also mirrors every setting onto the
+      // physical clock live over serial (runtime-only; see mirrorConfigToDevice).
+      emuCfgSync: (() => {
+        if (this._emuCfgNote) return this._emuCfgNote;
+        const S = this.session && this.session.S;
+        return (S && S.real && this.realdev)
+          ? 'MK IV CONNECTED — APPLY ALSO MIRRORS THESE SETTINGS TO THE CLOCK LIVE OVER SERIAL (RUNTIME-ONLY; THE CLOCK’S config.txt FILE IS UNCHANGED — EXPORT + DROP ON THE DRIVE TO PERSIST).'
+          : 'EMULATOR ONLY — CONNECT A MK IV IN THE DEVICE ROOM TO ALSO MIRROR APPLY ONTO THE PHYSICAL CLOCK.';
+      })(),
+      onEmuCfgApply: () => {
+        if (!this.emu || !this.els.emuCfg) return;
+        const txt = this.els.emuCfg.value;
+        this.emu.applyConfig(txt);                    // reboot the emulator with the new config.txt
+        const n = this.mirrorConfigToDevice(txt);     // 0 if no clock attached
+        this._emuCfgNote = n
+          ? ('✓ MIRRORED ' + n + ' SETTINGS TO THE CONNECTED CLOCK (LIVE / RUNTIME). EXPORT config.txt TO PERSIST ACROSS A POWER-CYCLE.')
+          : '';
+        this.setState({ tick: this.state.tick });     // re-render the sync note
+      },
+      onEmuCfgExport: () => {
+        const txt = (this.els.emuCfg && this.els.emuCfg.value) || (this.emu ? this.emu.getConfig() : '');
+        const blob = new Blob([txt], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'config.txt'; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      },
+      onEmuCfgImport: () => { if (this.els.emuCfgFile) this.els.emuCfgFile.click(); },
       cbBrightLock: this.cb(st.brightLock), oBrightLock: () => this.setState({ brightLock: !st.brightLock }),
       gammaVal: st.gamma, gammaLabel: st.gamma.toFixed(2),
       onGamma: (e) => { const g = +e.target.value; this.setState({ gamma: g }); this.allFaces((f) => f.setBrightness(Math.pow(this.state.brightness, g))); this.drawChart('gammaCurve'); },
@@ -1264,7 +1887,8 @@ class Component extends DcLite {
       oColSlow: () => this.set2({ colon: 'slowfade' }), oColHeart: () => this.set2({ colon: 'heartbeat' }), oColSaw: () => this.set2({ colon: 'sawtooth' }), oColAlt: () => this.set2({ colon: 'alt_sawtooth' }), oColTog: () => this.set2({ colon: 'toggle' }), oColSolid: () => this.set2({ colon: 'solid' }),
       colonFreezeNote: this.noFixFreeze() ? 'HELD SOLID — FIRMWARE FREEZES THE ANIMATION WITHOUT FIX' : 'RESYNCED ON THE EVEN UTC SECOND · 2 S CYCLE',
       ssSrcLocal: this.seg(!st.utc, true), ssSrcUtc: this.seg(st.utc, false),
-      oSrcLocal: () => this.set2({ utc: false }), oSrcUtc: () => this.set2({ utc: true }),
+      oSrcLocal: () => { this.set2({ utc: false }); if (this.emu) this.emu.setUtc(false); },
+      oSrcUtc: () => { this.set2({ utc: true }); if (this.emu) this.emu.setUtc(true); },
       cbStandby: this.cb(st.standby), oStandby: () => this.set2({ standby: !st.standby }),
       rbDgOff: this.rb(st.diag === 'off'), rbDgTest: this.rb(st.diag === 'test'), rbDgVbat: this.rb(st.diag === 'vbat'), rbDgSat: this.rb(st.diag === 'satview'),
       oDgOff: () => this.set2({ diag: 'off' }), oDgTest: () => this.set2({ diag: 'test', standby: false }), oDgVbat: () => this.set2({ diag: 'vbat', standby: false }), oDgSat: () => this.set2({ diag: 'satview', standby: false }),
@@ -1311,6 +1935,7 @@ class Component extends DcLite {
   // and the clickable header status.
   async connectRealDevice() {
     if (!this.realdev || (this.session && this.session.S.connected)) return;
+    this._devCaps = null;   // unknown until this device's config.txt is read (assume full meanwhile)
     try {
       await this.realdev.connect();
       try { localStorage.setItem('pcc.realDeviceSeen', '1'); } catch (e) { /* private mode */ }
@@ -1347,8 +1972,12 @@ class Component extends DcLite {
       cAge: S && S.fix.valid && S.fixAgeT ? ((Date.now() - S.fixAgeT) / 1000).toFixed(1) + ' s' : '—',
       // Real Mk IV over Web Serial (requires a genuine user gesture for requestPort).
       onConnectReal: () => this.connectRealDevice(),
-      // Simulate (fake data) — for exploring without hardware; disabled once a real device has been used.
-      onConnect: () => { if (this.session && !conn && !realSeen) { this.session.connect(); this.session.log('tx', 'OPEN (simulated device) @115200'); this.setState({}); } },
+      // Explore with a simulation — a clearly-labelled demo for anyone without hardware. NEVER
+      // greyed out (a visitor with no clock is exactly who needs it); only unavailable while a
+      // real Mk IV is connected, since sim and real never coexist.
+      simOn: !!st.sim,
+      simBtnDisabled: !!(S && S.real),
+      onConnect: () => this.setSim(!this.state.sim),
       onDisconnect: () => {
         if (!conn) return;
         if (S && S.real && this.realdev) this.realdev.disconnect(); else if (this.session) this.session.disconnect();
@@ -1395,8 +2024,10 @@ class Component extends DcLite {
       cfgSaveStyle: this.btn(false, !(st.cfgDirty && st.cfgWrite && this.cfgHandle)),
       readCfgDisabled: !(typeof window !== 'undefined' && 'showOpenFilePicker' in window),
       readCfgStyle: this.btn(false, !(typeof window !== 'undefined' && 'showOpenFilePicker' in window)),
-      realDisabled: conn || !serialOk, connectDisabled: conn || realSeen, discDisabled: !conn,
-      btnRealStyle: this.btn(true, conn || !serialOk), btnConnStyle: this.btn(false, conn || realSeen), btnDiscStyle: this.btn(false, !conn),
+      // SIMULATE is a toggle, never greyed by history — only blocked while a real device is live.
+      realDisabled: conn || !serialOk, connectDisabled: !!(S && S.real), discDisabled: !conn,
+      btnRealStyle: this.btn(true, conn || !serialOk), btnConnStyle: this.btn(false, !!(S && S.real)), btnDiscStyle: this.btn(false, !conn),
+      simBtnLabel: st.sim ? 'STOP SIMULATION' : 'SIMULATE',
       realSeen, isReal: !!(S && S.real),
       supSerial: serialOk ? 'AVAILABLE' : 'NOT AVAILABLE', supSerialC: serialOk ? 'var(--lock)' : 'var(--none)',
       supCtx: ctxOk ? 'SECURE' : 'INSECURE', supCtxC: ctxOk ? 'var(--lock)' : 'var(--none)',
@@ -1465,6 +2096,7 @@ class Component extends DcLite {
         w: Math.min(100, x.cn0 / 55 * 100).toFixed(1) + '%',
         val: x.cn0.toFixed(1), el: Math.round(x.el) + '°',
         dim: x.used ? '1' : '0.45',
+        valColor: x.used ? 'var(--txt-hi)' : 'var(--txt)',   // DIM = UNUSED: used values read brightest
       })),
     };
   }
@@ -1611,7 +2243,226 @@ class Component extends DcLite {
       onDlJson: () => this.session && this.dl('pcc-session.json', 'application/json', this.session.toJSON()),
       onDlGpx: () => this.session && this.dl('pcc-session.gpx', 'application/gpx+xml', this.session.toGPX()),
       onDlNmea: () => this.session && this.dl('pcc-session.nmea', 'text/plain', this.session.toNMEA()),
+      // Persistent telemetry log (IndexedDB) — the data-safety controls. Opt-in; never simulation.
+      cbTelLog: this.cb(!!(this.telemetryLog && this.telemetryLog.enabled)),
+      onTelLog: () => { if (!this.telemetryLog) return; this.telemetryLog.setEnabled(!this.telemetryLog.enabled); this.setState({}); },
+      telStat: (() => { const s = this._telStats; return s ? (s.rows.toLocaleString() + ' SAMPLES · ' + s.sessions + ' SESSION' + (s.sessions === 1 ? '' : 'S') + (s.kb ? ' · ' + (s.kb > 1024 ? (s.kb / 1024).toFixed(1) + ' MB' : s.kb + ' KB') : '')) : '—'; })(),
+      telRetVal: String(this.telemetryLog ? this.telemetryLog.retention : 604800),
+      onTelRet: (e) => { if (this.telemetryLog) this.telemetryLog.setRetention(+e.target.value).then(() => this.refreshTelStats()); },
+      onTelClear: () => {
+        if (!this.telemetryLog) return;
+        if (!confirm('Delete all persisted telemetry? Session history is kept; the recorded stream is erased. This cannot be undone.')) return;
+        this.telemetryLog.clear().then(() => {
+          // Drop the in-memory scrub model + repaint the (now empty) timeline STRAIGHT AWAY, rather
+          // than leaving stale charts until the user navigates away and back (which reloads openReview).
+          if (this._reviewing) this.exitReview();   // nothing left to drive the rooms from
+          this._review = null;
+          this.reviewPause();
+          this.renderReview();                       // wipes the canvas (no model) + refreshes the readout
+          return this.refreshTelStats();
+        });
+      },
+      onTelExport: async () => {
+        if (!this.telemetryLog) return;
+        const sess = await this.telemetryLog.sessions();
+        if (!sess.length) { alert('No recorded sessions yet.'); return; }
+        const s = sess[0];   // newest session
+        const rows = await this.telemetryLog.range(s.sessionId, 0, 2 ** 31);
+        const head = 't,lat,lon,alt,hdop,pdop,sats,fixType,cn0avg,temp,ppm\n';
+        const body = rows.map((r) => {
+          const f = r.fix || {}, p = r.pps || {}; let c = 0, cn = 0;
+          for (const x of r.sats) { if (x.cn0 > 0) { c += x.cn0; cn++; } }
+          return [r.t, f.lat ?? '', f.lon ?? '', f.alt ?? '', f.hdop ?? '', f.pdop ?? '', f.sats ?? '', f.type ?? '', cn ? (c / cn).toFixed(1) : '', p.temp ?? '', p.ppm ?? ''].join(',');
+        }).join('\n');
+        this.dl('pcc-telemetry-' + s.sessionId + '.csv', 'text/csv', head + body);
+      },
+      // Rewind / scrub over the persisted log.
+      ...(() => { const r = this.reviewReadout(); return {
+        rvTime: r.time, rvPos: r.disconnected ? 'CLOCK DISCONNECTED' : r.pos, rvFix: r.disconnected ? '—' : r.fix,
+        rvSats: r.disconnected ? '—' : r.sats, rvTemp: r.disconnected ? '—' : r.temp, rvSkew: r.disconnected ? '—' : r.skew,
+        rvHasData: r.has, rvNoData: !r.has, rvPlayLabel: r.playing ? '❚❚ PAUSE' : '▶ PLAY',
+      }; })(),
+      onReviewPlayPause: () => { this._reviewPlaying ? this.reviewPause() : this.reviewPlay(); },
+      onReviewReload: () => this.openReview(),
+      // Drive the whole app (Sky / Signal / Position / Timing + the face) from the playhead.
+      reviewDriveLabel: this._reviewing ? '● REVIEWING — EXIT TO LIVE' : 'DRIVE ROOMS FROM SCRUB →',
+      reviewDriveStyle: this._reviewing
+        ? 'font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:#fff;background:var(--beta,#f5b53d);border:1px solid var(--beta,#f5b53d);border-radius:5px;padding:7px 15px;cursor:pointer'
+        : 'font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--face-led,#ff4530);background:transparent;border:1px solid var(--face-led,#ff4530);border-radius:5px;padding:7px 15px;cursor:pointer',
+      onReviewDrive: () => { this._reviewing ? this.exitReview() : this.enterReview(); },
     };
+  }
+  // Refresh the persistent-log stats shown in the Export room (async IndexedDB counts).
+  async refreshTelStats() {
+    if (!this.telemetryLog) return;
+    try {
+      const [rows, sessions, bytes] = await Promise.all([this.telemetryLog.count(), this.telemetryLog.sessions(), this.telemetryLog.estimateBytes()]);
+      this._telStats = { rows, sessions: sessions.length, kb: Math.round(bytes / 1024) };
+      this.setState({});
+    } catch (e) { /* ignore */ }
+  }
+
+  // ---------- REWIND / SCRUB over the persisted telemetry log -----------------
+  // Load every session's samples into one scrub model, spanning the whole log,
+  // with connected/disconnected segments derived from the sample runs.
+  async openReview() {
+    if (!this.telemetryLog) return;
+    try {
+      const sessions = await this.telemetryLog.sessions();
+      let samples = [];
+      for (const s of sessions) {                      // newest-first; cap total for a sane first load
+        const rows = await this.telemetryLog.range(s.sessionId, 0, 2 ** 31);
+        samples = samples.concat(rows);
+        if (samples.length > 200000) break;            // safety cap; scrub still decimates to pixels
+      }
+      this._review = prepReview(sessions, samples);
+      this.reviewPause();
+      this.renderReview();
+    } catch (e) { console.warn('openReview failed', e); }
+  }
+  renderReview() {
+    const cv = this.els.reviewCanvas, R = this._review;
+    if (cv) {
+      if (R) { try { drawReview(cv, R); } catch (e) { /* canvas not laid out yet */ } }
+      // No model (e.g. the log was just cleared) — wipe the timeline so it doesn't keep stale pixels
+      // until the next navigation reloads openReview(). Match the canvas backing size, not CSS px.
+      else { try { const g = cv.getContext('2d'); if (g) g.clearRect(0, 0, cv.width, cv.height); } catch (e) {} }
+    }
+    this.setState({});   // refresh the readout below the timeline
+  }
+  reviewSeek(t) {
+    if (!this._review) return;
+    this._review.playT = Math.max(this._review.tMin, Math.min(this._review.tMax, t));
+    this.renderReview();
+    if (this._reviewing) this.applyReviewFrame(this._review.playT);   // drive the rooms to the playhead
+  }
+  reviewPlay() {
+    if (!this._review || this._reviewTimer) return;
+    this._reviewPlaying = true;
+    let last = performance.now();
+    const SPEED = 120;   // 120× real time
+    const step = () => {
+      if (!this._reviewPlaying || !this._review) return;
+      const now = performance.now(), dt = (now - last) / 1000; last = now;
+      let t = this._review.playT + dt * SPEED;
+      if (t >= this._review.tMax) { t = this._review.tMax; this.reviewPause(); }
+      this._review.playT = t; this.renderReview();
+      if (this._reviewing) this.applyReviewFrame(t);   // playback drives the rooms too
+      if (this._reviewPlaying) this._reviewTimer = requestAnimationFrame(step);
+    };
+    if (this._review.playT >= this._review.tMax) this._review.playT = this._review.tMin;   // restart from the top
+    this._reviewTimer = requestAnimationFrame(step);
+    this.setState({});
+  }
+  reviewPause() {
+    this._reviewPlaying = false;
+    if (this._reviewTimer) { cancelAnimationFrame(this._reviewTimer); this._reviewTimer = null; }
+    this.setState({});
+  }
+  // Pointer scrubbing on the timeline canvas (wired in initEl).
+  _reviewPointer(e) {
+    const cv = this.els.reviewCanvas; if (!cv || !this._review) return;
+    const r = cv.getBoundingClientRect();
+    this.reviewPause();
+    this.reviewSeek(tAtX(this._review, e.clientX - r.left));
+  }
+  // Values at the playhead — the scrub read-out.
+  reviewReadout() {
+    const off = { time: '—', pos: '—', fix: '—', sats: '—', temp: '—', skew: '—', has: false, playing: false };
+    const R = this._review; if (!R || !R.samples.length) return off;
+    const s = sampleAt(R, R.playT);
+    const d = new Date(R.playT * 1000);
+    const time = d.toISOString().slice(0, 19).replace('T', ' ') + ' UTC';
+    if (!s) return { ...off, time, has: true, disconnected: true, playing: !!this._reviewPlaying };
+    const f = s.fix, p = s.pps;
+    return {
+      time, has: true, disconnected: false, playing: !!this._reviewPlaying,
+      pos: f ? f.lat.toFixed(5) + ', ' + f.lon.toFixed(5) : 'no fix',
+      fix: f ? ((f.type === 3 ? '3D' : f.type >= 1 ? '2D' : 'NONE') + (f.hdop != null ? ' · HDOP ' + f.hdop.toFixed(2) : '')) : 'no fix',
+      sats: f && f.sats != null ? String(f.sats) : String(s.sats ? s.sats.length : 0),
+      temp: p && p.temp != null ? p.temp.toFixed(1) + ' °C' : '—',
+      skew: p && p.phaseUs != null ? p.phaseUs.toFixed(2) + ' µs' : '—',
+    };
+  }
+
+  // ---- REVIEW MODE — the scrub drives the whole app to the playhead time ----
+  // Reconstruct session.S (sats, fix, and every history buffer the rooms read) from the log
+  // window up to t, so Sky / Signal / Position / Timing render the PAST with no room changes.
+  reconstructReview(t, W = 1800) {
+    const R = this._review, S = this.session && this.session.S;
+    if (!R || !S) return;
+    const win = R.samples.filter((r) => r.t >= t - W && r.t <= t);
+    const D2R = Math.PI / 180;
+    let refLat = S.obs && S.obs.lat, refLon = S.obs && S.obs.lon;
+    const firstFix = win.find((r) => r.fix);
+    if ((refLat == null || refLon == null) && firstFix) { refLat = firstFix.fix.lat; refLon = firstFix.fix.lon; }
+    const cosRef = Math.cos((refLat || 0) * D2R);
+    const posHist = [], dopHist = [], fixHist = [], cn0Hist = new Map(), trails = new Map(), ppsList = [], ppsSamples = [];
+    let lastPpm = null;
+    for (const r of win) {
+      if (r.fix) {
+        posHist.push({ t: r.t, e: (r.fix.lon - refLon) * 111320 * cosRef, n: (r.fix.lat - refLat) * 111320, lat: r.fix.lat, lon: r.fix.lon, alt: r.fix.alt });
+        dopHist.push({ t: r.t, h: r.fix.hdop, p: r.fix.pdop, v: r.fix.vdop });
+        fixHist.push({ t: r.t, type: r.fix.type, sats: r.fix.sats });
+      }
+      for (const s of r.sats) {
+        const key = s.key || ('G' + String(s.prn).padStart(2, '0'));
+        let h = cn0Hist.get(key); if (!h) { h = []; cn0Hist.set(key, h); } h.push({ t: r.t, v: s.cn0 });
+        let tr = trails.get(key); if (!tr) { tr = []; trails.set(key, tr); } tr.push({ t: r.t, az: s.az, el: s.el });
+      }
+      if (r.pps) {
+        if (r.pps.phaseUs != null) ppsList.push({ t: r.t, us: r.pps.phaseUs });
+        if (r.pps.temp != null && r.pps.ppm !== lastPpm) { ppsSamples.push({ t: r.t, temp: r.pps.temp, ppm: r.pps.ppm }); lastPpm = r.pps.ppm; }
+      }
+    }
+    const cur = win.length ? win[win.length - 1] : null;
+    S.sats = (cur ? cur.sats : []).map((s) => ({
+      key: s.key || ('G' + String(s.prn).padStart(2, '0')), prn: s.prn, constId: s.constId || 'G', tok: s.tok || 'gps',
+      talker: s.talker || 'GP', sysId: s.sysId || 1, az: s.az, el: s.el, cn0: s.cn0, used: s.used,
+      visible: s.el != null && s.el > 0, geo: { lat: NaN, lon: NaN },
+    }));
+    if (cur && cur.fix) S.fix = { valid: true, lat: cur.fix.lat, lon: cur.fix.lon, alt: cur.fix.alt, hdop: cur.fix.hdop, pdop: cur.fix.pdop, vdop: cur.fix.vdop, type: cur.fix.type, sats: cur.fix.sats };
+    else S.fix = { ...S.fix, valid: false, type: 0, sats: 0 };
+    S.posHist = posHist; S.dopHist = dopHist; S.fixHist = fixHist; S.cn0Hist = cn0Hist; S.trails = trails;
+    S.pps = S.pps || {}; S.pps.list = ppsList; S.pps.samples = ppsSamples;
+    if (cur && cur.pps) { S.pps.temp = cur.pps.temp; S.pps.ppm = cur.pps.ppm; S.pps.calerr = cur.pps.calerr; }
+  }
+  enterReview() {
+    if (this._reviewing || !this._review) return;
+    const S = this.session.S;
+    this._liveSnap = { sats: S.sats, fix: S.fix, posHist: S.posHist, dopHist: S.dopHist, fixHist: S.fixHist, cn0Hist: S.cn0Hist, trails: S.trails, pps: S.pps };
+    this._reviewing = true;
+    this.applyReviewFrame(this._review.playT);
+  }
+  exitReview() {
+    if (!this._reviewing) return;
+    this._reviewing = false;
+    const s = this._liveSnap, S = this.session.S;
+    if (s) Object.assign(S, s);   // restore the live buffers untouched
+    this._liveSnap = null;
+    this.reviewPause();
+    if (this.drawCharts) this.drawCharts();
+    this.setState({});
+  }
+  applyReviewFrame(t) {
+    if (!this._reviewing || !this._review) return;
+    this.reconstructReview(t);
+    if (this.drawCharts) this.drawCharts();   // repaint whichever room's charts are mounted
+    this.setState({});
+  }
+  // Paint the six emulator faces to a wall-clock time (STANDBY = now; REVIEW = the playhead).
+  paintFaceAt(d) {
+    const two = (n) => [Math.floor(n / 10), n % 10];
+    const big = [...two(d.getHours()), ...two(d.getMinutes()), ...two(d.getSeconds())];
+    const dateRow = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const frame = { dateRow, time: { mode: 'cells', big, small: ['DASH', 'DASH', 'DASH'], dp: false, colonsOn: true, colonStep: 0 } };
+    const bright = Math.pow(this.state.brightness, this.state.gamma);
+    for (const k of this.EMU_FACES) {
+      const f = this.faces[k]; if (!f) continue;
+      if (f._emuColon !== 'solid') { f.setColonMode('solid'); f._emuColon = 'solid'; }
+      if (f._emuBright !== bright) { f.setBrightness(bright); f._emuBright = bright; }
+      f.applyDeviceFrame(frame);
+    }
   }
 }
 

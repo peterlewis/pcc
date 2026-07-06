@@ -251,7 +251,7 @@ export function createSession(opts = {}) {
   const rng = mulberry32(opts.seed || 1977);
   const gauss = () => (rng() + rng() + rng() + rng() - 2) / 2 * 1.42;
   const sats = makeSats(rng);
-  const obs = { lat: 52.2053, lon: 0.1218, alt: 21.0 };
+  const obs = { lat: 51.4779, lon: -0.0015, alt: 46.0 };   // Royal Observatory Greenwich (WGS84 prime meridian) — one default across the app
   const preroll = opts.preroll ?? 1560;
   const t0 = Math.floor(Date.now() / 1000) - preroll;
 

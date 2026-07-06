@@ -54,6 +54,30 @@ for (const dir of ['fonts', 'globe', 'data']) {
   if (existsSync(src)) cpSync(src, resolve(docs, dir), { recursive: true });
 }
 
+// 3b. Emulator page (emu/clock-emu.html): the REAL clock4 firmware in WebAssembly. Bundle its
+//     inline module (clockface + virtual-GPS + the SINGLE_FILE wasm) into one self-contained
+//     ES module and inline it, so docs/emu.html works over https AND file:// with no fetches.
+let emuHtml = readFileSync(resolve(web, 'emu', 'clock-emu.html'), 'utf8');
+const emuScriptRe = /<script type="module">([\s\S]*?)<\/script>/;
+const emuMatch = emuHtml.match(emuScriptRe);
+if (!emuMatch) throw new Error('module <script> not found in emu/clock-emu.html');
+// The SINGLE_FILE emscripten module is built for node,web; its Node-only branch (createRequire
+// via node:module) is guarded by ENVIRONMENT_IS_NODE and never runs in a browser — mark node:*
+// external so esbuild leaves those dynamic imports alone. es2022 target allows top-level await.
+const externalNode = { name: 'external-node', setup(b) { b.onResolve({ filter: /^node:/ }, () => ({ external: true })); } };
+const emuBuild = await esbuild.build({
+  stdin: { contents: emuMatch[1], resolveDir: resolve(web, 'emu'), loader: 'js' },
+  bundle: true, format: 'esm', minify: true, target: 'es2022', legalComments: 'none',
+  plugins: [stripQuery, externalNode], write: false,
+});
+const emuBundle = emuBuild.outputFiles[0].text;
+emuHtml = emuHtml.replace(emuScriptRe, `<script type="module">\n${emuBundle}\n</script>`);
+mkdirSync(resolve(docs, 'emu'), { recursive: true });   // same relative path as dev (emu/clock-emu.html)
+writeFileSync(resolve(docs, 'emu', 'clock-emu.html'), emuHtml);
+const emuExternal = [...emuHtml.matchAll(/\b(?:src|href)\s*=\s*["'](https?:)?\/\/[^"']+/gi)].map((m) => m[0]);
+console.log(`built docs/emu/clock-emu.html (${kb(emuHtml.length)} KB, self-contained firmware wasm)`);
+if (emuExternal.length) { console.error('WARNING external refs in emu:', emuExternal); process.exit(1); }
+
 // 4. Report + guard against any external reference sneaking into index.html.
 const external = [...html.matchAll(/\b(?:src|href)\s*=\s*["'](https?:)?\/\/[^"']+/gi)].map((m) => m[0]);
 console.log(`built docs/index.html (${kb(html.length)} KB, bundle ${kb(bundle.length)} KB)`);

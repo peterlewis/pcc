@@ -1,0 +1,65 @@
+/* ============================================================================
+   pcc-tokens.css — DESIGN RETURN · R1
+   Drop-in extension of base.css :root — load AFTER base.css. Adds the scale,
+   rhythm, radii and motion the return comps reference by name. Palette is
+   base.css's own, untouched; the only colour additions are two neutrals.
+   ========================================================================== */
+
+:root {
+  /* ---- TYPE — two families, six roles -----------------------------------
+     B612 (sans) carries sentences; B612 Mono carries labels and data.
+     The prototype set everything in mono — prose moves to sans (--fs-body),
+     which is half the perceived-density fix on its own. */
+  --fs-display: 30px;    /* room hero metrics (CEP, jitter) · mono 700 */
+  --fs-data-lg: 21px;    /* panel key values · mono 400 */
+  --fs-data:    13px;    /* tabular values, inputs · mono 400 */
+  --fs-body:    13.5px;  /* explanatory prose · SANS 400 — never mono */
+  --fs-label:   11px;    /* panel titles · mono 400, caps, --ls-label */
+  --fs-micro:   9.5px;   /* axis marks, meta, footnotes · mono 400, caps */
+  --ls-label: .14em;
+  --ls-micro: .11em;
+  --lh-body: 1.55;
+
+  /* ---- SPACING — 4px quantum; panels breathe at 20 ----------------------
+     The prototype's interior pad ran 10–14 with 14 between panels; the
+     return sets one panel pad and two gap sizes. Nothing else. */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-7: 28px; --sp-8: 32px;
+  --pad-panel-x: 20px;   /* panel interior, horizontal (was 10–14) */
+  --pad-panel-y: 16px;   /* panel interior, vertical */
+  --gap-grid: 20px;      /* between sibling panels (was 14) */
+  --gap-room: 28px;      /* between panel groups / above the fold line */
+  --rail-w: 186px;       /* unchanged — the rail is right */
+
+  /* ---- HAIRLINE ECONOMY --------------------------------------------------
+     One box per panel. Interior structure uses --line-soft or whitespace,
+     never a second full-strength border. */
+  --line-soft: rgba(43, 47, 56, .55);   /* dark: --line2 @ 55% */
+  --txt-hi: #eef1f6;                    /* brightest tier — key values only */
+
+  /* ---- RADII — instruments are square; radius is reserved ---------------- */
+  --r-0: 0px;   /* panels, wells, charts */
+  --r-1: 3px;   /* controls: buttons, inputs, chips, the LED bezel */
+  --r-2: 6px;   /* floating chrome only: popovers, drawers, toasts */
+
+  /* ---- MOTION — the hinge owns ceremony; everything else is a tick ------
+     --t-fold is a timing handle for the EXISTING fold animation — the
+     animation itself is code-owned and already built. Data never animates:
+     values flip at --t-tick, opacity only. */
+  --t-tick: 90ms;        /* value/state flips — opacity only, no movement */
+  --t-ui: 160ms;         /* hover, focus, control state */
+  --t-disclose: 220ms;   /* accessory expand/collapse */
+  --t-room: 260ms;       /* room content: 8px rise + fade on entry */
+  --t-fold: 560ms;       /* the hinge-fold — token only, animation exists */
+  --ease-ui: cubic-bezier(.3, .7, .25, 1);
+  --ease-hinge: cubic-bezier(.62, .04, .22, 1); /* heavy start, damped land */
+}
+
+:root[data-theme="light"] {
+  --line-soft: rgba(178, 176, 168, .5);
+  --txt-hi: #08090b;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --t-disclose: 0ms; --t-room: 0ms; --t-fold: 0ms; }
+}

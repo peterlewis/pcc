@@ -74,10 +74,15 @@ export function createRealDevice(session) {
     let obsAtConnect = null;      // pre-connect observer, restored on disconnect
     let lastHistT = 0;            // last whole-second we sampled POSITION/DOP/continuity history
     let lastCn0T = 0;             // last whole-second we sampled per-sat C/N0 history
+    let rxSeq = 0;                // monotonic id per rx line — survives the 420 front-trim (see log())
 
     /// Push one line into S.nmeaLog with the sim's item shape, capped like sim.
+    /// Each item carries a MONOTONIC `seq`: the log is front-trimmed at 420, so any
+    /// consumer that tracks "new sentences since" by absolute array index silently
+    /// breaks once the cap is hit (this froze the emulator clock ~40 s after connect).
+    /// `seq` survives the splice, so the drive loop can advance reliably.
     function log(text, err) {
-        S.nmeaLog.push({ t: Date.now(), dir: 'rx', text, err: !!err });
+        S.nmeaLog.push({ t: Date.now(), dir: 'rx', text, err: !!err, seq: ++rxSeq });
         if (S.nmeaLog.length > 420) S.nmeaLog.splice(0, S.nmeaLog.length - 420);
     }
 

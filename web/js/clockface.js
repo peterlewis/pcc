@@ -212,7 +212,12 @@ const MODES = {
     const page = Math.floor((c.tick || 0) / (c.dwell || 5500)) % 2;
     const lbl = page === 0 ? 'LAT' : 'LON';
     const v = page === 0 ? c.lat : c.lon, a = Math.abs(v);
-    return { dateRow: `${lbl} ${v < 0 ? '-' : ''}${Math.floor(a)}.${pad(Math.floor((a - Math.floor(a)) * 100), 2)}` };
+    // firmware parity: RISE/SET-style — label, separator space, sign slot (space when
+    // positive), digits: "LAT  51.48" / "LAT -51.48". A 3-digit longitude drops just the
+    // separator ("LON-179.99"). Hundredths rounded the way the firmware does (±0.5 on h).
+    const h = Math.round(a * 100);
+    const num = `${Math.floor(h / 100)}.${pad(h % 100, 2)}`;
+    return { dateRow: lbl + (h >= 10000 ? '' : ' ') + (v < 0 ? '-' : ' ') + num };
   },
   standby: () => ({ dateRow: '', time: { mode: 'off' } }),
   displaytest: (f) => {
@@ -475,9 +480,10 @@ export function createClockFace(canvas, opts = {}) {
     const timeModel = !model.time ? { mode: 'cells', ...std } : model.time;
 
     // colon animation phase: the firmware DMA index (10 ms/step, 200-entry table = 2 s cycle).
-    // 200*10ms divides 2000ms evenly, so step==0 lands exactly on the even UTC second — the
-    // firmware's resync point — with no float drift.
-    const step = Math.floor(ms / 10) % 200;
+    // A device frame carrying the firmware's REAL phase (colonStep) locks the colon to the
+    // PPS-disciplined second; otherwise fall back to host ms (200*10ms divides 2000ms evenly, so
+    // step==0 lands on the even UTC second — the firmware's resync point — with no float drift).
+    const step = (timeModel && timeModel.colonStep != null) ? (timeModel.colonStep % 200) : (Math.floor(ms / 10) % 200);
 
     // ---- paint ----
     ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -526,8 +532,11 @@ export function createClockFace(canvas, opts = {}) {
         const b = litColon ? colonTbl[cell.which][step] : 0;
         const r = (GEO.colonDotDia / 2) * S;
         const cxPx = originX + (row.offX + cell.cx) * S;
-        drawDot(cxPx, originY + (row.top + GEO.colonTopY) * S, r, b);
-        drawDot(cxPx, originY + (row.top + GEO.colonBotY) * S, r, b);
+        // the colon leans with the digits: same italic shear about cell mid-height
+        // (GLYPH.slant, top toward +x), so the two dots sit on the digit's slant axis
+        const shear = (cy) => cxPx + (GEO.cellH / 2 - cy) * (GLYPH.slant || 0) * S;
+        drawDot(shear(GEO.colonTopY), originY + (row.top + GEO.colonTopY) * S, r, b);
+        drawDot(shear(GEO.colonBotY), originY + (row.top + GEO.colonBotY) * S, r, b);
         continue;
       }
       const val = cell.role === 'small' ? tm.small[cell.src] : tm.big[cell.src];
