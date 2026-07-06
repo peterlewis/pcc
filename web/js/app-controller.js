@@ -7,7 +7,7 @@ import * as ASTRO from './astro-fw.js?v=90';
 import * as DS from './datasources.js?v=90';
 import { TelemetryLog } from './telemetrylog.js?v=3';
 import { prepReview, drawReview, sampleAt, tAtX } from './review.js?v=1';
-import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=2';
+import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=3';
 
 // config.txt is the single source of truth: the clock-behaviour defaults (enabled modes, colon,
 // astro dwell, …) are DERIVED from the canonical golden config, not hand-written here. See
@@ -78,14 +78,21 @@ class Component extends DcLite {
       hdrBar: localStorage.getItem('pccweb.hdrbar') === '1',
     });
     this.reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=105'), import('./sim.js?v=92'), import('./charts.js?v=91'), import('./realdev.js?v=92'), import('./emu-driver.js?v=23')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=105'), import('./sim.js?v=92'), import('./charts.js?v=91'), import('./realdev.js?v=92'), import('./emu-driver.js?v=25')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
       // The WASM firmware emulator drives the display faces (the emulator IS the clock). Async
-      // (loads wasm); the render loop guards on this.emu until it's ready.
-      ED.createEmuDriver().then((d) => {
+      // (loads wasm); the render loop guards on this.emu until it's ready. It boots from the
+      // GOLDEN config.txt — the same single source the UI state is seeded from — so the clock
+      // enables exactly the modes the config says and nothing else (emu-driver's own list is
+      // only the standalone demo page's fallback).
+      ED.createEmuDriver({ config: DEFAULT_CONFIG }).then((d) => {
         this.emu = d; this._emuLast = performance.now();
+        // Config-declared dash-ladder thresholds → the driver's precision model (usually the
+        // same as its defaults; matters when the golden config is edited).
+        const cd = CONFIG_DEFAULTS;
+        if (d.setTolerances && (cd.tol1 !== 1000 || cd.tol10 !== 10000 || cd.tol100 !== 100000)) d.setTolerances(cd.tol1, cd.tol10, cd.tol100);
         // populate any already-mounted emulator controls now that the driver exists
         if (this.els.emuCfg && !this.els.emuCfg.value) this.els.emuCfg.value = d.getConfig();
         const est = d.state();
@@ -149,7 +156,14 @@ class Component extends DcLite {
 
   // 'weather' retired from the routable sections while the feature is rebuilt (COMING SOON pill on
   // the FACE-room accessory keeps the promise visible); a stale saved section falls back to display.
-  get SECTIONS() { return ['connect', 'devmodes', 'devbright', 'devconfig', 'devadvanced', 'devupdates', 'display', 'satellites', 'signal', 'position', 'timing', 'globe', 'map', 'monitor', 'export', 'datalink']; }
+  // 'datalink' hidden for now — early days on the feature; flip DATALINK_SHOW to bring the room back
+  // (modules, tests and room wiring all stay intact).
+  get DATALINK_SHOW() { return false; }
+  get SECTIONS() {
+    const s = ['connect', 'devmodes', 'devbright', 'devconfig', 'devadvanced', 'devupdates', 'display', 'satellites', 'signal', 'position', 'timing', 'globe', 'map', 'monitor', 'export'];
+    if (this.DATALINK_SHOW) s.push('datalink');
+    return s;
+  }
 
   // ---------- refs ----------
   ref(name) {
@@ -418,13 +432,16 @@ class Component extends DcLite {
     // GPS) so both fall through to the live precision ladder below — a connected clock shows its REAL
     // holdover precision, not this placeholder.
     if (this.appMode() === 'standby') {
-      return { ...off, level: 'P0', style: 'display:inline-flex;align-items:center;justify-content:center;min-width:46px;height:36px;font-family:var(--mono);font-size:15px;font-weight:700;color:var(--txt3);border:1.5px solid var(--line2);border-radius:7px',
+      return { ...off, level: '1 s', style: 'display:inline-flex;align-items:center;justify-content:center;min-width:58px;height:36px;font-family:var(--mono);font-size:15px;font-weight:700;color:var(--txt3);border:1.5px solid var(--line2);border-radius:7px',
         unc: 'no fix', digits: 'whole seconds', hold: 'SYSTEM TIME', colon: 'no PPS — start a simulation or connect a clock' };
     }
     if (!this.emu || !this.emu.precision) return off;
     const p = this.emu.precision();
     const COL = { P3: '#3fd06a', P2: '#caa63a', P1: '#e08b3a', P0: '#e0503a' };
     const col = COL[p.level] || '#888';
+    // "P3..P0" is the firmware's INTERNAL handler naming (SysTick_CountUp_P3 …), not real metrology —
+    // surface the honest quantity instead: the RESOLUTION of the finest digit still displayed.
+    const RES = { P3: '1 ms', P2: '10 ms', P1: '0.1 s', P0: '1 s' };
     const unc = p.uUs == null ? 'unknown' : (p.uUs < 1000 ? (p.uUs < 1 ? '<1' : p.uUs) + ' µs' : (p.uUs / 1000).toFixed(p.uUs < 10000 ? 2 : 1) + ' ms');
     const hold = !p.hadPps ? 'NO FIX' : (p.since <= 0 ? 'PPS fresh' : 'holdover ' + p.since + ' s');
     // Meter: how far significance has decayed. On the dash ladder that's holdover age vs the 100 ms
@@ -437,8 +454,8 @@ class Component extends DcLite {
       : cn === 'alt_sawtooth' ? 'colon ALT — sidereal/solar, not civil'
       : cn === 'solid' ? 'colon SOLID — free-running / holdover' : 'colon ' + cn.toUpperCase();
     return {
-      level: p.level,
-      style: 'display:inline-flex;align-items:center;justify-content:center;min-width:46px;height:36px;font-family:var(--mono);font-size:17px;font-weight:700;letter-spacing:.04em;color:' + col + ';border:1.5px solid ' + col + ';border-radius:7px;transition:color .25s,border-color .25s',
+      level: RES[p.level] || p.level,
+      style: 'display:inline-flex;align-items:center;justify-content:center;min-width:58px;height:36px;font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:.04em;color:' + col + ';border:1.5px solid ' + col + ';border-radius:7px;transition:color .25s,border-color .25s;white-space:nowrap;padding:0 8px',
       unc, digits: p.digitsTo, hold, pct, colon,
       gps: p.signal ? 'GPS SIGNAL: ON' : 'GPS SIGNAL: OFF',
       tl: this.emu.timelapseOn && this.emu.timelapseOn() ? 'TIME-LAPSE: ON' : 'TIME-LAPSE: OFF',
@@ -698,7 +715,10 @@ class Component extends DcLite {
     // rendered as a lone dash. (Skip when the patch already carries a dateFormat — that
     // branch above emits the command — to avoid sending it twice.)
     else if (patch.mode === 'time' && !patch.dateFormat) c.push((DATE[this.state.dateFormat] || 'MODE_ISO8601_STD') + ' = enabled');
-    if (patch.astroDwell != null) c.push('astro_page_ms = ' + patch.astroDwell);
+    // Firmware renamed astro_page_ms -> page_ms (it paces ALL paged read-outs incl. MODE_TEMPCOMP).
+    // Send both: current firmware honours page_ms, older builds honour astro_page_ms, each ignores
+    // the key it doesn't know. Without this the dwell control was silently dead post-rename.
+    if (patch.astroDwell != null) { c.push('page_ms = ' + patch.astroDwell); c.push('astro_page_ms = ' + patch.astroDwell); }
     if (patch.colon) c.push('colon_mode = ' + patch.colon);
     // Empty text is never sent: blanking happens by switching to date mode (above), and an
     // empty `text =` in TEXT mode is exactly what draws the stray dash on the device.
@@ -1507,6 +1527,8 @@ class Component extends DcLite {
       { key: 'moon', mode: 'MODE_MOON', label: 'MOON PHASE', group: 'ASTRO' },
       { key: 'grid', mode: 'MODE_GRID', label: 'MAIDENHEAD', group: 'ASTRO' },
       { key: 'latlon', mode: 'MODE_LATLON', label: 'LAT·LON', group: 'ASTRO' },
+      // Tempcomp diagnostic pages (die temp / HSE / LSE / samples+state) — real firmware read-out.
+      { key: 'tempcomp', mode: 'MODE_TEMPCOMP', label: 'TEMP COMP', group: 'DIAGNOSTIC' },
     ];
   }
   modeDef(key) { return this.MODE_DEFS.find((d) => d.key === key); }
@@ -1695,7 +1717,7 @@ class Component extends DcLite {
       // Abbreviate the wordmark to "PC" only while the ~650px clock is actually in the header;
       // with it closed (or on Display) there's room for the full name. "PC" not "PCC" — the
       // "COMPANION" subtitle underneath carries the third word (PC = Precision Clock).
-      hdrTitle: (st.docked && st.section !== 'display' && st.hdrClockOpen) ? 'PC' : 'PRECISION CLOCK',
+      // (brand is static markup now — no abbreviated 'PC' variant; it read as a different product)
       onCloseHdrClock: () => this.setState({ hdrClockOpen: false }),
       onOpenHdrClock: () => this.setState({ hdrClockOpen: true }),
       onEntryClick: () => this.beginFold(),
@@ -1754,6 +1776,8 @@ class Component extends DcLite {
     out.drawerBtnStyle = 'display:flex;align-items:center;gap:8px;padding:0 15px;background:' + (st.drawerOpen ? 'var(--strip)' : 'transparent') + ';border:0;border-left:1px solid var(--line);cursor:pointer;font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:' + (st.drawerOpen ? 'var(--txt)' : 'var(--txt3)');
     // Sections keep driving their content (sec_X) and act as sub-tabs (go_X + a segmented style).
     out.sec_weather = false;   // retired section (COMING SOON); keep the binding defined so its sc-if stays hidden
+    out.dlShow = this.DATALINK_SHOW;   // Datalink room hidden while the feature matures
+    if (!this.DATALINK_SHOW) out.sec_datalink = false;
     for (const sec of this.SECTIONS) {
       const on = st.section === sec;
       out['go_' + sec] = () => this.go(sec);
@@ -1762,7 +1786,7 @@ class Component extends DcLite {
         + ';border:0;box-shadow:' + (on ? 'inset 0 -2px 0 var(--led)' : 'none')
         + ';color:' + (on ? 'var(--txt-hi)' : 'var(--txt2)') + ';cursor:pointer;white-space:nowrap';
     }
-    for (const r of ['EntryBg', 'FoldStage', 'TimeHalf', 'DateHalf', 'LinkWrap', 'LinkPlate', 'PinTop', 'PinBot', 'EntryTime', 'EntryDate', 'Hint', 'EntryCap', 'FloorShadow', 'DockSlot', 'HdrDate', 'HdrTime', 'Main', 'Drawer', 'DispWrap', 'DispBar', 'DispDateHalf', 'DispTimeHalf', 'DispDate', 'DispTime', 'DispLink', 'DispPinA', 'DispPinB', 'GammaCurve', 'TextInput', 'CdInput', 'LatIn', 'LonIn', 'EmuLat', 'EmuLon', 'EmuCfg', 'EmuCfgFile', 'Sky', 'Cn0elev', 'Cn0time', 'PosScatter', 'Dop', 'Cont', 'Phase', 'Stair', 'Ppmtemp', 'Globe', 'Map', 'MonLog', 'Cmd', 'ReviewCanvas', 'Datalink']) {
+    for (const r of ['EntryBg', 'FoldStage', 'TimeHalf', 'DateHalf', 'LinkWrap', 'LinkPlate', 'PinTop', 'PinBot', 'EntryTime', 'EntryDate', 'Hint', 'EntryCap', 'FloorShadow', 'DockSlot', 'HdrDate', 'HdrTime', 'Main', 'Drawer', 'DispWrap', 'DispBar', 'DispDateHalf', 'DispTimeHalf', 'DispDate', 'DispTime', 'DispLink', 'DispPinA', 'DispPinB', 'GammaCurve', 'TextInput', 'CdInput', 'LatIn', 'LonIn', 'EmuLat', 'EmuLon', 'EmuCfg', 'EmuCfgFile', 'Sky', 'Cn0elev', 'Cn0time', 'PosScatter', 'Dop', 'Cont', 'Phase', 'Stair', 'Ppmtemp', 'Globe', 'Map', 'MonLog', 'Cmd', 'ReviewCanvas', 'Datalink', 'Tol1In', 'Tol10In', 'Tol100In']) {
       out['ref' + r] = this.ref(r[0].toLowerCase() + r.slice(1));
     }
     return out;
@@ -1783,8 +1807,11 @@ class Component extends DcLite {
     const _mode = this.appMode();
     const _modeLbl = _mode === 'connected' ? 'LIVE' : _mode === 'simulation' ? 'SIMULATION' : 'STANDBY';
     // Both simulation AND connected drive the firmware, so both read the REAL precision ladder from
-    // the emulator; only standby (host time, no fix) has no honest precision to show.
-    const _pl = _mode === 'standby' ? 'NO FIX' : (this.emu && this.emu.precision ? this.emu.precision().level : 'P' + st.precision);
+    // the emulator; only standby (host time, no fix) has no honest precision to show. Displayed as
+    // RESOLUTION (place value of the finest lit digit) — "P3" etc. is internal handler naming only.
+    const _RES = { P3: '1 ms', P2: '10 ms', P1: '0.1 s', P0: '1 s' };
+    const _pl = _mode === 'standby' ? 'NO FIX'
+      : 'RES ' + (this.emu && this.emu.precision ? (_RES[this.emu.precision().level] || '1 s') : (_RES['P' + st.precision] || '1 s'));
     const _dispName = _mode === 'standby' ? 'SYSTEM TIME' : (st.standby ? 'STANDBY' : (names[em.m] || em.m.toUpperCase()));
     const acc = st.accessoryOpen || {};
     return {
@@ -1881,6 +1908,7 @@ class Component extends DcLite {
       cbAstMoon: this.cb(!!st.modesEnabled.moon), oAstMoon: () => this.toggleMode('moon'),
       cbAstGrid: this.cb(!!st.modesEnabled.grid), oAstGrid: () => this.toggleMode('grid'),
       cbAstLl: this.cb(!!st.modesEnabled.latlon), oAstLl: () => this.toggleMode('latlon'),
+      cbDgTc: this.cb(!!st.modesEnabled.tempcomp), oDgTc: () => this.toggleMode('tempcomp'),   // diagnostic read-out — lives in ADVANCED
       cbWdFull: this.cb(!!st.modesEnabled.weekday), oWdFull: () => this.toggleMode('weekday'),
       cbWdMmdd: this.cb(!!st.modesEnabled.wdy_mm_dd), oWdMmdd: () => this.toggleMode('wdy_mm_dd'),
       cbWdDd: this.cb(!!st.modesEnabled.weekda_dd), oWdDd: () => this.toggleMode('weekda_dd'),
@@ -1902,8 +1930,30 @@ class Component extends DcLite {
       modeEnabledCount: this.enabledModeKeys().length,
       astroDwellVal: String(st.astroDwell || 5500),
       onAstroDwell: () => { const v = this.els.astroDwellIn && this.els.astroDwellIn.value; const n = parseInt(v, 10); if (Number.isFinite(n)) this.set2({ astroDwell: Math.max(250, n || 5500) }); },
-      ssP0: this.seg(st.precision === 0, true), ssP1: this.seg(st.precision === 1, false), ssP2: this.seg(st.precision === 2, false), ssP3: this.seg(st.precision === 3, false),
-      oP0: () => this.set2({ precision: 0 }), oP1: () => this.set2({ precision: 1 }), oP2: () => this.set2({ precision: 2 }), oP3: () => this.set2({ precision: 3 }),
+      // Holdover tolerances — the REAL firmware knobs (config.txt Tolerance_time_*). The old P0–P3
+      // "pick a level" selector was a design-era leftover: resolution is derived, never set.
+      // significance_fade is the EVOLUTION of this ladder: while it's enabled the firmware ignores
+      // these timers entirely (setPrecision's fade branch), so the panel disables and says so.
+      tol1Val: st.tol1 || 1000, tol10Val: st.tol10 || 10000, tol100Val: st.tol100 || 100000,   // seeded from config.txt
+      ...(() => {
+        const fadeOn = !!(this.emu && this.emu.holdoverFadeOn && this.emu.holdoverFadeOn());
+        return {
+          tolDisabled: fadeOn,
+          tolRowStyle: fadeOn ? 'opacity:.38;pointer-events:none' : '',
+          tolApplyStyle: 'font-family:var(--sans);font-size:12px;padding:5px 14px;background:transparent;border:1px solid var(--led);color:var(--txt);cursor:' + (fadeOn ? 'not-allowed' : 'pointer'),
+          tolNote: fadeOn
+            ? 'OVERRIDDEN — Significance Fade is on: digits are dashed by the measured 3σ holdover uncertainty, not these timers. Turn the fade off to use the fixed ladder again.'
+            : 'Seconds of holdover before each digit is dashed (config.txt Tolerance_time_*). Resolution is earned from GPS discipline, not set — these only decide when the clock stops claiming digits. Significance Fade supersedes this ladder while enabled.',
+        };
+      })(),
+      onTolApply: () => {
+        if (this.emu && this.emu.holdoverFadeOn && this.emu.holdoverFadeOn()) return;   // ladder overridden
+        const read = (el, dflt) => { const n = parseInt(el && el.value, 10); return Number.isFinite(n) && n > 0 ? n : dflt; };
+        const t1 = read(this.els.tol1In, 1000), t10 = read(this.els.tol10In, 10000), t100 = read(this.els.tol100In, 100000);
+        if (this.emu && this.emu.setTolerances) this.emu.setTolerances(t1, t10, t100);   // keeps precision() in sync
+        for (const l of ['Tolerance_time_1ms = ' + t1, 'Tolerance_time_10ms = ' + t10, 'Tolerance_time_100ms = ' + t100]) this.devSend(l);
+        if (this.session && this.session.log) this.session.log('tx', 'holdover tolerances: ' + t1 + ' / ' + t10 + ' / ' + t100 + ' s');
+      },
       brightVal: Math.round(st.brightness * 100), brightPctLabel: Math.round(st.brightness * 100) + '%', brightLock: st.brightLock,
       onBright: (e) => { const b = (+e.target.value) / 100; this.setState({ brightness: b }); this.allFaces((f) => f.setBrightness(Math.pow(b, this.state.gamma))); this.drawChart('gammaCurve'); this.devBright(b); },
       // Observer location shim: drives the emulator's virtual GPS (sidereal/solar/grid + real sky).

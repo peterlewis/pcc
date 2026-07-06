@@ -66,8 +66,9 @@ MODE_MOON     = disabled
 MODE_GRID     = disabled
 MODE_LATLON   = disabled
 
-# Dwell per sub-screen for the paged astro modes, in ms (default 5500, min 250)
-astro_page_ms = 5500
+# Dwell per sub-screen for the paged read-outs (astro + temp comp), in ms (default 5500,
+# min 250). Older firmware called this astro_page_ms.
+page_ms = 5500
 
 # Fixed position for astro when there's no GPS fix (decimal degrees, N+/E+)
 #fake_latitude  = 51.48
@@ -93,6 +94,9 @@ colon_mode = heartbeat
 Tolerance_time_1ms   = 1000
 Tolerance_time_10ms  = 10000
 Tolerance_time_100ms = 100000
+# Replace the fixed ladder above with measured uncertainty: each digit is dashed when the
+# live 3-sigma holdover error passes its place value (needs the significance-fade firmware).
+significance_fade = off
 
 
 ## brightness
@@ -114,6 +118,8 @@ BS5 = 3849,4095
 tc_learn = off
 tc_apply = off
 tc_rtc   = off
+# Diagnostic date-row read-out: die temp / HSE model / LSE model / samples (pages, page_ms each)
+MODE_TEMPCOMP = disabled
 #tc_t0 = 40
 #tc_engage_s = 2
 #tc_max_ppm = 100
@@ -166,6 +172,7 @@ export const MODE_FIELDS = [
   { cfg: 'mode_moon', key: 'moon', group: 'astro' },
   { cfg: 'mode_grid', key: 'grid', group: 'astro' },
   { cfg: 'mode_latlon', key: 'latlon', group: 'astro' },
+  { cfg: 'mode_tempcomp', key: 'tempcomp', group: 'diag' },
 ];
 
 // Derive the config-DRIVEN slice of app state from a config.txt (defaults to the golden config).
@@ -187,8 +194,12 @@ export function configToState(text = DEFAULT_CONFIG) {
     astroFmt: first('astro') || 'off',
     colon: (c.colon_mode || 'heartbeat').toLowerCase(),
   };
-  if (c.astro_page_ms != null) { const n = parseInt(c.astro_page_ms, 10); if (Number.isFinite(n) && n > 0) st.astroDwell = n; }
+  const dwell = c.page_ms != null ? c.page_ms : c.astro_page_ms;   // current key, old-firmware fallback
+  if (dwell != null) { const n = parseInt(dwell, 10); if (Number.isFinite(n) && n > 0) st.astroDwell = n; }
   else st.astroDwell = 5500;
+  // Holdover dash-ladder thresholds (seconds) — seed the DEVICE panel's editable values.
+  const tolN = (k, d) => { const n = parseInt(c[k], 10); return Number.isFinite(n) && n > 0 ? n : d; };
+  st.tol1 = tolN('tolerance_time_1ms', 1000); st.tol10 = tolN('tolerance_time_10ms', 10000); st.tol100 = tolN('tolerance_time_100ms', 100000);
   // timezone: blank/commented => auto (local); Etc/UTC => the UTC toggle; else a specific IANA zone.
   const zone = (c.zone_override || '').trim();
   st.utc = /^etc\/utc$/i.test(zone);
@@ -223,7 +234,7 @@ export function stateToConfig(state, text = DEFAULT_CONFIG) {
     const modeOn = onFor(kl);
     if (modeOn !== null) return setVal(line, key, modeOn ? 'enabled' : 'disabled');
     if (kl === 'colon_mode') return setVal(line, key, state.colon || 'heartbeat');
-    if (kl === 'astro_page_ms') return setVal(line, key, state.astroDwell || 5500);
+    if (kl === 'page_ms' || kl === 'astro_page_ms') return setVal(line, key, state.astroDwell || 5500);
     if (kl === 'text') return state.text ? setVal(line, key, state.text) : line;
     if (kl === 'countdown_to' && state.countdownTo > 0)
       return setVal(line, key, new Date(state.countdownTo).toISOString().replace(/\.\d{3}Z$/, 'Z'));

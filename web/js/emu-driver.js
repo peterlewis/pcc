@@ -19,8 +19,9 @@ const decode = (b) => { const p=b&0x7f; if(p===0)return 'BLANK'; if(p===DASH)ret
 // (main.h) and the face's COLON_MODES are the SAME order, so this is 1:1 by index.
 const COLON_NAME = ['slowfade', 'heartbeat', 'sawtooth', 'alt_sawtooth', 'toggle', 'solid'];
 
-// Modes enabled by default so the face can cycle through the interesting read-outs. Real
-// config.txt keys, applied through the firmware's own parser. Import/replace at runtime.
+// Standalone-demo fallback ONLY (emu/clock-emu.html): a rich mode set so the demo page has
+// something to cycle. The APP always passes the golden config.txt instead — config is the
+// single source of truth for what the clock enables. Real keys, real firmware parser.
 export const DEFAULT_CONFIG = [
   'colon_mode = heartbeat',       // civil colon (matches the shipped device config.txt)
   'MODE_ISO8601_STD = enabled',
@@ -72,6 +73,7 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
 
   let state = { lat, lon, configText: config, signal: true, vbus: true, adc: 2600, geo: 'default',
     tol: { t1: 1000, t10: 10000, t100: 100000 },   // precision-ladder thresholds (s since PPS)
+    baseTol: { t1: 1000, t10: 10000, t100: 100000 },   // user-configured values (time-lapse restores these)
     holdoverFade: false, fadeAge: 0,   // significance_fade demo: enabled? + swept holdover age (s) under time-lapse
     utc: false, tzZone: 'UTC', tzSec: 0, tzAge: 0,   // timezone: local (browser IANA) unless forced UTC
     locZone: null,   // zone resolved from a manually-observed position (ZoneDetect); overrides browser zone
@@ -329,12 +331,24 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     // Compress the ladder thresholds so holdover degradation is watchable in seconds (a labelled
     // time-lapse — the same firmware path, just faster to reveal the honesty). Off restores real.
     setTimelapse(on) {
-      state.tol = on ? { t1: 6, t10: 12, t100: 18 } : { t1: 1000, t10: 10000, t100: 100000 };
+      state.tol = on ? { t1: 6, t10: 12, t100: 18 } : { ...state.baseTol };   // off restores the CONFIGURED values
       E.configLine('Tolerance_time_1ms = ' + state.tol.t1);
       E.configLine('Tolerance_time_10ms = ' + state.tol.t10);
       E.configLine('Tolerance_time_100ms = ' + state.tol.t100);
     },
     timelapseOn() { return state.tol.t1 < 100; },
+    // Set the real dash-ladder thresholds (config.txt Tolerance_time_*): update the firmware AND the
+    // driver's cached copy so precision() reports against the values actually in force. Under an
+    // active time-lapse only the base is updated; the drill keeps its compressed ladder until off.
+    setTolerances(t1, t10, t100) {
+      state.baseTol = { t1, t10, t100 };
+      if (state.tol.t1 >= 100) {
+        state.tol = { ...state.baseTol };
+        E.configLine('Tolerance_time_1ms = ' + t1);
+        E.configLine('Tolerance_time_10ms = ' + t10);
+        E.configLine('Tolerance_time_100ms = ' + t100);
+      }
+    },
     // --- SIGNIFICANCE FADE (significance_fade): the firmware computes a live time-interval-error bound
     // from the disciplining residual + temperature model, and fades each sub-second digit out as it
     // stops being significant — a continuous replacement for the fixed dash ladder. Enabling it here
