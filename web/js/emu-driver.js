@@ -7,7 +7,7 @@
 // a cache-bust a dev-server tab can pair NEW app JS with a STALE cached firmware (e.g. a renamed
 // config key silently ignored). Production is immune: the build inlines this module into the bundle.
 import factory from '../emu/clock-fw.mjs?v=2';
-import { VirtualGPS } from '../emu/sim-gps.mjs?v=2';
+import { VirtualGPS } from '../emu/sim-gps.mjs?v=3';
 import { createSatTracker } from './sat-tracker.js?v=2';
 
 const SEG = [0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,0x07,0x7f,0x6f]; // 0-9 seven-seg

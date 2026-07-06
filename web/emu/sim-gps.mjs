@@ -102,15 +102,20 @@ export class VirtualGPS {
       if (this.signal) {
         const locked = sec >= this.acquireSec;
         this.emu.feedNmea(rmc(wallDate, this.lat, this.lon, locked));
-        if (this.satProvider) {
-          // REAL constellation: report the top-N by elevation, ramping N up during acquisition.
-          const all = this.satProvider() || [];
+        // REAL constellation when the provider actually HAS sats (the TLE fetch can fail — offline,
+        // CelesTrak down); otherwise the plausible synthetic ramp. Checking the provider's RESULT,
+        // not the function: a provider that yields null must fall back, or every GSV reports 00
+        // satellites and the face honestly shows "0 SATS" forever.
+        const all = (this.satProvider && this.satProvider()) || [];
+        if (all.length) {
+          // report the top-N by elevation, ramping N up during acquisition.
           const n = locked ? all.length : Math.floor(all.length * Math.min(1, sec / this.acquireSec));
           this.shownSats = all.slice(0, n);
           this.sats = this.shownSats.length;
           for (const line of gsvReal(this.shownSats)) this.emu.feedNmea(line);
-        } else if (this.sats > 0) {
-          this.emu.feedNmea(gsv(this.sats));
+        } else {
+          this.shownSats = [];
+          if (this.sats > 0) this.emu.feedNmea(gsv(this.sats));
         }
         this._drainPendSV();
       }
