@@ -45,6 +45,8 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     setAdc: w('emu_set_adc','void',['number']),
     setVbus: w('emu_set_vbus','void',['number']),
     configLine: w('emu_config_line','void',['string']),
+    configDone: w('emu_config_done','void',[]),          // post-config hook (fires the tempcomp warm-start seed)
+    tcProbe: w('emu_tc_probe','number',['number']),      // tempcomp model read-back (see main_wrap emu_tc_probe)
     setTzOffset: w('emu_set_tz_offset','void',['number']),
     tzOffset: w('emu_tz_offset','number'),
     loadZone: w('emu_load_zone','number',['string']),               // firmware DST engine (real /TZRULES.BIN)
@@ -60,10 +62,14 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     bufb: w('emu_bufb','number',['number']),
     bufcLo: w('emu_bufc_low','number',['number']),
     bufcHi: w('emu_bufc_high','number',['number']),
+    digitFade: w('emu_digit_fade','number',['number']),   // holdover-fade per-digit intensity 0..255
+    uUsFade: w('emu_holdover_u_us','number',[]),          // live 3σ TIE bound U(τ) in µs (what digits fade by)
+    forceHoldover: w('emu_force_holdover','void',['number']),   // pin the holdover age (s) → recompute fade
   };
 
   let state = { lat, lon, configText: config, signal: true, vbus: true, adc: 2600, geo: 'default',
     tol: { t1: 1000, t10: 10000, t100: 100000 },   // precision-ladder thresholds (s since PPS)
+    holdoverFade: false, fadeAge: 0,   // holdover_fade demo: enabled? + swept holdover age (s) under time-lapse
     utc: false, tzZone: 'UTC', tzSec: 0, tzAge: 0,   // timezone: local (browser IANA) unless forced UTC
     locZone: null,   // zone resolved from a manually-observed position (ZoneDetect); overrides browser zone
     live: false };   // LIVE = fed by a real device's NMEA (not the virtual GPS)
@@ -154,6 +160,7 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
   function boot() {
     E.bootCold(Math.floor(Date.now()/1000));
     for (const line of configLines(state.configText)) E.configLine(line);
+    E.configDone();   // post-config hook: warm-start the tempco model if the config carried a seed
     E.setPos(state.lat, state.lon);
     E.setAdc(state.adc);
     E.setVbus(state.vbus ? 1 : 0);
@@ -194,11 +201,18 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     const big = [E.bufb(0)>>2, E.bufb(1)>>2, E.bufb(2)>>2, E.bufb(3)>>2, E.bufb(4)>>2, E.bufcLo(0)].map(decode);
     const small = [E.bufcLo(1), E.bufcLo(2), E.bufcLo(3)].map(decode);
     const dp = (E.bufcHi(0) & 0x10) !== 0;
+    // Holdover-fade per-digit intensity 0..1 for the three sub-second digits [ds, cs, ms] + the
+    // decimal point. 1 = fully significant/lit; <1 = fading as it loses significance in holdover.
+    // The real display fades by PWM dwell (invisible to a latched-segment read), so read it explicitly.
+    // Only meaningful when holdover_fade is enabled; otherwise the digits are simply full (the dash
+    // ladder still blanks them, but that's carried by the segment bytes, not this intensity).
+    const smallFade = state.holdoverFade ? [E.digitFade(0) / 255, E.digitFade(1) / 255, E.digitFade(2) / 255] : [1, 1, 1];
+    const dpFade = state.holdoverFade ? E.digitFade(3) / 255 : 1;
     const p = E.daterow(); let dateRow = '';
     for (let i=1;i<=10;i++){ const c=M.HEAPU8[p+i]; if(c===0x0a||c===0) break; dateRow += (c>=32&&c<127)?String.fromCharCode(c):' '; }
     // colonStep = the firmware's REAL colon-DMA phase, so the face animates the colon in lock
     // with the PPS-disciplined second instead of free-running on wall-clock ms.
-    return { dateRow: dateRow.replace(/\s+$/,''), time: { mode:'cells', big, small, dp, colonsOn:true, colonStep: E.colonStep() } };
+    return { dateRow: dateRow.replace(/\s+$/,''), time: { mode:'cells', big, small, dp, smallFade, dpFade, colonsOn:true, colonStep: E.colonStep() } };
   }
 
   return {
@@ -210,6 +224,26 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
       let steps = Math.round(dtMs);
       while (steps-- > 0) { E.tick(); drain(); }
       if (!state.live) gps.advance(dtMs/1000, new Date());   // in LIVE mode the app feeds real NMEA/PPS
+      // Holdover-fade demo: with GPS dropped and the significance-fade on, the sub-second digits fade
+      // (ms→cs→ds) as their significance is lost. The firmware recomputes the fade once per second, but
+      // the emu runs a reduced loop where that housekeeping doesn't fire — so drive it here each frame
+      // by pinning the holdover age (which also refreshes U(τ) for the panel). Two cadences:
+      //  · time-lapse: the three half-weights are DECADES apart (500 / 5000 / 50000 µs), so grow the age
+      //    EXPONENTIALLY (~one decade per 7 s) — each digit fades at an even, watchable rate.
+      //  · real-time: pin the TRUE holdover age (idempotent on last_pps_time) — the honest ~½-hour fade.
+      // setPrecision's fade overrides the dash ladder either way.
+      if (state.holdoverFade && !state.signal && !state.live) {
+        let age;
+        if (state.tol.t1 < 100) {
+          state.fadeAge = Math.min(3000, (state.fadeAge < 1.2 ? 1.2 : state.fadeAge) * Math.exp(0.33 * dtMs / 1000));
+          age = Math.round(state.fadeAge);
+        } else {
+          age = E.hadPps() ? (E.sincePps() >>> 0) : 0;
+        }
+        E.forceHoldover(age);
+      } else {
+        state.fadeAge = 0;
+      }
       E.poll();
       satsAge += dtMs;
       if (satsAge > 5000) refreshSats();     // sats move slowly; recompute every ~5 s
@@ -241,7 +275,12 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     // real sats currently reported (with az/el/cn0) — for the app to plot the true constellation
     sats() { return gps ? gps.shownSats : []; },
     satsLoaded() { return tracker.loaded; },
-    setSignal(on) { state.signal = !!on; gps.setSignal(state.signal); },
+    setSignal(on) {
+      state.signal = !!on; gps.setSignal(state.signal);
+      // Restoring GPS re-locks: clear any accrued significance-fade so the sub-second digits come back
+      // full rather than showing a stale holdover dim once PPS is fresh again.
+      if (state.signal) { state.fadeAge = 0; if (state.holdoverFade) E.forceHoldover(0); }
+    },
     setVbus(on) { state.vbus = !!on; E.setVbus(state.vbus ? 1 : 0); E.poll(); },
     // --- timezone: local (browser IANA, DST-aware) vs forced UTC. Faithful — drives the
     // firmware's rules[] offset so its own setNextTimestamp does the conversion. ---
@@ -259,6 +298,21 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     precision() {
       const hadPps = !!E.hadPps();
       const since = hadPps ? (E.sincePps() >>> 0) : null;
+      // holdover_fade on: significance is CONTINUOUS — each sub-second digit fades once the live 3σ
+      // time-interval-error bound U(τ) grows past its place value. Read the SAME quantity the digits
+      // fade by (U + which digits remain lit), not the dash-tolerance ladder that holdover_fade
+      // overrides — so this panel can never contradict the face (e.g. "P0 · whole seconds" while a
+      // decisecond is still lit). least-significant lit digit → the level; U(τ) → the ± uncertainty.
+      if (state.holdoverFade && hadPps) {
+        const lit = [E.digitFade(0), E.digitFade(1), E.digitFade(2)].map(v => v > 128);  // ds, cs, ms
+        let level, digitsTo;
+        if (lit[2]) { level = 'P3'; digitsTo = 'milliseconds'; }
+        else if (lit[1]) { level = 'P2'; digitsTo = 'centiseconds'; }
+        else if (lit[0]) { level = 'P1'; digitsTo = 'deciseconds'; }
+        else { level = 'P0'; digitsTo = 'whole seconds'; }
+        return { level, since, hadPps, uUs: Math.round(E.uUsFade()), digitsTo,
+          t1: state.tol.t1, t100: state.tol.t100, signal: state.signal, fade: true };
+      }
       const { t1, t10, t100 } = state.tol;
       let level, digitsTo;
       if (!hadPps) { level = 'P0'; digitsTo = 'whole seconds'; }
@@ -278,6 +332,16 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
       E.configLine('Tolerance_time_100ms = ' + state.tol.t100);
     },
     timelapseOn() { return state.tol.t1 < 100; },
+    // --- SIGNIFICANCE FADE (holdover_fade): the firmware computes a live time-interval-error bound
+    // from the disciplining residual + temperature model, and fades each sub-second digit out as it
+    // stops being significant — a continuous replacement for the fixed dash ladder. Enabling it here
+    // flips the real firmware key; the age-sweep above then makes it watchable. ---
+    setHoldoverFade(on) {
+      state.holdoverFade = !!on;
+      state.fadeAge = 0;
+      E.configLine('holdover_fade = ' + (on ? 'on' : 'off'));
+    },
+    holdoverFadeOn() { return state.holdoverFade; },
     // --- config: twiddle / export / import (all via the real firmware parser) ---
     applyConfig(txt) { state.configText = txt; boot(); },      // reboot with new config.txt
     configLine(line) { for (const l of configLines(line)) E.configLine(l); },  // live single line

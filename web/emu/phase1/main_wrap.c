@@ -35,6 +35,35 @@ unsigned short emu_seg_b(int i){ return next7seg.b[i]; }
 unsigned short emu_bufb(int i){ return buffer_b[i]; }
 unsigned char  emu_bufc_low(int i){ return buffer_c[i].low; }
 unsigned char  emu_bufc_high(int i){ return buffer_c[i].high; }
+/* Holdover-fade per-digit intensity, normalised 0..255 (255 = fully significant / lit). The real
+ * display fades a digit by PWM dwell, which the latched-segment read can't see — so the emulator
+ * reads this explicit channel instead. digit_bright[] = [deciseconds, centiseconds, ms, dp]. */
+unsigned char  emu_digit_fade(int i){ return (i>=0 && i<4) ? (unsigned char)((unsigned)digit_bright[i]*255u/FADE_MAX) : 255; }
+/* The firmware's live 3σ time-interval-error bound U(τ) in µs — the honest ± uncertainty that drives
+ * the fade. Read it so the precision panel shows the SAME quantity the digits fade by, not the (now
+ * overridden) dash-tolerance ladder. */
+double emu_holdover_u_us(void){ return (double)holdover_u_us; }
+/* Tempcomp model read-back — for the companion app's temp-comp panel and warm-start verification.
+ * field: 0 hse_valid · 1 lse_valid · 2 hse_b (ppm/°C) · 3 hse_c (ppm/°C²) · 4 lse_a (ppm)
+ *        5 prior (model order still held from a seed; 0 = real-data-owned) · 6 state char (A/F/S/L/-)
+ *        7 hse_resid (ppm) · 8 tc_t0 (°C) · 9 hse_tmin · 10 hse_tmax */
+double emu_tc_probe(int field){
+  float tpp = (float)tc_tpp();
+  switch (field){
+    case 0:  return tc_hse_valid;
+    case 1:  return tc_lse_valid;
+    case 2:  return tc_hse_valid ? tc_hse_m[1] / tpp : 0;
+    case 3:  return tc_hse_valid ? tc_hse_m[2] / tpp : 0;
+    case 4:  return tc_lse_valid ? tc_lse_m[0] : 0;
+    case 5:  return tc_hse_prior > tc_lse_prior ? tc_hse_prior : tc_lse_prior;
+    case 6:  return (double)(unsigned char)tc_disp_state;
+    case 7:  return tc_hse_valid ? tc_hse_resid / tpp : 0;
+    case 8:  return tc_t0;
+    case 9:  return tc_hse_tmin;
+    case 10: return tc_hse_tmax;
+    default: return 0;
+  }
+}
 unsigned int   emu_now(void){ return (unsigned int)currentTime; }
 
 /* --- boot a GPS-locked civil clock + 1 kHz tick dispatched through the real vector table --- */
@@ -101,10 +130,37 @@ void emu_boot_cold(unsigned int t){
   latitude = 0.0f; longitude = 0.0f;
   for (int i=0;i<SV_COUNT;i++) satview[i] = 255;   /* nothing in view yet */
   satview_stale = 0;
+  /* Tempcomp learned state is .bss/.data on real silicon — a power-on clears it and the startup
+   * copy restores the NAN-initialised config slots. Mirror that so a sim reboot re-learns (and
+   * re-seeds) from scratch instead of inheriting the previous run. tc_nom_load models the 80 MHz
+   * SysTick reload the firmware captures on hardware, so tc_tpp() = 80 (else the tick-domain HSE
+   * model degenerates to 0). Set SysTick->LOAD (as SystemClock_Config does on hardware) but leave
+   * tc_nom_load == 0, exactly as at power-on, so tc_seed_apply / tc_housekeeping capture it themselves
+   * — that way the emulator exercises the real boot ordering rather than masking it. */
+  SysTick->LOAD = 79999;
+  tc_nom_load = 0;
+  tc_hse_valid = tc_lse_valid = 0; tc_hse_prior = tc_lse_prior = 0; tc_seed_done = 0;
+  tc_hse_m[0]=tc_hse_m[1]=tc_hse_m[2]=0; tc_lse_m[0]=tc_lse_m[1]=tc_lse_m[2]=0;
+  tc_cfg_hse[0]=tc_cfg_hse[1]=tc_cfg_hse[2]=NAN; tc_cfg_lse[0]=tc_cfg_lse[1]=tc_cfg_lse[2]=NAN;
+  tc_hse_tmin=tc_hse_tmax=tc_lse_tmin=tc_lse_tmax=0;
+  tc_hse_resid=tc_lse_resid=0; tc_n_hse=tc_n_lse=0;
+  tc_seed=0; tc_seed_lo=tc_seed_hi=0; tc_learn=tc_apply=tc_rtc=0; tc_disp_state='-';
+  for (int i=0;i<40;i++){ tc_bins[i].hse_sum=tc_bins[i].lse_sum=0; tc_bins[i].hse_n=tc_bins[i].lse_n=0; }
   setNextTimestamp(currentTime);
   SetPPS( &PPS );          /* PPS_Init's job: COUNT_NORMAL setPrecision never installs one */
   setPrecision();
 }
+
+/* Config-load complete. The real firmware runs the post-config steps (incl. the tempcomp warm-start
+ * seed) at the end of readConfigFile; the emulator streams config lines through emu_config_line()
+ * instead, so the driver calls this once after the last line to fire the same post-config hook. */
+void emu_config_done(void){ tc_seed_apply(); }
+
+/* Conformance test hooks (tempcomp evolve): inject synthetic HSE samples into a die-temp bin and
+ * force a refit, so the warm-start prior's preserve-then-hand-over behaviour can be exercised without
+ * driving hours of PPS + temperature through the sim. hse_e is the per-sample tick error (≈ ppm·tpp). */
+void emu_tc_fill(int temp, int hse_e, int n){ struct tc_bin *b = &tc_bins[tc_bin_i(temp)]; b->hse_sum += (int32_t)hse_e * n; b->hse_n += n; tc_n_hse += n; }
+void emu_tc_refit(void){ tc_fit(); }
 
 /* Test hook (conformance only): jump the clock into N seconds of holdover without ticking N
  * seconds, so the precision ladder P3->P2->P1->P0 can be exercised cheaply. Sets last_pps_time
@@ -115,6 +171,7 @@ void emu_force_holdover(unsigned secs){
   rtc_last_calibration = (uint32_t)currentTime - secs;
   had_pps = 1;
   setPrecision();
+  if (holdover_fade) computeHoldoverFade();   /* refresh digit_bright[] at the forced age */
 }
 /* Two-axis holdover: age the PPS and the RTC calibration INDEPENDENTLY. The precision ladder is
  * asymmetric — P3/P2 gate on last_pps_time, but P1 gates on rtc_last_calibration — so this is
@@ -124,6 +181,7 @@ void emu_force_holdover2(unsigned pps_secs, unsigned cal_secs){
   rtc_last_calibration = (uint32_t)currentTime - cal_secs;
   had_pps = 1;
   setPrecision();
+  if (holdover_fade) computeHoldoverFade();   /* refresh digit_bright[] at the forced age */
 }
 /* Active colon animation + the civil/alt references. LST/SOLAR install colonModeAlt so the alt
  * timebases read as "not civil time" at a glance (an intentional honesty feature). */

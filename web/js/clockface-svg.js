@@ -430,11 +430,16 @@ export function createClockFaceSVG(container, opts = {}) {
   }
 
   // Light a single digit cell's 7 segments + optional DP from a byte (byte<0 = fully blank).
-  function paintGlyph(desc, byte, dpOn) {
-    const b = state.brightness;
-    // Diff: most cells are unchanged most frames (only the ms digits move). Skip the DOM
-    // writes when byte/dp/brightness/colours all match — this is what keeps SVG cheap.
-    const sig = byte + '|' + (dpOn ? 1 : 0) + '|' + b + '|' + tokens.led + '|' + tokens.ledDim;
+  // fade (0..1): holdover-significance multiplier — dims this digit toward black as it loses
+  // significance. dpFade: the same for the decimal point. Both default to 1 (fully lit).
+  function paintGlyph(desc, byte, dpOn, fade, dpFade) {
+    if (fade == null) fade = 1;
+    if (dpFade == null) dpFade = 1;
+    const b = state.brightness * fade;   // lit-segment opacity
+    const gh = DIM_ALPHA * fade;         // off-segment ghost fades with the digit (→ true black at 0)
+    // Diff: most cells are unchanged most frames (only the ms digits move). Skip the DOM writes
+    // when byte/dp/brightness/fade/colours all match — this is what keeps SVG cheap.
+    const sig = byte + '|' + (dpOn ? 1 : 0) + '|' + state.brightness + '|' + fade + '|' + dpFade + '|' + tokens.led + '|' + tokens.ledDim;
     if (desc._sig === sig) return;
     desc._sig = sig;
     for (let s = 0; s < 7; s++) {
@@ -445,16 +450,17 @@ export function createClockFaceSVG(container, opts = {}) {
         if (GLOW) { desc.glowSegs[s].setAttribute('fill', tokens.led); desc.glowSegs[s].setAttribute('opacity', String(b)); }
       } else {
         desc.crispSegs[s].setAttribute('fill', tokens.ledDim);
-        desc.crispSegs[s].setAttribute('opacity', String(DIM_ALPHA));
+        desc.crispSegs[s].setAttribute('opacity', String(gh));
         if (GLOW) desc.glowSegs[s].setAttribute('opacity', '0');
       }
     }
-    paintDP(desc, dpOn);
+    paintDP(desc, dpOn, dpFade);
   }
 
   // Position + light the DP dot for a digit cell. Point-reflected when the board is inverted,
   // exactly as the canvas drawDateRow / drawTimeRow do.
-  function paintDP(desc, on) {
+  function paintDP(desc, on, fade) {
+    if (fade == null) fade = 1;
     const box = desc.box;
     const inv = state.inverted;
     const ox = DP_OFF_X, oy = DP_OFF_Y; // row-frame units (DP dot is not glyph-scaled)
@@ -466,8 +472,8 @@ export function createClockFaceSVG(container, opts = {}) {
     if (GLOW) { desc.dpGlow.setAttribute('cx', dpX); desc.dpGlow.setAttribute('cy', dpY); }
     if (on) {
       desc.dpCrisp.setAttribute('fill', tokens.led);
-      desc.dpCrisp.setAttribute('opacity', String(state.brightness));
-      if (GLOW) { desc.dpGlow.setAttribute('fill', tokens.led); desc.dpGlow.setAttribute('opacity', String(state.brightness)); }
+      desc.dpCrisp.setAttribute('opacity', String(state.brightness * fade));
+      if (GLOW) { desc.dpGlow.setAttribute('fill', tokens.led); desc.dpGlow.setAttribute('opacity', String(state.brightness * fade)); }
     } else {
       // DP fully hidden when off (the canvas draws no dim ghost for DPs).
       desc.dpCrisp.setAttribute('opacity', '0');
@@ -519,7 +525,11 @@ export function createClockFaceSVG(container, opts = {}) {
       else if (val === 'DASH') byte = DASH;
       else byte = LUT_TIME[val] ?? -1;
       const dpOn = !!(cell.dp && tm.dp);
-      paintGlyph(desc, byte, dpOn);
+      // Holdover-significance fade (emulator/device frames only): the sub-second digits dim toward
+      // black per digit_bright[], the DP by dpFade. Absent (standby / no fade) → 1, i.e. no change.
+      const fade = (cell.role === 'small' && tm.smallFade) ? (tm.smallFade[cell.src] ?? 1) : 1;
+      const dpFade = tm.dpFade != null ? tm.dpFade : 1;
+      paintGlyph(desc, byte, dpOn, fade, dpFade);
     }
   }
 

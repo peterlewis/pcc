@@ -8,9 +8,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# Firmware source: the pinned submodule (web/emu/firmware, used by CI) if it's checked out,
-# else the local clock4-megabuild dev worktree. Either produces the same byte-identical WASM.
-if   [ -d ../firmware/mk4-time ];                 then FW=../firmware/mk4-time
+# Firmware source. Honor an explicit FW= override (feature branches / testing — point it at a
+# .../mk4-time dir); else prefer the pinned submodule (web/emu/firmware, used by CI); else the
+# local clock4-megabuild dev worktree. The submodule + worktree paths give byte-identical WASM.
+if   [ -n "${FW:-}" ] && [ -d "$FW" ];            then :   # explicit override
+elif [ -d ../firmware/mk4-time ];                 then FW=../firmware/mk4-time
 elif [ -d ../../../clock4-megabuild/mk4-time ];   then FW=../../../clock4-megabuild/mk4-time
 else echo "ERROR: firmware source not found — run: git submodule update --init web/emu/firmware" >&2; exit 1; fi
 echo "firmware source: $FW"
@@ -40,7 +42,7 @@ EXPORTS='["_emu_boot","_emu_boot_cold","_emu_tick","_emu_poll","_emu_now","_emu_
 "_emu_MODE_MOON","_emu_MODE_GRID","_emu_MODE_LATLON","_emu_MODE_SUN",
 "_emu_MODE_JULIAN_DATE","_emu_MODE_MODIFIED_JD","_emu_pmtxts_line",
 "_emu_register_file","_emu_load_zone","_emu_offset_at","_emu_set_systick","_emu_zone_from_pos",
-"_emu_flags","_emu_data_valid","_emu_had_pps","_emu_since_pps","_emu_satcount","_malloc","_free"]'
+"_emu_flags","_emu_data_valid","_emu_had_pps","_emu_since_pps","_emu_satcount","_emu_digit_fade","_emu_holdover_u_us","_emu_tc_probe","_emu_config_done","_emu_tc_fill","_emu_tc_refit","_malloc","_free"]'
 
 CFLAGS=("${INCS[@]}" "${DEFS[@]}" -O2 -Wno-implicit-function-declaration)
 
