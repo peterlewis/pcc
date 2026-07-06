@@ -157,6 +157,11 @@
           <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="3.5" width="5" height="5"></rect><path d="M6.5 6h4M8.5 4.5v3"></path></svg>
           DEVICE<span style="margin-left:auto;width:5px;height:5px;border-radius:1px;background:{{roomDot_device}};transition:background .3s"></span>
         </button>
+        <button onClick="{{goRoom_datalink}}" style="position:relative;display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:11px 12px 11px 17px;background:{{roomBg_datalink}};border:0;font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:{{roomC_datalink}};cursor:pointer">
+          <span style="position:absolute;left:0;top:6px;bottom:6px;width:2px;background:{{roomE_datalink}}"></span>
+          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3.5" y="3.5" width="5" height="5" rx="1"></rect><path d="M4.5 1.5h3M4.5 10.5h3"></path></svg>
+          DATALINK<span style="margin-left:auto;width:5px;height:5px;border-radius:1px;background:{{roomDot_datalink}};transition:background .3s"></span>
+        </button>
         <div style="flex:1"></div>
         <div style="padding:0 16px 14px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--txt3)">DESIGN PROTOTYPE · V0.2</div>
       </nav>
@@ -533,7 +538,9 @@
               <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
                 <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">01 · {{faceRoomCap}}</span>
                 <span style="flex:1"></span>
-                <button onClick="{{onHwCalibrate}}" style="{{hwCalBtnStyle}}">{{hwCalBtnLabel}}</button>
+                <sc-if value="{{hwCalShow}}" hint-placeholder-val="{{false}}">
+                  <button onClick="{{onHwCalibrate}}" style="{{hwCalBtnStyle}}">{{hwCalBtnLabel}}</button>
+                </sc-if>
                 <span style="font-family:var(--mono);font-size:var(--fs-micro);letter-spacing:var(--ls-micro);color:var(--txt3)">{{faceStatusLine}}</span>
               </div>
               <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px var(--pad-panel-x) 0">
@@ -581,12 +588,12 @@
             </section>
 
             <section style="background:var(--panel);border:1px solid var(--line)">
-              <div style="display:flex;align-items:center;gap:9px;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">PRECISION — HONEST DIGITS</span><span style="font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.16em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:3px;padding:3px 5px;line-height:1">BETA</span></div>
+              <div style="display:flex;align-items:center;gap:9px;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">PRECISION — SIGNIFICANT DIGITS</span><span style="font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.16em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:3px;padding:3px 5px;line-height:1">BETA</span></div>
               <div style="padding:13px 12px;display:flex;flex-direction:column;gap:11px">
                 <div style="display:flex;align-items:center;gap:13px">
                   <span style="{{precLevelStyle}}">{{precLevel}}</span>
                   <div style="display:flex;flex-direction:column;gap:2px">
-                    <span style="font-size:12px;color:var(--txt);font-family:var(--mono)">±{{precUnc}} · sub-second to {{precDigits}}</span>
+                    <span style="font-size:12px;color:var(--txt);font-family:var(--mono)">±{{precUnc}} · significant to {{precDigits}}</span>
                     <span style="font-size:10px;color:var(--txt3);font-family:var(--mono);letter-spacing:.04em">{{precColon}}</span>
                   </div>
                   <span style="flex:1"></span>
@@ -598,12 +605,13 @@
                 <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
                   <button onClick="{{onDrillTog}}" style="display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--txt3);background:transparent;border:1px solid var(--line2);border-radius:var(--r-1);padding:6px 11px;cursor:pointer" style-hover="color:var(--txt2);border-color:var(--txt3)"><span>{{drillChev}}</span>DRILL</button>
                   <span style="flex:1;min-width:80px"></span>
-                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body);max-width:300px">Drop GPS (with time-lapse on) to watch it hold over and blank the digits it can no longer stand behind.</span>
+                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body);max-width:300px">Turn on Significance Fade, drop GPS, and run time-lapse to watch the sub-second digits fade out as they lose significance.</span>
                 </div>
                 <div class="pcc-acc-body" data-open="{{drillOpenStr}}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
                   <span style="font-family:var(--mono);font-size:var(--fs-micro);font-weight:700;letter-spacing:.14em;color:var(--beta)">SIMULATION ONLY</span>
                   <button onClick="{{onGpsSignal}}" disabled="{{simDemoDisabled}}" style="{{simDemoBtnStyle}}">{{gpsSignalLabel}}</button>
                   <button onClick="{{onTimelapse}}" disabled="{{simDemoDisabled}}" style="{{simDemoBtnStyle}}">{{timelapseLabel}}</button>
+                  <button onClick="{{onHoldoverFade}}" disabled="{{simDemoDisabled}}" style="{{simDemoBtnStyle}}">{{fadeLabel}}</button>
                 </div>
               </div>
             </section>
@@ -973,7 +981,7 @@
               <section style="background:var(--panel);border:1px solid var(--line)">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
                   <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">PRECISION</span>
-                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">THE HONEST FIGURE</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">THE CONFIDENCE FIGURE</span>
                 </div>
                 <div class="pcc-cards" style="display:grid;grid-template-columns:1fr 1fr">
                   <div style="padding:var(--pad-panel-y) var(--pad-panel-x);border-right:1px solid var(--line-soft)">
@@ -1367,6 +1375,10 @@
           </div>
         </sc-if>
 
+        <sc-if value="{{sec_datalink}}" hint-placeholder-val="{{false}}">
+          <div ref="{{refDatalink}}"></div>
+        </sc-if>
+
         <!-- @@PANELS -->
 
       </main>
@@ -1374,6 +1386,6 @@
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=161"></script>
+<script type="module" src="js/app-controller.js?v=173"></script>
 </body>
 </html>

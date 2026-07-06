@@ -78,7 +78,7 @@ class Component extends DcLite {
       hdrBar: localStorage.getItem('pccweb.hdrbar') === '1',
     });
     this.reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=104'), import('./sim.js?v=92'), import('./charts.js?v=91'), import('./realdev.js?v=92'), import('./emu-driver.js?v=14')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=105'), import('./sim.js?v=92'), import('./charts.js?v=91'), import('./realdev.js?v=92'), import('./emu-driver.js?v=21')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -147,7 +147,7 @@ class Component extends DcLite {
     }
   }
 
-  get SECTIONS() { return ['connect', 'devmodes', 'devbright', 'devconfig', 'devadvanced', 'devupdates', 'display', 'satellites', 'signal', 'position', 'timing', 'globe', 'map', 'weather', 'monitor', 'export']; }
+  get SECTIONS() { return ['connect', 'devmodes', 'devbright', 'devconfig', 'devadvanced', 'devupdates', 'display', 'satellites', 'signal', 'position', 'timing', 'globe', 'map', 'weather', 'monitor', 'export', 'datalink']; }
 
   // ---------- refs ----------
   ref(name) {
@@ -407,9 +407,10 @@ class Component extends DcLite {
     return t.utc ? 'UTC · FORCED' : (t.zone + ' · ' + t.label);
   }
 
-  // HONEST DIGITS: turn the firmware's precision ladder into a legible, self-teaching panel.
+  // SIGNIFICANT DIGITS: turn the firmware's precision ladder into a legible, self-teaching panel —
+  // each sub-second digit is shown only while it stays significant under the holdover uncertainty.
   precUi() {
-    const off = { level: '—', style: '', unc: '—', digits: '—', hold: '—', pct: 0, colon: '', gps: 'GPS SIGNAL: ON', tl: 'HOLDOVER TIME-LAPSE: OFF' };
+    const off = { level: '—', style: '', unc: '—', digits: '—', hold: '—', pct: 0, colon: '', gps: 'GPS SIGNAL: ON', tl: 'TIME-LAPSE: OFF', fade: 'SIGNIFICANCE FADE: OFF' };
     // Standby has no GPS discipline — say so plainly instead of showing a precision ladder that
     // isn't backed by any fix. CONNECTED and SIMULATION both drive the firmware (real NMEA / virtual
     // GPS) so both fall through to the live precision ladder below — a connected clock shows its REAL
@@ -424,7 +425,11 @@ class Component extends DcLite {
     const col = COL[p.level] || '#888';
     const unc = p.uUs == null ? 'unknown' : (p.uUs < 1000 ? (p.uUs < 1 ? '<1' : p.uUs) + ' µs' : (p.uUs / 1000).toFixed(p.uUs < 10000 ? 2 : 1) + ' ms');
     const hold = !p.hadPps ? 'NO FIX' : (p.since <= 0 ? 'PPS fresh' : 'holdover ' + p.since + ' s');
-    const pct = !p.hadPps ? 100 : Math.min(100, Math.round(100 * p.since / p.t100));
+    // Meter: how far significance has decayed. On the dash ladder that's holdover age vs the 100 ms
+    // threshold; with the significance-fade on it's driven by which digits remain (the ladder age is
+    // meaningless once holdover_fade overrides it), so map the fade level straight to the meter.
+    const pct = p.fade ? ({ P3: 8, P2: 38, P1: 68, P0: 100 }[p.level] ?? 100)
+      : (!p.hadPps ? 100 : Math.min(100, Math.round(100 * p.since / p.t100)));
     const cn = this.emu.colonName();
     const colon = cn === 'heartbeat' ? 'colon HEARTBEAT — PPS-disciplined (locked)'
       : cn === 'alt_sawtooth' ? 'colon ALT — sidereal/solar, not civil'
@@ -435,6 +440,7 @@ class Component extends DcLite {
       unc, digits: p.digitsTo, hold, pct, colon,
       gps: p.signal ? 'GPS SIGNAL: ON' : 'GPS SIGNAL: OFF',
       tl: this.emu.timelapseOn && this.emu.timelapseOn() ? 'TIME-LAPSE: ON' : 'TIME-LAPSE: OFF',
+      fade: this.emu.holdoverFadeOn && this.emu.holdoverFadeOn() ? 'SIGNIFICANCE FADE: ON' : 'SIGNIFICANCE FADE: OFF',
     };
   }
 
@@ -1390,6 +1396,16 @@ class Component extends DcLite {
     localStorage.setItem('pccweb.section', sec);
     if (this.els.main) this.els.main.scrollTop = 0;
     if (sec === 'export') { this.refreshTelStats(); this.openReview(); }   // log counts + load the scrub model
+    if (sec === 'datalink') this.mountDatalink();                          // lazy-mount the watch-programming UI
+  }
+
+  // Lazily import + mount the Datalink room (self-contained; builds its own DOM in the refDatalink node).
+  mountDatalink() {
+    if (this._dlMounted) return;
+    const host = this.els.datalink;   // populated once the section's sc-if renders the mount div
+    if (!host) { setTimeout(() => this.mountDatalink(), 60); return; }
+    this._dlMounted = true;
+    import('./datalink/datalink-ui.js?v=3').then((m) => m.mountDatalink(host));
   }
   // The redesign collapses the ten sections into four rooms; each room routes to one or more
   // existing sections, surfaced as a sub-tab bar. Content is unchanged — this is IA only.
@@ -1399,6 +1415,7 @@ class Component extends DcLite {
       sky: ['satellites', 'signal', 'position', 'globe', 'map', 'export'], // weather moved to the Display room
       timing: ['timing'],
       device: ['connect', 'devmodes', 'devbright', 'devconfig', 'devadvanced', 'devupdates'], // Monitor is a slide-up drawer, not a room/tab
+      datalink: ['datalink'],   // program a vintage Timex Datalink watch by light (its own room)
     };
   }
   roomOf(sec) { for (const r in this.ROOMS) if (this.ROOMS[r].includes(sec)) return r; return 'display'; }
@@ -1556,27 +1573,27 @@ class Component extends DcLite {
   // ---- hardware calibration: drag the on-screen buttons/screws/sensor, read the mm back --------
   defaultHwConfig() {
     // GOSPEL positions — 100% measured by hand against the corrected board geometry. Right-side
-    // furniture (buttons / brightness sensor / body screws) at x=267; hinge mounting bolts at x=8,
+    // furniture (buttons / brightness sensor / body screws) at x=266; hinge mounting bolts at x=9.5,
     // all three on their own board's row. Radii are in MILLIMETRES (r = radius): screws/sensor r=2,
     // buttons r=1.5. Do not "tidy" these numbers — they are measured, not derived.
     return [
-      { id: 'd-btn-1', row: 'date', kind: 'button', x: 267, y: 0.375, r: 1.5 },
-      { id: 'd-btn-2', row: 'date', kind: 'button', x: 267, y: 0.625, r: 1.5 },
-      { id: 'd-scr-1', row: 'date', kind: 'screw', x: 267, y: 0.16, r: 2 },
-      { id: 'd-scr-2', row: 'date', kind: 'screw', x: 267, y: 0.84, r: 2 },
-      { id: 'd-hng-0', row: 'date', kind: 'screw', x: 8, y: 0.84, r: 2 },
-      { id: 'd-hng-1', row: 'date', kind: 'screw', x: 8, y: 0.16, r: 2 },
-      { id: 'd-hng-2', row: 'date', kind: 'screw', x: 8, y: 0.5, r: 2 },
-      { id: 't-sensor', row: 'time', kind: 'sensor', x: 267, y: 0.5, r: 2 },
-      { id: 't-scr-1', row: 'time', kind: 'screw', x: 267, y: 0.16, r: 2 },
-      { id: 't-scr-2', row: 'time', kind: 'screw', x: 267, y: 0.84, r: 2 },
-      { id: 't-hng-1', row: 'time', kind: 'screw', x: 8, y: 0.5, r: 2 },
-      { id: 't-hng-0', row: 'time', kind: 'screw', x: 8, y: 0.84, r: 2 },
-      { id: 't-hng-2', row: 'time', kind: 'screw', x: 8, y: 0.16, r: 2 },
+      { id: 'd-btn-1', row: 'date', kind: 'button', x: 266, y: 0.375, r: 1.5 },
+      { id: 'd-btn-2', row: 'date', kind: 'button', x: 266, y: 0.625, r: 1.5 },
+      { id: 'd-scr-1', row: 'date', kind: 'screw', x: 266, y: 0.16, r: 2 },
+      { id: 'd-scr-2', row: 'date', kind: 'screw', x: 266, y: 0.84, r: 2 },
+      { id: 'd-hng-0', row: 'date', kind: 'screw', x: 9.5, y: 0.84, r: 2 },
+      { id: 'd-hng-1', row: 'date', kind: 'screw', x: 9.5, y: 0.16, r: 2 },
+      { id: 'd-hng-2', row: 'date', kind: 'screw', x: 9.5, y: 0.5, r: 2 },
+      { id: 't-sensor', row: 'time', kind: 'sensor', x: 266, y: 0.5, r: 2 },
+      { id: 't-scr-1', row: 'time', kind: 'screw', x: 266, y: 0.16, r: 2 },
+      { id: 't-scr-2', row: 'time', kind: 'screw', x: 266, y: 0.84, r: 2 },
+      { id: 't-hng-0', row: 'time', kind: 'screw', x: 9.5, y: 0.16, r: 2 },
+      { id: 't-hng-1', row: 'time', kind: 'screw', x: 9.5, y: 0.5, r: 2 },
+      { id: 't-hng-2', row: 'time', kind: 'screw', x: 9.5, y: 0.84, r: 2 },
     ];
   }
   loadHwConfig() {
-    const VER = 5;   // bump whenever the GOSPEL defaults change → a pre-gospel saved config re-adopts them ONCE
+    const VER = 6;   // bump whenever the GOSPEL defaults change → a pre-gospel saved config re-adopts them ONCE
     let saved = null;
     try { const s = localStorage.getItem('pccweb.hwConfig'); const p = s && JSON.parse(s); if (Array.isArray(p) && p.length) saved = p; } catch (e) {}
     let ver = 0; try { ver = +(localStorage.getItem('pccweb.hwConfigVer') || 0); } catch (e) {}
@@ -1716,8 +1733,9 @@ class Component extends DcLite {
       sky: ci.state === 'LOCKED' ? 'var(--lock)' : (acqLike ? 'var(--acq)' : 'var(--line2)'),// fix health
       timing: ci.state === 'LOCKED' ? 'var(--lock)' : 'var(--line2)',                         // PPS stream live
       device: realDev ? (ci.state === 'LOCKED' ? 'var(--lock)' : 'var(--acq)') : 'var(--line2)', // real hardware
+      datalink: 'var(--line2)',   // watch-programming surface; no live status source
     };
-    for (const room of ['display', 'sky', 'timing', 'device']) {
+    for (const room of ['display', 'sky', 'timing', 'device', 'datalink']) {
       const on = curRoom === room;
       out['goRoom_' + room] = () => this.goRoom(room);
       out['roomBg_' + room] = on ? 'var(--strip)' : 'transparent';
@@ -1741,7 +1759,7 @@ class Component extends DcLite {
         + ';border:0;box-shadow:' + (on ? 'inset 0 -2px 0 var(--led)' : 'none')
         + ';color:' + (on ? 'var(--txt-hi)' : 'var(--txt2)') + ';cursor:pointer;white-space:nowrap';
     }
-    for (const r of ['EntryBg', 'FoldStage', 'TimeHalf', 'DateHalf', 'LinkWrap', 'LinkPlate', 'PinTop', 'PinBot', 'EntryTime', 'EntryDate', 'Hint', 'EntryCap', 'FloorShadow', 'DockSlot', 'HdrDate', 'HdrTime', 'Main', 'Drawer', 'DispWrap', 'DispBar', 'DispDateHalf', 'DispTimeHalf', 'DispDate', 'DispTime', 'DispLink', 'DispPinA', 'DispPinB', 'GammaCurve', 'TextInput', 'CdInput', 'LatIn', 'LonIn', 'EmuLat', 'EmuLon', 'EmuCfg', 'EmuCfgFile', 'Sky', 'Cn0elev', 'Cn0time', 'PosScatter', 'Dop', 'Cont', 'Phase', 'Stair', 'Ppmtemp', 'Globe', 'Map', 'MonLog', 'Cmd', 'ReviewCanvas']) {
+    for (const r of ['EntryBg', 'FoldStage', 'TimeHalf', 'DateHalf', 'LinkWrap', 'LinkPlate', 'PinTop', 'PinBot', 'EntryTime', 'EntryDate', 'Hint', 'EntryCap', 'FloorShadow', 'DockSlot', 'HdrDate', 'HdrTime', 'Main', 'Drawer', 'DispWrap', 'DispBar', 'DispDateHalf', 'DispTimeHalf', 'DispDate', 'DispTime', 'DispLink', 'DispPinA', 'DispPinB', 'GammaCurve', 'TextInput', 'CdInput', 'LatIn', 'LonIn', 'EmuLat', 'EmuLon', 'EmuCfg', 'EmuCfgFile', 'Sky', 'Cn0elev', 'Cn0time', 'PosScatter', 'Dop', 'Cont', 'Phase', 'Stair', 'Ppmtemp', 'Globe', 'Map', 'MonLog', 'Cmd', 'ReviewCanvas', 'Datalink']) {
       out['ref' + r] = this.ref(r[0].toLowerCase() + r.slice(1));
     }
     return out;
@@ -1780,6 +1798,7 @@ class Component extends DcLite {
       faceRoomCap: _mode === 'connected' ? 'MK IV FACE — LIVE HARDWARE' : _mode === 'simulation' ? 'MK IV FACE — SIMULATION' : 'MK IV FACE — SYSTEM TIME',
       // Hardware calibration overlay — drag the board furniture on the face, read the mm here.
       hwCalibrateOn: !!st.hwCalibrate,
+      hwCalShow: false,   // furniture positions are baked to gospel defaults — hide the calibrate entry (flip to re-enable)
       hwCalBtnLabel: st.hwCalibrate ? '● CALIBRATING — TAP TO FINISH' : 'CALIBRATE HARDWARE',
       hwCalBtnStyle: 'font-family:var(--mono);font-size:9px;letter-spacing:.08em;border-radius:4px;padding:4px 9px;cursor:pointer;' + (st.hwCalibrate ? 'color:#000;background:var(--beta);border:1px solid var(--beta)' : 'color:var(--beta);background:transparent;border:1px solid var(--beta)'),
       onHwCalibrate: () => this.toggleHwCalibrate(),
@@ -1909,7 +1928,7 @@ class Component extends DcLite {
       // Honest-digits precision panel (recomputed each render; onTick re-renders at 1 Hz).
       ...(() => { const u = this.precUi(); return {
         precLevel: u.level, precLevelStyle: u.style, precUnc: u.unc, precDigits: u.digits,
-        precHold: u.hold, precMeterPct: u.pct + '%', precColon: u.colon, gpsSignalLabel: u.gps, timelapseLabel: u.tl,
+        precHold: u.hold, precMeterPct: u.pct + '%', precColon: u.colon, gpsSignalLabel: u.gps, timelapseLabel: u.tl, fadeLabel: u.fade,
       }; })(),
       // The GPS-drop / time-lapse toggles are a SIMULATION-ONLY drill — you can't fake a real
       // receiver's signal, and standby is plain host time. Enable them only in simulation; grey
@@ -1919,6 +1938,9 @@ class Component extends DcLite {
         (this.appMode() !== 'simulation' ? 'not-allowed;opacity:.38' : 'pointer'),
       onGpsSignal: () => { if (this.appMode() !== 'simulation' || !this.emu) return; this.emu.setSignal(!this.emu.state().signal); },
       onTimelapse: () => { if (this.appMode() !== 'simulation' || !this.emu) return; this.emu.setTimelapse(!(this.emu.timelapseOn && this.emu.timelapseOn())); },
+      // SIGNIFICANCE FADE toggle — flips the firmware's holdover_fade so sub-second digits fade out
+      // (continuous TIE-driven) instead of dashing (the fixed tolerance ladder). Sim-only, like the rest.
+      onHoldoverFade: () => { if (this.appMode() !== 'simulation' || !this.emu) return; this.emu.setHoldoverFade(!(this.emu.holdoverFadeOn && this.emu.holdoverFadeOn())); },
       // DRILL disclosure — folds the sim-only demo toggles away so the honest readout leads.
       onDrillTog: () => this.setState({ drillOpen: !this.state.drillOpen }),
       drillOpenStr: st.drillOpen ? 'true' : 'false', drillChev: st.drillOpen ? '▾' : '▸',
