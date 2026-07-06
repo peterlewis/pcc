@@ -86,10 +86,16 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
   // Fetch the real /TZRULES.BIN (the same MTZ database the device carries) once and register it, so
   // the firmware's OWN loadRules() can parse full IANA DST rules — byte-faithful across transitions,
   // not a single browser offset. Best-effort: on any failure we fall back to the offset shim below.
+  // Resolve an emu runtime asset (tzrules.bin / tzmap.bin) relative to the DOCUMENT, not this module.
+  // In dev this module lives at web/js/ so '../emu' would work — but the production build inlines this
+  // code into docs/index.html, where import.meta.url is the page and '../emu' escapes the site root.
+  // document.baseURI is index.html's own URL in BOTH cases, so 'emu/<f>' resolves under the app in dev
+  // AND on Pages (…/pcc/emu/<f>). The runtime .mjs/.wasm are bundled (SINGLE_FILE) so only these fetch.
+  const emuAsset = (name) => new URL('emu/' + name, document.baseURI);
   let tzBytes = null, tzZoneLoaded = null, tzMapReady = false, tzMapPromise = null;
   async function initTzEngine() {
     try {
-      const resp = await fetch(new URL('../emu/tzrules.bin', import.meta.url));
+      const resp = await fetch(emuAsset('tzrules.bin'));
       if (resp.ok) { tzBytes = new Uint8Array(await resp.arrayBuffer()); registerFile('/TZRULES.BIN', tzBytes); }
     } catch (e) { /* offline / missing -> offset-shim fallback */ }
   }
@@ -99,7 +105,7 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     if (tzMapReady) return Promise.resolve(true);
     if (!tzMapPromise) tzMapPromise = (async () => {
       try {
-        const resp = await fetch(new URL('../emu/tzmap.bin', import.meta.url));
+        const resp = await fetch(emuAsset('tzmap.bin'));
         if (!resp.ok) return false;
         registerFile('/TZMAP.BIN', new Uint8Array(await resp.arrayBuffer()));
         tzMapReady = true; return true;

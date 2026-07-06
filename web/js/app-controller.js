@@ -72,7 +72,7 @@ class Component extends DcLite {
       hdrBar: localStorage.getItem('pccweb.hdrbar') === '1',
     });
     this.reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=102'), import('./sim.js?v=91'), import('./charts.js?v=91'), import('./realdev.js?v=91'), import('./emu-driver.js?v=12')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=102'), import('./sim.js?v=91'), import('./charts.js?v=91'), import('./realdev.js?v=91'), import('./emu-driver.js?v=13')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S

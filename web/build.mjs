@@ -22,6 +22,21 @@ const stripQuery = {
   },
 };
 
+// The emcc SINGLE_FILE firmware (emu/clock-fw.mjs) carries a Node code path (import node:module etc.)
+// guarded at runtime by ENVIRONMENT_IS_NODE — dead in the browser, but esbuild still can't RESOLVE
+// node:* when bundling an IIFE. Stub them to an inert module so the browser bundle builds; the wasm is
+// inlined (SINGLE_FILE) so nothing here is actually needed at runtime in the browser.
+const stubNodeBuiltins = {
+  name: 'stub-node-builtins',
+  setup(build) {
+    build.onResolve({ filter: /^node:/ }, (a) => ({ path: a.path, namespace: 'node-stub' }));
+    build.onLoad({ filter: /.*/, namespace: 'node-stub' }, () => ({
+      contents: 'export const createRequire = () => (() => ({})); export default {};',
+      loader: 'js',
+    }));
+  },
+};
+
 // 1. Bundle the app entry (pulls in dc-lite + the dynamic clockface/sim/charts/realdev
 //    imports + serial/nmea) into one IIFE.
 const result = await esbuild.build({
@@ -31,7 +46,7 @@ const result = await esbuild.build({
   minify: true,
   target: 'es2020',
   legalComments: 'none',
-  plugins: [stripQuery],
+  plugins: [stripQuery, stubNodeBuiltins],
   write: false,
 });
 const bundle = result.outputFiles[0].text;
@@ -40,6 +55,10 @@ const bundle = result.outputFiles[0].text;
 let html = readFileSync(resolve(web, 'index.html'), 'utf8');
 const css = readFileSync(resolve(web, 'css/base.css'), 'utf8').replace(/\.\.\/fonts\//g, 'fonts/');
 html = html.replace(/<link rel="stylesheet" href="css\/base\.css(?:\?v=\d+)?">/, `<style>\n${css}\n</style>`);
+// pcc-tokens.css (design-return tokens) — inline it too, AFTER base.css so its :root additions win.
+const tokens = readFileSync(resolve(web, 'css/pcc-tokens.css'), 'utf8');
+html = html.replace(/<link rel="stylesheet" href="css\/pcc-tokens\.css(?:\?v=\d+)?">/, `<style>\n${tokens}\n</style>`);
+if (/href="css\/pcc-tokens\.css/.test(html)) throw new Error('pcc-tokens.css link not inlined');
 const scriptRe = /<script type="module" src="js\/app-controller\.js(?:\?v=\d+)?"><\/script>/;
 if (!scriptRe.test(html)) throw new Error('module <script> tag not found in index.html');
 html = html.replace(scriptRe, `<script>\n${bundle}\n</script>`);
@@ -74,6 +93,14 @@ const emuBundle = emuBuild.outputFiles[0].text;
 emuHtml = emuHtml.replace(emuScriptRe, `<script type="module">\n${emuBundle}\n</script>`);
 mkdirSync(resolve(docs, 'emu'), { recursive: true });   // same relative path as dev (emu/clock-emu.html)
 writeFileSync(resolve(docs, 'emu', 'clock-emu.html'), emuHtml);
+// Emulator runtime binaries fetched at runtime by the app (the firmware .mjs/.wasm are bundled via
+// SINGLE_FILE, but these are streamed): the firmware IANA tz engine (tzrules.bin) and the ZoneDetect
+// map (tzmap.bin, Git LFS). Without these the app's timezone engine silently falls back to browser Intl.
+for (const bin of ['tzrules.bin', 'tzmap.bin']) {
+  const src = resolve(web, 'emu', bin);
+  if (existsSync(src)) { cpSync(src, resolve(docs, 'emu', bin)); console.log(`copied docs/emu/${bin} (${kb(statSync(src).size)} KB)`); }
+  else console.warn(`WARN: web/emu/${bin} missing — the deployed tz engine will fall back to browser Intl`);
+}
 const emuExternal = [...emuHtml.matchAll(/\b(?:src|href)\s*=\s*["'](https?:)?\/\/[^"']+/gi)].map((m) => m[0]);
 console.log(`built docs/emu/clock-emu.html (${kb(emuHtml.length)} KB, self-contained firmware wasm)`);
 if (emuExternal.length) { console.error('WARNING external refs in emu:', emuExternal); process.exit(1); }
