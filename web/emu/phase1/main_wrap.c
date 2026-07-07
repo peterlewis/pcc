@@ -16,6 +16,12 @@
 #else
 #  define EMU_HAS_ASTRO 0
 #endif
+#ifndef EMU_HAS_CUCKOO
+#  define EMU_HAS_CUCKOO 0
+#endif
+#ifndef EMU_HAS_TEMPCOMP
+#  define EMU_HAS_TEMPCOMP 0
+#endif
 #ifndef EMU_HAS_ALT
 #  define EMU_HAS_ALT 1
 #endif
@@ -49,15 +55,24 @@ unsigned char  emu_bufc_high(int i){ return buffer_c[i].high; }
 /* Holdover-fade per-digit intensity, normalised 0..255 (255 = fully significant / lit). The real
  * display fades a digit by PWM dwell, which the latched-segment read can't see — so the emulator
  * reads this explicit channel instead. digit_bright[] = [deciseconds, centiseconds, ms, dp]. */
+#if EMU_HAS_TEMPCOMP
 unsigned char  emu_digit_fade(int i){ return (i>=0 && i<4) ? (unsigned char)((unsigned)digit_bright[i]*255u/FADE_MAX) : 255; }
+#else
+unsigned char  emu_digit_fade(int i){ (void)i; return 255; }   /* lean branch: no significance fade */
+#endif
 /* The firmware's live 3σ time-interval-error bound U(τ) in µs — the honest ± uncertainty that drives
  * the fade. Read it so the precision panel shows the SAME quantity the digits fade by, not the (now
  * overridden) dash-tolerance ladder. */
+#if EMU_HAS_TEMPCOMP
 double emu_holdover_u_us(void){ return (double)holdover_u_us; }
+#else
+double emu_holdover_u_us(void){ return 0; }
+#endif
 /* Tempcomp model read-back — for the companion app's temp-comp panel and warm-start verification.
  * field: 0 hse_valid · 1 lse_valid · 2 hse_b (ppm/°C) · 3 hse_c (ppm/°C²) · 4 lse_a (ppm)
  *        5 prior (model order still held from a seed; 0 = real-data-owned) · 6 state char (A/F/S/L/-)
  *        7 hse_resid (ppm) · 8 tc_t0 (°C) · 9 hse_tmin · 10 hse_tmax */
+#if EMU_HAS_TEMPCOMP
 double emu_tc_probe(int field){
   float tpp = (float)tc_tpp();
   switch (field){
@@ -75,6 +90,9 @@ double emu_tc_probe(int field){
     default: return 0;
   }
 }
+#else
+double emu_tc_probe(int field){ (void)field; return 0; }
+#endif
 unsigned int   emu_now(void){ return (unsigned int)currentTime; }
 
 /* --- boot a GPS-locked civil clock + 1 kHz tick dispatched through the real vector table --- */
@@ -128,6 +146,9 @@ void emu_poll(void){
 #if EMU_HAS_ALT
   alt_update();
 #endif
+#if EMU_HAS_CUCKOO
+  cuckoo_poll();             /* scheduler + the 10 ms animation tick (main-loop work) */
+#endif
   monitor_vbus();          /* process any VBUS (fold/power) connect/disconnect this pass */
 }
 
@@ -178,6 +199,7 @@ void emu_boot_cold(unsigned int t){
    * tc_nom_load == 0, exactly as at power-on, so tc_seed_apply / tc_housekeeping capture it themselves
    * — that way the emulator exercises the real boot ordering rather than masking it. */
   SysTick->LOAD = 79999;
+#if EMU_HAS_TEMPCOMP
   tc_nom_load = 0;
   tc_hse_valid = tc_lse_valid = 0; tc_hse_prior = tc_lse_prior = 0; tc_seed_done = 0;
   tc_hse_m[0]=tc_hse_m[1]=tc_hse_m[2]=0; tc_lse_m[0]=tc_lse_m[1]=tc_lse_m[2]=0;
@@ -186,6 +208,7 @@ void emu_boot_cold(unsigned int t){
   tc_hse_resid=tc_lse_resid=0; tc_n_hse=tc_n_lse=0;
   tc_seed=0; tc_seed_pending=0; tc_seed_lo=tc_seed_hi=0; tc_learn=tc_apply=tc_rtc=0; tc_disp_state='-';
   for (int i=0;i<40;i++){ tc_bins[i].hse_sum=tc_bins[i].lse_sum=0; tc_bins[i].hse_n=tc_bins[i].lse_n=0; }
+#endif
   colon_dma_ms = 0;             /* power-on: colon DMA starts from table index 0 */
   setNextTimestamp(currentTime);
   SetPPS( &PPS );          /* PPS_Init's job: COUNT_NORMAL setPrecision never installs one */
@@ -195,13 +218,22 @@ void emu_boot_cold(unsigned int t){
 /* Config-load complete. The real firmware runs the post-config steps (incl. the tempcomp warm-start
  * seed) at the end of readConfigFile; the emulator streams config lines through emu_config_line()
  * instead, so the driver calls this once after the last line to fire the same post-config hook. */
+#if EMU_HAS_TEMPCOMP
 void emu_config_done(void){ tc_seed_apply(); }
+#else
+void emu_config_done(void){}
+#endif
 
 /* Conformance test hooks (tempcomp evolve): inject synthetic HSE samples into a die-temp bin and
  * force a refit, so the warm-start prior's preserve-then-hand-over behaviour can be exercised without
  * driving hours of PPS + temperature through the sim. hse_e is the per-sample tick error (≈ ppm·tpp). */
+#if EMU_HAS_TEMPCOMP
 void emu_tc_fill(int temp, int hse_e, int n){ struct tc_bin *b = &tc_bins[tc_bin_i(temp)]; b->hse_sum += (int32_t)hse_e * n; b->hse_n += n; tc_n_hse += n; }
 void emu_tc_refit(void){ tc_fit(); }
+#else
+void emu_tc_fill(int temp, int hse_e, int n){ (void)temp; (void)hse_e; (void)n; }
+void emu_tc_refit(void){}
+#endif
 
 /* Test hook (conformance only): jump the clock into N seconds of holdover without ticking N
  * seconds, so the precision ladder P3->P2->P1->P0 can be exercised cheaply. Sets last_pps_time
@@ -212,7 +244,9 @@ void emu_force_holdover(unsigned secs){
   rtc_last_calibration = (uint32_t)currentTime - secs;
   had_pps = 1;
   setPrecision();
+#if EMU_HAS_TEMPCOMP
   if (significance_fade) computeHoldoverFade();   /* refresh digit_bright[] at the forced age */
+#endif
 }
 /* Two-axis holdover: age the PPS and the RTC calibration INDEPENDENTLY. The precision ladder is
  * asymmetric — P3/P2 gate on last_pps_time, but P1 gates on rtc_last_calibration — so this is
@@ -222,7 +256,9 @@ void emu_force_holdover2(unsigned pps_secs, unsigned cal_secs){
   rtc_last_calibration = (uint32_t)currentTime - cal_secs;
   had_pps = 1;
   setPrecision();
+#if EMU_HAS_TEMPCOMP
   if (significance_fade) computeHoldoverFade();   /* refresh digit_bright[] at the forced age */
+#endif
 }
 /* Active colon animation + the civil/alt references. LST/SOLAR install colonModeAlt so the alt
  * timebases read as "not civil time" at a glance (an intentional honesty feature). */
@@ -231,6 +267,35 @@ int emu_colon_mode(void){ return colonMode; }
  * zeroed by the firmware's own colonAnimationSync() at even-second PPS. This is the index the
  * hardware DMA would be reading — NOT a reconstruction from currentTime parity, which flips
  * mid-second (.900 prep, RMC decode) and chopped the animation into segments. */
+/* --- Cuckoo animations (CUCKOO_SPEC.md; cuckoo branch only) ------------------------------
+ * The engine's per-segment levels (0..16) let the face render the dwell-dither greyscale the
+ * hardware plays, exactly like emu_digit_fade renders the significance fade. emu_cuckoo_set
+ * with interval 99 is the test hook: force-start an animation without waiting for a quarter. */
+int emu_cuckoo_active(void){
+#if EMU_HAS_CUCKOO
+  return ck_scan ? 1 : 0;
+#else
+  return 0;
+#endif
+}
+int emu_cuckoo_level(int d, int s){
+#if EMU_HAS_CUCKOO
+  if (!ck_scan) return 16;                       /* idle: the plain face is 'fully lit' */
+  return (d >= 0 && d < CK_DIGITS && s >= 0 && s < 8) ? ck_levels[d][s] : 16;
+#else
+  (void)d; (void)s; return 16;
+#endif
+}
+void emu_cuckoo_set(int anim, int interval){
+#if EMU_HAS_CUCKOO
+  if (anim >= 0 && anim < CKA_COUNT) cuckoo_animation = (uint8_t)anim;
+  if (interval == 99) { ck_carry_n = 5; ck_start(cuckoo_animation); }
+  else if (interval >= 0 && interval <= 2) cuckoo_interval = (uint8_t)interval;
+#else
+  (void)anim; (void)interval;
+#endif
+}
+
 int emu_colon_step(void){
   return (int)((colon_dma_ms / 10u) % 200u);
 }
@@ -275,10 +340,14 @@ uint8_t CDC_Copy_Transmit(uint8_t* buf, uint16_t Len){
 /* Drive one $PMTXTS emit from the values captured at the last emu_pps() edge; return the sentence
  * (with trailing CR/LF), or "" if no record is pending. */
 const char* emu_pmtxts_line(void){
+#if EMU_HAS_TEMPCOMP   /* $PMTXTS ships with the PR #5+ branches; stock master has no emitter */
   emu_pmtxts_buf[0] = 0;
   pps_ts_enabled = 1;
   hUsbDeviceFS.dev_state = USBD_STATE_CONFIGURED;  /* satisfy emitPPSTimestamp's host-present gate */
   if (pps_record_pending) emitPPSTimestamp();
+#else
+  emu_pmtxts_buf[0] = 0;
+#endif
   return emu_pmtxts_buf;
 }
 

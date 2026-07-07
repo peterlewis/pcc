@@ -42,7 +42,7 @@ EXPORTS='["_emu_boot","_emu_boot_cold","_emu_tick","_emu_poll","_emu_now","_emu_
 "_emu_MODE_MOON","_emu_MODE_GRID","_emu_MODE_LATLON","_emu_MODE_SUN",
 "_emu_MODE_JULIAN_DATE","_emu_MODE_MODIFIED_JD","_emu_pmtxts_line",
 "_emu_register_file","_emu_load_zone","_emu_offset_at","_emu_set_systick","_emu_zone_from_pos",
-"_emu_flags","_emu_data_valid","_emu_had_pps","_emu_since_pps","_emu_satcount","_emu_digit_fade","_emu_holdover_u_us","_emu_tc_probe","_emu_config_done","_emu_tc_fill","_emu_tc_refit","_malloc","_free"]'
+"_emu_flags","_emu_data_valid","_emu_had_pps","_emu_since_pps","_emu_satcount","_emu_digit_fade","_emu_holdover_u_us","_emu_tc_probe","_emu_config_done","_emu_tc_fill","_emu_tc_refit","_emu_cuckoo_active","_emu_cuckoo_level","_emu_cuckoo_set","_malloc","_free"]'
 
 CFLAGS=("${INCS[@]}" "${DEFS[@]}" -O2 -Wno-implicit-function-declaration)
 
@@ -55,6 +55,14 @@ fi
 # branches run postConfigCleanup straight from the ISR and have no flag to acknowledge.
 if grep -q "delayedPostConfigCleanup" "$FW/Core/Src/main.c"; then
   CFLAGS+=(-DEMU_HAS_DELAYED_CLEANUP=1)
+fi
+# Cuckoo display animations (CUCKOO_SPEC.md) live on the cuckoo branch.
+if grep -q "cuckoo_poll" "$FW/Core/Src/main.c"; then
+  CFLAGS+=(-DEMU_HAS_CUCKOO=1)
+fi
+# Self-learning tempcomp + significance fade (PR #9 / rollup); stock master lacks them.
+if grep -q "significance_fade" "$FW/Core/Src/main.c"; then
+  CFLAGS+=(-DEMU_HAS_TEMPCOMP=1)
 fi
 
 echo "[1/3] compile firmware + shim objects from source"
