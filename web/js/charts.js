@@ -1,6 +1,8 @@
 // charts.js — flat instrument-grade canvas charts for PCC Web.
 // Discipline: hairline graticules, square markers, mono labels, no gradients, no glow.
 
+import { robustPhaseStats } from './ppsts.js?v=14';
+
 const TAU = Math.PI * 2;
 
 export function c2d(canvas) {
@@ -41,7 +43,8 @@ export function drawSky(canvas, tok, data, opts) {
     const lum = m ? (parseInt(m[1], nb) * 0.299 + parseInt(m[2], nb) * 0.587 + parseInt(m[3], nb) * 0.114) : 0;
     const onLight = lum > 140, k = onLight ? 2.2 : 1;   // lift a touch if bg is bright
     const blob = (x, y, cn0, rad, a) => {
-      const q = cn0 == null ? 0 : Math.max(0, Math.min(1, (cn0 - 20) / 28));
+      // unknown C/N0 (older persisted trail points) → neutral mid-quality, not "weak red"
+      const q = cn0 == null ? 0.5 : Math.max(0, Math.min(1, (cn0 - 20) / 28));
       const c = Math.round(255 * (1 - q)) + ',' + Math.round(200 * q) + ',80,';
       const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
       g.addColorStop(0, 'rgba(' + c + Math.min(0.5, a * k).toFixed(3) + ')');   // cap keeps multiply from over-darkening
@@ -51,12 +54,14 @@ export function drawSky(canvas, tok, data, opts) {
     ctx.save();
     ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.clip();     // keep blobs inside the sky disc
     ctx.globalCompositeOperation = onLight ? 'multiply' : 'lighter';
-    // trail history — newest-first, ≥10 px apart, ≤32 samples per sat: a soft base field of travelled sky
+    // trail history — newest-first, ≥10 px apart, ≤32 samples per sat: a soft base field of
+    // travelled sky. Points without cn0 (older persisted history) still contribute at neutral
+    // quality — dropping them left the heatmap with no history at all, i.e. a dead control.
     for (const tr of data.trails.values()) {
       let lx = -1e9, ly = -1e9, n = 0;
       for (let i = tr.length - 1; i >= 0 && n < 32; i--) {
         const p = tr[i];
-        if (p.el < 0 || p.cn0 == null) continue;
+        if (p.el < 0) continue;
         const [x, y] = pt(p.az, p.el);
         if ((x - lx) * (x - lx) + (y - ly) * (y - ly) < 100) continue;
         blob(x, y, p.cn0, 26, 0.05); lx = x; ly = y; n++;
@@ -367,16 +372,24 @@ export function drawPhase(canvas, tok, list, spanSec, now, holdSince) {
   clear(ctx, w, h, tok);
   const fr = frame(ctx, w, h, tok, { ml: 40 });
   const vals = list.filter((p) => now - p.t <= spanSec).map((p) => p.us);
-  // Plot jitter about the mean: real hardware sits ~999 µs off the boundary (fixed
-  // ISR latency), which isn't jitter — without centring it draws as a flat line high
-  // up. Sim values are already ~zero-mean, so this is a no-op there.
-  const mean = vals.length ? vals.reduce((a, v) => a + v, 0) / vals.length : 0;
-  const sig = vals.length ? Math.sqrt(vals.reduce((a, v) => a + (v - mean) * (v - mean), 0) / vals.length) : 30;
+  // Plot jitter about the MEDIAN with a MAD-based σ: real hardware sits ~999 µs off the
+  // boundary (fixed ISR latency — not jitter), and shows occasional single-sample ~−1 ms
+  // capture artifacts (lost ms-tick under an IRQ-masked window). Mean/σ let a handful of
+  // those smear a ~10 ns clock into a ~77 µs band; robust stats keep the band honest and
+  // the artifacts are counted + labelled instead. Sim values are ~zero-mean: near no-op.
+  const { med: mean, sigma: sig, outliers } = vals.length ? robustPhaseStats(vals) : { med: 0, sigma: 30, outliers: 0 };
   const lim = Math.max(80, sig * 3.4);
   const Y = (us) => fr.Y((us + lim) / (2 * lim));
   yTicks(ctx, tok, fr, [-lim * 0.75, 0, lim * 0.75].map((v) => ({ v, f: (v + lim) / (2 * lim) })), (v) => (v > 0 ? '+' : '') + Math.round(v));
   ctx.font = F9; ctx.fillStyle = tok.txt3; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   ctx.fillText('µs', fr.m.l + 4, fr.m.t + 3);
+  // Capture artifacts are clipped to the frame (line 391) — say how many, so the flat robust
+  // band and the spikes read as "clock is fine, N captures glitched", not hidden data.
+  if (outliers) {
+    ctx.textAlign = 'right'; ctx.fillStyle = tok.acq;
+    ctx.fillText(outliers + ' ANOMALOUS EDGE' + (outliers > 1 ? 'S' : '') + ' · CLIPPED', fr.m.l + fr.iw - 4, fr.m.t + 3);
+    ctx.fillStyle = tok.txt3; ctx.textAlign = 'left';
+  }
   xTimeTicks(ctx, tok, fr, h, spanSec);
   // ±1σ band — soft red, the design's signature timing fill
   ctx.fillStyle = tok.led; ctx.globalAlpha = 0.08;

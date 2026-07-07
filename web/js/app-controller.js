@@ -82,7 +82,7 @@ class Component extends DcLite {
       hdrBar: localStorage.getItem('pccweb.hdrbar') === '1',
     });
     this.reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=105'), import('./sim.js?v=93'), import('./charts.js?v=92'), import('./realdev.js?v=93'), import('./emu-driver.js?v=27'), import('./ppsts.js?v=13')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=105'), import('./sim.js?v=94'), import('./charts.js?v=93'), import('./realdev.js?v=94'), import('./emu-driver.js?v=27'), import('./ppsts.js?v=14')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -1438,20 +1438,21 @@ class Component extends DcLite {
 
   timingStats() {
     const S = this.session && this.session.S;
-    if (!S) return { rms: 0, p2p: 0, ppm: 0, hold: 0, temp: 0, seq: 0, drop: 0, locked: true, fit: null };
+    if (!S) return { rms: 0, p2p: 0, anom: 0, ppm: 0, hold: 0, temp: 0, seq: 0, drop: 0, locked: true, fit: null };
     // .t is in whole seconds (sim tick floors ms→s; realdev matches). Last 900 s.
     const nowS = Math.floor(Date.now() / 1000);
     const win = S.pps.list.filter((p) => nowS - p.t <= 900).map((p) => p.us);
-    // Jitter is deviation about the MEAN. Absolute offset (fixed ISR latency, the
-    // ~1 ms sub-second DC term) isn't recoverable over USB and isn't jitter — a real
-    // Mk IV sits ~999 µs off the boundary yet holds ~10 ns RMS, so subtract the mean
-    // before squaring or the metric reports the offset as jitter (verified on hardware).
-    const mean = win.length ? win.reduce((a, v) => a + v, 0) / win.length : 0;
-    const rms = win.length ? Math.sqrt(win.reduce((a, v) => a + (v - mean) * (v - mean), 0) / win.length) : 0;
+    // Jitter is deviation about the CENTRE, robustly. The absolute offset (fixed ISR latency,
+    // the ~1 ms sub-second DC term) isn't jitter, and neither are the occasional single-sample
+    // ~−1 ms capture artifacts (lost ms-tick under an IRQ-masked window) — a real Mk IV holds
+    // ~10 ns RMS, and a handful of artifacts in a mean/σ smear that into tens of µs. Median/MAD
+    // (robustPhaseStats) reports the clock's real jitter; artifacts are counted as `anom` and
+    // peak-to-peak is taken over the inliers only.
+    const R = win.length && this.PT ? this.PT.robustPhaseStats(win) : { med: 0, sigma: 0, thr: 50, outliers: 0 };
     let mn = Infinity, mx = -Infinity;
-    for (const v of win) { if (v < mn) mn = v; if (v > mx) mx = v; }
+    for (const v of win) { if (Math.abs(v - R.med) > R.thr) continue; if (v < mn) mn = v; if (v > mx) mx = v; }
     return {
-      rms, p2p: win.length ? mx - mn : 0, ppm: S.pps.ppm,
+      rms: R.sigma, p2p: mx > mn ? mx - mn : 0, anom: R.outliers, ppm: S.pps.ppm,
       hold: (S.pps.flags & 2) ? 0 : Math.floor(S.pps.sincecal),
       temp: S.pps.temp, seq: S.pps.seq, drop: S.pps.dropped,
       locked: !!(S.pps.flags & 2), fit: this.session.fit(),
@@ -2362,7 +2363,13 @@ class Component extends DcLite {
       // Real device with no $PMTXTS yet (stock FW, or before `pps = on`): the KPIs
       // have no honest value — dash them rather than show stale sim scalars or 0s.
       // In sim mode `streaming` is true (sim fills pps.list), so tiles show as before.
-      tJitter: noData ? '—' : (T.rms || 0).toFixed(1), tP2p: noData ? '—' : (T.p2p || 0).toFixed(0),
+      // Robust jitter on real hardware is ns-scale — show ns below 1 µs instead of "0.0 µs".
+      ...((() => {
+        const f = (v, dp) => v > 0 && v < 1 ? [String(Math.max(1, Math.round(v * 1000))), 'ns'] : [v.toFixed(dp), 'µs'];
+        const [jv, ju] = f(T.rms || 0, 1), [pv, pu] = f(T.p2p || 0, 0);
+        return noData ? { tJitter: '—', tJitterU: 'µs', tP2p: '—', tP2pU: 'µs' }
+                      : { tJitter: jv, tJitterU: ju, tP2p: pv, tP2pU: pu };
+      })()),
       tDrift: noData ? '—' : (T.ppm || 0).toFixed(2), tHold: noData ? '—' : (T.locked ? '0' : String(T.hold || 0)),
       tHoldSub: noData ? 'NO PPS — CONNECT A CLOCK OR SIMULATE' : (T.locked ? 'GPS DISCIPLINED' : 'FREE-RUNNING — LSE (TEMP COMP HOST-SIDE)'),
       tTemp: noData ? '—' : (T.temp || 0).toFixed(1), tSeq: noData ? '—' : String(T.seq || 0), tDrop: noData ? '—' : String(T.drop || 0),
@@ -2644,7 +2651,7 @@ class Component extends DcLite {
       for (const s of r.sats) {
         const key = s.key || ('G' + String(s.prn).padStart(2, '0'));
         let h = cn0Hist.get(key); if (!h) { h = []; cn0Hist.set(key, h); } h.push({ t: r.t, v: s.cn0 });
-        let tr = trails.get(key); if (!tr) { tr = []; trails.set(key, tr); } tr.push({ t: r.t, az: s.az, el: s.el });
+        let tr = trails.get(key); if (!tr) { tr = []; trails.set(key, tr); } tr.push({ t: r.t, az: s.az, el: s.el, cn0: s.cn0 });
       }
       if (r.pps) {
         if (r.pps.phaseUs != null) ppsList.push({ t: r.t, us: r.pps.phaseUs });

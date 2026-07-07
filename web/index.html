@@ -1033,11 +1033,11 @@
               <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
                 <div style="padding:var(--pad-panel-y) var(--pad-panel-x);border-right:1px solid var(--line-soft)">
                   <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">PHASE JITTER RMS</div>
-                  <div style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--txt)">{{tJitter}}<span style="font-size:11px;font-weight:400;color:var(--txt3)"> µs</span></div>
+                  <div style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--txt)">{{tJitter}}<span style="font-size:11px;font-weight:400;color:var(--txt3)"> {{tJitterU}}</span></div>
                 </div>
                 <div style="padding:var(--pad-panel-y) var(--pad-panel-x);border-right:1px solid var(--line-soft)">
                   <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">PEAK-TO-PEAK</div>
-                  <div style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--txt)">{{tP2p}}<span style="font-size:11px;font-weight:400;color:var(--txt3)"> µs</span></div>
+                  <div style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--txt)">{{tP2p}}<span style="font-size:11px;font-weight:400;color:var(--txt3)"> {{tP2pU}}</span></div>
                 </div>
                 <div style="padding:var(--pad-panel-y) var(--pad-panel-x);border-right:1px solid var(--line-soft)">
                   <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">OSC DRIFT</div>
@@ -1063,7 +1063,7 @@
               <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
                   <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">PHASE AT PPS EDGE</span>
-                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">CENTRED ms-TICK · ±1σ BAND</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">MEDIAN-CENTRED · ROBUST ±1σ BAND</span>
                 </div>
                 <div style="padding:12px;flex:1">
                   <canvas ref="{{refPhase}}" style="width:100%;height:240px;display:block"></canvas>
@@ -1398,6 +1398,6 @@
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=186"></script>
+<script type="module" src="js/app-controller.js?v=187"></script>
 </body>
 </html>

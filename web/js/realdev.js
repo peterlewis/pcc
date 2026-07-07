@@ -14,7 +14,7 @@
 
 import { Clock } from './serial.js?v=12';
 import { parseGGA, parseRMC, parseGSA, GSVBuffer, constellationFromTalker } from './nmea.js?v=1';
-import { parsePMTXTS, centrePhase } from './ppsts.js?v=13';
+import { parsePMTXTS, centrePhase } from './ppsts.js?v=14';
 // subSatellitePoint reconstructs a sat's ground point from observer-relative
 // az/el (all GSV gives us) — the exact inverse of the sim's forward azel(). The
 // import also runs satpass.js's augmentConstellations() IIFE, which sets
@@ -70,6 +70,7 @@ export function createRealDevice(session) {
     });
 
     const gtrailLast = new Map(); // sat.key → last wall-clock ms a ground-trail point was appended
+    const trailLast = new Map();  // sat.key → last wall-clock ms a polar az/el trail point was appended
     let obsSeeded = false;        // adopt the device's own fix as the observer once per connection
     let obsAtConnect = null;      // pre-connect observer, restored on disconnect
     let lastHistT = 0;            // last whole-second we sampled POSITION/DOP/continuity history
@@ -139,6 +140,16 @@ export function createRealDevice(session) {
                 gt.push({ lat: sp.lat, lon: sp.lon });
                 if (gt.length > 40) gt.shift();
                 gtrailLast.set(key, now);
+            }
+            // Polar az/el trail — mirrors sim.tick's cadence (1 pt / 30 s / sat, cap 180
+            // ≈ 90 min). Without this, CONNECTED mode never accumulated sky trails at all:
+            // the polar TRAILS layer and the heatmap's history field only worked in sim.
+            if (visible && (now - (trailLast.get(key) || 0) >= 30000)) {
+                let tr = S.trails.get(key);
+                if (!tr) { tr = []; S.trails.set(key, tr); }
+                tr.push({ t: tSec, az, el, cn0 });
+                if (tr.length > 180) tr.shift();
+                trailLast.set(key, now);
             }
             // Per-sat C/N0 history for the "C/N0 over time" chart — mirrors
             // sim.tick's cn0Hist (one point/sec/sat, cap 1800 ≈ 30 min).
@@ -234,7 +245,7 @@ export function createRealDevice(session) {
                         obsSeeded = true;
                         if (Math.abs(g.lat - S.obs.lat) > 1e-4 || Math.abs(g.lon - S.obs.lon) > 1e-4) {
                             S.obs.lat = g.lat; S.obs.lon = g.lon;
-                            S.gtrails.clear(); S.trails.clear(); gtrailLast.clear();
+                            S.gtrails.clear(); S.trails.clear(); gtrailLast.clear(); trailLast.clear();
                             if (Array.isArray(S.posHist)) S.posHist.length = 0;
                         }
                     }
@@ -343,7 +354,7 @@ export function createRealDevice(session) {
             S.fix.type = 0;
             S.fix.sats = 0;
             // Stale sim ground tracks / trails / chart history must not linger.
-            S.gtrails.clear(); S.trails.clear(); gtrailLast.clear();
+            S.gtrails.clear(); S.trails.clear(); gtrailLast.clear(); trailLast.clear();
             if (S.cn0Hist && S.cn0Hist.clear) S.cn0Hist.clear();
             if (Array.isArray(S.posHist)) S.posHist.length = 0;
             if (Array.isArray(S.dopHist)) S.dopHist.length = 0;
@@ -384,7 +395,7 @@ export function createRealDevice(session) {
             S.fix.valid = false;
             S.fix.type = 0;
             S.sats = [];
-            S.gtrails.clear(); S.trails.clear(); gtrailLast.clear();
+            S.gtrails.clear(); S.trails.clear(); gtrailLast.clear(); trailLast.clear();
             if (S.cn0Hist && S.cn0Hist.clear) S.cn0Hist.clear();
             if (Array.isArray(S.posHist)) S.posHist.length = 0;
             if (Array.isArray(S.dopHist)) S.dopHist.length = 0;

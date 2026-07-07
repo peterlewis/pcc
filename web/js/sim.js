@@ -396,7 +396,7 @@ export function createSession(opts = {}) {
       if (tAbs % 30 === 0) {
         let tr = S.trails.get(s.key);
         if (!tr) { tr = []; S.trails.set(s.key, tr); }
-        tr.push({ t: tAbs, az: s.az, el: s.el });
+        tr.push({ t: tAbs, az: s.az, el: s.el, cn0: s.cn0 });   // cn0 feeds the heatmap's history field
         if (tr.length > 180) tr.shift();
       }
       if (tAbs % 45 === 0) {
@@ -513,7 +513,9 @@ export function createSession(opts = {}) {
         let j = 0;
         for (const p of S.trails.get(key)) {
           while (j < cn0.length - 1 && Math.abs(cn0[j + 1].t - p.t) <= Math.abs(cn0[j].t - p.t)) j++;
-          const c = cn0.length && Math.abs(cn0[j].t - p.t) <= 15 ? cn0[j].v.toFixed(1) : '';
+          // newer trail points carry their own cn0; the nearest-sample join covers older history
+          const c = p.cn0 != null ? p.cn0.toFixed(1)
+            : (cn0.length && Math.abs(cn0[j].t - p.t) <= 15 ? cn0[j].v.toFixed(1) : '');
           rows.push([new Date(p.t * 1000).toISOString(), key, p.az.toFixed(1), p.el.toFixed(1), c].join(','));
         }
       }

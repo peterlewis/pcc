@@ -59,6 +59,26 @@ export function centrePhase(phaseMs) {
   return phaseMs > 500 ? phaseMs - 1000 : phaseMs;
 }
 
+// Robust phase statistics (µs): median + MAD instead of mean + σ. Real hardware shows
+// occasional single-sample ~−1 ms excursions — a lost/incoherent ms-tick when an IRQ-masked
+// window (USB MSC, flash, RTC writes) straddles the capture — which are artifacts of that one
+// capture, not oscillator jitter. Mean/σ lets a handful of them smear a ~10 ns clock into a
+// ~77 µs band; median/MAD ignores them, and they're counted separately as `outliers`.
+// MAD×1.4826 estimates σ for the (normal) core. Anomaly = > max(8·σ_robust, 50 µs) from the
+// median — far beyond plausible jitter, well inside the artifact regime. `thr` is exported so
+// callers can compute inlier-only derived stats (e.g. peak-to-peak).
+export function robustPhaseStats(vals) {
+  const n = vals.length;
+  if (!n) return { med: 0, sigma: 0, thr: 50, outliers: 0, n: 0 };
+  const mid = (arr) => { const s = [...arr].sort((a, b) => a - b); const h = s.length >> 1; return s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2; };
+  const med = mid(vals);
+  const sigma = mid(vals.map((v) => Math.abs(v - med))) * 1.4826;
+  const thr = Math.max(8 * sigma, 50);
+  let outliers = 0;
+  for (const v of vals) if (Math.abs(v - med) > thr) outliers++;
+  return { med, sigma, thr, outliers, n };
+}
+
 // Rolling monitor: feed it lines (or parsed records) and read derived stats for the charts.
 export class PpsMonitor {
   constructor({ capacity = 900 } = {}) {   // ~15 min at 1 Hz
