@@ -360,7 +360,27 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     },
     holdoverFadeOn() { return state.holdoverFade; },
     // --- config: twiddle / export / import (all via the real firmware parser) ---
-    applyConfig(txt) { state.configText = txt; boot(); },      // reboot with new config.txt
+    applyConfig(txt) {
+      state.configText = txt; boot();
+      // Reconcile the driver's cached demo overlays with what the config actually applied —
+      // otherwise the panel keeps showing the pre-reboot time-lapse ladder / significance-fade
+      // state while the rebooted firmware is on the config's values. A reboot cancels the
+      // time-lapse demo (tol returns to the configured tolerances) and fade follows the config.
+      let t1 = 1000, t10 = 10000, t100 = 100000, fade = false;
+      for (const l of configLines(txt)) {
+        const m = l.match(/^\s*(Tolerance_time_1ms|Tolerance_time_10ms|Tolerance_time_100ms|significance_fade)\s*=\s*(.+?)\s*$/i);
+        if (!m) continue;
+        const k = m[1].toLowerCase(), v = m[2];
+        if (k === 'tolerance_time_1ms') t1 = +v || t1;
+        else if (k === 'tolerance_time_10ms') t10 = +v || t10;
+        else if (k === 'tolerance_time_100ms') t100 = +v || t100;
+        else fade = /^(on|1|true|enabled|yes)$/i.test(v);
+      }
+      state.baseTol = { t1, t10, t100 };
+      state.tol = { t1, t10, t100 };
+      state.holdoverFade = fade;
+      state.fadeAge = 0;
+    },      // reboot with new config.txt
     configLine(line) { for (const l of configLines(line)) E.configLine(l); },  // live single line
     getConfig() { return state.configText; },
     reboot() { boot(); },

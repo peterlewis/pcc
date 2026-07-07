@@ -5,7 +5,7 @@
 import { DcLite } from './dc-lite.js?v=90';
 import * as ASTRO from './astro-fw.js?v=90';
 import * as DS from './datasources.js?v=90';
-import { TelemetryLog } from './telemetrylog.js?v=3';
+import { TelemetryLog } from './telemetrylog.js?v=4';
 import { prepReview, drawReview, sampleAt, tAtX } from './review.js?v=1';
 import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=3';
 
@@ -70,6 +70,9 @@ class Component extends DcLite {
     // Telemetry log — persists the CONNECTED real stream to IndexedDB for later scrub/rewind.
     // Opt-in (default off); never records simulation. record() guards on its own _db, so no await.
     try { this.telemetryLog = new TelemetryLog(); } catch (e) { this.telemetryLog = null; }
+    // Closing the tab is the normal way to leave — stamp the open session's disconnectAt so it
+    // isn't orphaned (an un-stamped session never prunes and stretches the scrub timeline).
+    window.addEventListener('pagehide', () => { try { this.telemetryLog && this.telemetryLog.endSession(); } catch (e) {} });
     this.hwConfig = this.loadHwConfig();   // editable board-furniture positions (calibration overlay)
     this.MM = { W: 264, H: 34.56, PIN: 6 }; // rendered board (mm): 12mm nubbin + 240mm digits + 12mm nubbin, symmetric; pins ±6mm about the seam
     this.globeRot = { lon: -0.0015, lat: 51.4779 };   // Royal Observatory Greenwich — matches the emulator's default observer
@@ -87,7 +90,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=108'), import('./sim.js?v=95'), import('./charts.js?v=93'), import('./realdev.js?v=96'), import('./emu-driver.js?v=30'), import('./ppsts.js?v=14')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=95'), import('./charts.js?v=93'), import('./realdev.js?v=96'), import('./emu-driver.js?v=31'), import('./ppsts.js?v=14')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S

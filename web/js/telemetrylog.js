@@ -36,6 +36,7 @@ export class TelemetryLog extends EventTarget {
     this._lastT = -1;                 // last whole-second written (dedupe)
     this._minAccum = null;            // { m, ... } accumulator for the in-progress minute
     this._count = 0;                  // rows written this session (for the sessions row)
+    this._writeFailed = false;        // a put errored (quota etc.) — stop pretending to record
 
     this._enabled = localStorage.getItem(LS_LOGGING) === 'true';
     const r = parseInt(localStorage.getItem(LS_RETENTION), 10);
@@ -93,7 +94,7 @@ export class TelemetryLog extends EventTarget {
   // --- the write hook (called from onTick, CONNECTED only) -----------------
   // One append per whole second. Fire-and-forget — never awaited on the tick.
   record(S) {
-    if (!this._enabled || !this._db || !this._sid || !S) return;
+    if (!this._enabled || !this._db || !this._sid || !S || this._writeFailed) return;
     const t = Math.floor(Date.now() / 1000);
     if (t === this._lastT) return;                 // dedupe: a double/late tick can't double-write
     this._lastT = t;
@@ -118,10 +119,13 @@ export class TelemetryLog extends EventTarget {
       prn: s.prn, cn0: s.cn0 ?? 0, el: s.el ?? null, az: s.az ?? null, used: !!s.used,
       key: s.key, constId: s.constId, tok: s.tok, talker: s.talker, sysId: s.sysId,
     })) : [];
+    // Only record timing once a real $PMTXTS has actually arrived — realdev initialises the pps
+    // scalars to 0 (not null), so gating on `temp != null` used to persist phantom 0 degC / 0 ppm
+    // rows for the seconds before the stream starts. p.list is populated only by a real PPS edge.
     const p = S.pps;
-    const pps = (p && (p.temp != null || p.calerr != null)) ? {
+    const pps = (p && p.list && p.list.length) ? {
       temp: p.temp ?? null, ppm: p.ppm ?? null,
-      phaseUs: p.phaseUs ?? (p.list && p.list.length ? p.list[p.list.length - 1].us : null) ?? null,
+      phaseUs: p.list[p.list.length - 1].us ?? null,
       calerr: p.calerr ?? null,
     } : null;
     return { sessionId: this._sid, t, sim: false, sats, fix, pps };
@@ -173,6 +177,7 @@ export class TelemetryLog extends EventTarget {
   // row not stamped sim:false (defense-in-depth against a fake-data leak).
   async range(sessionId, tStart, tEnd) {
     await this._ready;
+    if (!this._db) return [];
     // NB: no `| 0` — these are whole-second epoch timestamps (~1.8e9), which overflow a signed
     // 32-bit truncation. Floor to plain numbers; IndexedDB orders the compound key numerically.
     const lo = Math.floor(tStart || 0), hi = Math.floor(tEnd || 4e9);
@@ -191,6 +196,7 @@ export class TelemetryLog extends EventTarget {
   }
   async sessions() {
     await this._ready;
+    if (!this._db) return [];
     return new Promise((resolve) => {
       const tx = this._db.transaction(STORE_SESSIONS, 'readonly');
       const req = tx.objectStore(STORE_SESSIONS).getAll();
@@ -200,6 +206,7 @@ export class TelemetryLog extends EventTarget {
   }
   async count() {
     await this._ready;
+    if (!this._db) return 0;
     return new Promise((resolve) => {
       const tx = this._db.transaction(STORE_SAMPLES, 'readonly');
       const req = tx.objectStore(STORE_SAMPLES).count();
@@ -215,6 +222,7 @@ export class TelemetryLog extends EventTarget {
   async clear() {
     this._minAccum = null; this._lastT = -1;
     await this._ready;
+    if (!this._db) return;
     await new Promise((resolve) => {
       const tx = this._db.transaction([STORE_SAMPLES, STORE_MINUTE], 'readwrite');
       tx.objectStore(STORE_SAMPLES).clear();
@@ -241,13 +249,26 @@ export class TelemetryLog extends EventTarget {
         }
       };
       req.onsuccess = () => { this._db = req.result; resolve(this._db); };
-      req.onerror = () => reject(req.error);
+      // Resolve to null (not reject) on open failure — private-mode Firefox, storage disabled, etc.
+      // Every public method awaits this._ready; a rejection would surface as an unhandled rejection
+      // on each call and the Export buttons would silently no-op. Null + the !this._db guards let
+      // the whole feature degrade to a clean no-op instead.
+      req.onerror = () => { console.warn('TelemetryLog open failed:', req.error); resolve(null); };
     });
   }
   _put(store, row) {
-    if (!this._db) return;
-    try { this._db.transaction(store, 'readwrite').objectStore(store).put(row); }
-    catch (err) { console.warn('TelemetryLog put failed:', err); }
+    if (!this._db || this._writeFailed) return;
+    try {
+      const rq = this._db.transaction(store, 'readwrite').objectStore(store).put(row);
+      rq.onerror = (e) => {
+        // Quota exhaustion (or any write error) must stop the illusion of recording: flag it so
+        // record() stops counting and the UI can surface that persistence stalled, rather than the
+        // sample counter climbing while nothing lands.
+        this._writeFailed = true;
+        console.warn('TelemetryLog write failed (recording stopped):', (e && e.target && e.target.error) || 'unknown');
+        this.dispatchEvent(new CustomEvent('writefailed', {}));
+      };
+    } catch (err) { this._writeFailed = true; console.warn('TelemetryLog put threw:', err); }
   }
 
   // Delete raw samples older than the retention cutoff (by absolute time), then
@@ -265,7 +286,14 @@ export class TelemetryLog extends EventTarget {
     });
     // sessions fully older than the cutoff: drop their metadata + minute rows too.
     try {
-      const olds = (await this.sessions()).filter((s) => s.disconnectAt && s.disconnectAt / 1000 < cutoff);
+      // A session is stale once its LAST activity fell before the cutoff. Sessions ended cleanly
+      // carry disconnectAt; sessions orphaned by a tab-close (endSession never fired) have
+      // disconnectAt === null, so fall back to connectedAt — otherwise orphans (and their minute
+      // rows) accumulate forever and stretch the scrub timeline back to the first-ever orphan.
+      const olds = (await this.sessions()).filter((s) => {
+        const last = s.disconnectAt != null ? s.disconnectAt : s.connectedAt;
+        return last != null && last / 1000 < cutoff;
+      });
       for (const s of olds) {
         const tx = this._db.transaction([STORE_SESSIONS, STORE_MINUTE], 'readwrite');
         tx.objectStore(STORE_SESSIONS).delete(s.sessionId);

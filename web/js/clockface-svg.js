@@ -440,7 +440,7 @@ export function createClockFaceSVG(container, opts = {}) {
     const gh = DIM_ALPHA * fade;         // off-segment ghost fades with the digit (→ true black at 0)
     // Diff: most cells are unchanged most frames (only the ms digits move). Skip the DOM writes
     // when byte/dp/brightness/fade/colours all match — this is what keeps SVG cheap.
-    const sig = byte + '|' + (dpOn ? 1 : 0) + '|' + state.brightness + '|' + fade + '|' + dpFade + '|' + tokens.led + '|' + tokens.ledDim;
+    const sig = byte + '|' + (dpOn ? 1 : 0) + '|' + state.brightness + '|' + fade + '|' + dpFade + '|' + (state.inverted ? 1 : 0) + '|' + tokens.led + '|' + tokens.ledDim;
     if (desc._sig === sig) return;
     desc._sig = sig;
     for (let s = 0; s < 7; s++) {
@@ -534,24 +534,27 @@ export function createClockFaceSVG(container, opts = {}) {
     }
   }
 
-  // Set a colon's two dots to intensity b (0..1). The colon must never dim BELOW the ghost floor
-  // that unlit segments sit at (ledDim @ DIM_ALPHA) — a real colon LED at minimum brightness looks
-  // like any other unlit segment, not darker. So above the floor it's lit red scaled by b; at or
-  // below the floor it rests on the SAME ghost as unlit segments.
+  // Set a colon's two dots to animation intensity b (0..1). The dot tracks brightness exactly like
+  // a lit digit segment (paintGlyph uses state.brightness*fade as its opacity), so the colon
+  // animates at EVERY brightness and through the boot-reveal ramp — the old fixed 0.5 floor gated
+  // 'lit' on brightness*b, which clamped the whole animation to a grey ghost below ~59% brightness
+  // (and froze it entirely during boot). The 'lit vs ghost' decision is now driven by b itself (the
+  // animation phase), not by brightness, so only the animation's dark point (b≈0) rests on the same
+  // ghost as an unlit segment.
   function setColon(desc, b) {
     const litOp = state.brightness * b;
-    const on = litOp > DIM_ALPHA;
-    const key = on ? Math.round(litOp * 200) : -1; // diff bucket (-1 == resting on the floor)
+    const lit = b > 0.02;
+    const key = lit ? Math.round(litOp * 200) : -1; // diff bucket (-1 == resting on the ghost)
     for (const dot of [desc.top, desc.bot]) {
       if (dot._k === key) continue; // intensity unchanged — skip DOM write
       dot._k = key;
-      if (on) {
+      if (lit) {
         dot.crisp.setAttribute('fill', tokens.led);
         dot.crisp.setAttribute('opacity', String(litOp));
         if (GLOW) dot.glow.setAttribute('opacity', String(litOp));
       } else {
         dot.crisp.setAttribute('fill', tokens.ledDim);
-        dot.crisp.setAttribute('opacity', String(DIM_ALPHA)); // same floor as an unlit segment
+        dot.crisp.setAttribute('opacity', String(DIM_ALPHA)); // same ghost as an unlit segment
         if (GLOW) dot.glow.setAttribute('opacity', '0');
       }
     }
