@@ -1095,15 +1095,15 @@
               <section style="background:var(--panel);border:1px solid var(--line)">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
                   <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">TEMP COMPENSATION — SOFTWARE TCXO</span>
-                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">HOST FITS · FIRMWARE HOOK PENDING</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">HOST FIT · CROSS-CHECK OF ON-DIE LEARNING</span>
                 </div>
                 <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">k0 / k1 / k2 (ref 25 °C)</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fitK0}} / {{fitK1}} / {{fitK2}}</span></div>
                 <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Samples</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fitN}}</span></div>
                 <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Temp spread</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fitSpread}}</span></div>
                 <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Fit residual RMS</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fitRms}}</span></div>
                 <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Compensation state</span><span style="font-family:var(--mono);font-size:12px;color:{{compStateC}}">{{compState}}</span></div>
-                <div style="margin:10px 12px;padding:8px 10px;background:var(--well);border:1px solid var(--line2);font-family:var(--mono);font-size:11px;color:var(--txt)">{{compLine}}</div>
-                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--txt3);line-height:1.6">$PMTXTS TIMESTAMP + DIE-TEMP COME FROM DRAFT FIRMWARE PRs (pps=on) — NOT YET MERGED UPSTREAM. THE HOST FITS ppm(T) AND EMITS THIS temp_comp LINE, BUT FIRMWARE CONSUMPTION ISN'T WIRED YET, SO IT'S FOR REVIEW/LOGGING TODAY. WHILE LOCKED, calibrateRTC OWNS CALR; ABSOLUTE UTC OFFSET ISN'T RECOVERABLE OVER USB (≈1 ms FLOOR), SO THE APP SHOWS JITTER, STABILITY AND DRIFT.</div>
+                <div style="margin:10px 12px;padding:8px 10px;background:var(--well);border:1px solid var(--line2);font-family:var(--mono);font-size:11px;color:var(--txt);white-space:pre;overflow-x:auto;line-height:1.7">{{compLine}}</div>
+                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--txt3);line-height:1.6">$PMTXTS TIMESTAMP + DIE-TEMP COME FROM DRAFT FIRMWARE PRs (pps=on). THE HOST FITS ppm(T) FROM THE RTC CAL ERROR — THE LSE CURVE — AND EMITS THE FIRMWARE'S tc_* SEED BLOCK (PASTE INTO config.txt; tc_seed=on LAST WARM-STARTS THE ON-DIE LEARNER). tc_dump ON THE CLOCK STAYS CANONICAL — THIS IS THE HOST'S INDEPENDENT ESTIMATE OF THE SAME CURVE. WHILE LOCKED, calibrateRTC OWNS CALR; ABSOLUTE UTC OFFSET ISN'T RECOVERABLE OVER USB (≈1 ms FLOOR), SO THE APP SHOWS JITTER, STABILITY AND DRIFT.</div>
               </section>
             </div>
           </div>
@@ -1398,6 +1398,6 @@
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=185"></script>
+<script type="module" src="js/app-controller.js?v=186"></script>
 </body>
 </html>

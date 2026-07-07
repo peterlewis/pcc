@@ -82,8 +82,8 @@ class Component extends DcLite {
       hdrBar: localStorage.getItem('pccweb.hdrbar') === '1',
     });
     this.reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=105'), import('./sim.js?v=93'), import('./charts.js?v=92'), import('./realdev.js?v=92'), import('./emu-driver.js?v=27')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
-      this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED;
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=105'), import('./sim.js?v=93'), import('./charts.js?v=92'), import('./realdev.js?v=93'), import('./emu-driver.js?v=27'), import('./ppsts.js?v=13')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
+      this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
       // The WASM firmware emulator drives the display faces (the emulator IS the clock). Async
@@ -2372,10 +2372,15 @@ class Component extends DcLite {
       fitN: fit ? String(fit.n) : '0',
       fitStatus: fit ? (fit.ready ? (fit.lineOnly ? 'READY — LINE FIT' : 'READY — QUADRATIC') : 'COLLECTING — NEED ≥30 SAMPLES / ≥8 °C') : 'AWAITING SAMPLES',
       fitStatusC: fit && fit.ready ? 'var(--lock)' : 'var(--acq)',
-      // The firmware doesn't consume temp_comp yet, so we never claim to be steering.
-      compState: noData ? 'IDLE — NO TIMING STREAM' : (fit && fit.ready ? 'FIT READY — PASTE temp_comp INTO config.txt' : 'CHARACTERISING — FIRMWARE APPLY PENDING'),
+      // Emit the tempcomp firmware's REAL seed vocabulary (tc_t0 / tc_lse_a/b/c / tc_seed) — the
+      // legacy `temp_comp = k0,k1,k2` key was never parsed by any firmware. The block is only shown
+      // once the fit is trustworthy (ready); before that a comment says what's still needed, so a
+      // half-baked curve can't be pasted into config.txt by accident. tc_dump stays canonical.
+      compState: noData ? 'IDLE — NO TIMING STREAM' : (fit && fit.ready ? 'FIT READY — SEED BLOCK FOR config.txt' : 'CHARACTERISING — BLOCK PENDING'),
       compStateC: noData ? 'var(--txt3)' : (fit && fit.ready ? 'var(--lock)' : 'var(--txt2)'),
-      compLine: fit ? 'temp_comp = ' + fit.k0.toFixed(4) + ',' + fit.k1.toFixed(5) + ',' + fit.k2.toFixed(6) : 'temp_comp = off',
+      compLine: fit && fit.ready && this.PT
+        ? this.PT.tcSeedBlock({ k0: fit.k0, k1: fit.k1, k2: fit.k2, tlo: fit.tMin, thi: fit.tMax, n: fit.n, rms: fit.rms }).configBlock
+        : (fit ? `# characterising — need ≥30 samples & ≥8 °C span (have ${fit.n}, ${fit.spread.toFixed(1)} °C)` : '# tc seed — awaiting timing stream'),
     };
   }
 

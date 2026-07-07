@@ -227,14 +227,19 @@ export function fitTempCompensation(points, { minPoints = 30, minSpanC = 8, curv
   for (const { temp: T, ppm: y } of pts) { const u = T - TC_TREF; const f = k0 + k1 * u + k2 * u * u; ss += (y - f) ** 2; }
   const rms = Math.sqrt(ss / n);
 
-  // Serialise, then PROVE the serialised line round-trips: re-parse it and check the curve across
-  // the operating window (data range ± 10 °C margin) deviates < 0.5 ppm from the full-precision fit.
-  const configLine = `temp_comp = ${k0.toFixed(4)},${k1.toFixed(5)},${k2.toFixed(6)}`;
-  const [r0, r1, r2] = configLine.slice(configLine.indexOf('=') + 1).split(',').map(parseFloat);
+  // Serialise as the FIRMWARE's seed vocabulary (tcSeedBlock), then PROVE the block round-trips:
+  // re-parse the coefficient lines and check the curve across the operating window (data range
+  // ± 10 °C margin) deviates < 0.5 ppm from the full-precision fit.
+  const seed = tcSeedBlock({ k0, k1, k2, tlo, thi, n, rms });
+  const rp = {};
+  for (const line of seed.configBlock.split('\n')) {
+    const m = line.match(/^tc_lse_([abc]) = (-?[\d.]+)$/);
+    if (m) rp[m[1]] = parseFloat(m[2]);
+  }
   let maxErr = 0;
   for (const T of [tlo - 10, (tlo + thi) / 2, thi + 10]) {
-    const u = T - TC_TREF;
-    maxErr = Math.max(maxErr, Math.abs((k0 + k1 * u + k2 * u * u) - (r0 + r1 * u + r2 * u * u)));
+    const u = T - TC_TREF, x = T - seed.t0;
+    maxErr = Math.max(maxErr, Math.abs((k0 + k1 * u + k2 * u * u) - (rp.a + rp.b * x + rp.c * x * x)));
   }
   if (maxErr > 0.5) return { ok: false, reason: 'serialisation precision too low (please report)', n, span };
 
@@ -242,6 +247,33 @@ export function fitTempCompensation(points, { minPoints = 30, minSpanC = 8, curv
   return {
     ok: true, mode, k0, k1, k2, n, span, tlo, thi, rms, quantum,
     turnover: k2 ? TC_TREF - k1 / (2 * k2) : null,   // implied parabola vertex (°C), for insight only
-    configLine,
+    ...seed,
   };
+}
+
+// Map a TC_TREF-centred host fit onto the FIRMWARE's seed vocabulary. $PMTXTS ppm is the RTC
+// calibration error, i.e. the LSE curve, so the fit maps to tc_lse_a/b/c — re-centred onto a
+// tc_t0 at the middle of the observed span (the block includes its own tc_t0 line, so it is
+// self-consistent; note a paste re-centres any existing tc_hse_* seed too). Precisions match
+// tc_dump. Line order matters: the firmware arms the warm-start when "tc_seed = on" parses, so
+// it goes LAST. tc_dump on the clock stays canonical; this block is the host's independent
+// estimate of the same curve. There are no tc_hse_* lines because the host cannot see the HSE
+// separately over $PMTXTS — the firmware learns that on-die.
+export function tcSeedBlock({ k0, k1, k2, tlo, thi, n, rms }) {
+  const t0 = Math.min(80, Math.max(-30, Math.round((tlo + thi) / 2)));
+  const d = t0 - TC_TREF;                        // shift: ppm(x+d) with x = T - t0
+  const lseA = k0 + k1 * d + k2 * d * d;
+  const lseB = k1 + 2 * k2 * d;
+  const lseC = k2;
+  const configBlock = [
+    `# host LSE fit (PCC TIMING) — n=${n}, ${tlo.toFixed(0)}..${thi.toFixed(0)} C, rms ${rms.toFixed(2)} ppm`,
+    `tc_t0 = ${t0}`,
+    `tc_lse_a = ${lseA.toFixed(4)}`,
+    `tc_lse_b = ${lseB.toFixed(5)}`,
+    `tc_lse_c = ${lseC.toFixed(6)}`,
+    `tc_seed_lo = ${Math.floor(tlo)}`,
+    `tc_seed_hi = ${Math.ceil(thi)}`,
+    `tc_seed = on`,
+  ].join('\n');
+  return { t0, lseA, lseB, lseC, configBlock };
 }
