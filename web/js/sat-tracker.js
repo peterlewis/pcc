@@ -93,9 +93,6 @@ function gmst(date) {
 // Topocentric az/el (deg) of an ECI point from a geodetic observer.
 function azel(eci, latDeg, lonDeg, date) {
   const lat = latDeg * DEG, lon = lonDeg * DEG;
-  const th = gmst(date) + lon;                        // local sidereal angle
-  // observer ECI (spherical Earth is fine at this scale)
-  const ox = RE * Math.cos(lat) * Math.cos(th), oy = RE * Math.cos(lat) * Math.sin(th), oz = RE * Math.sin(lat);
   // rotate sat ECI by -gmst into the same (x=Greenwich) frame the observer is in
   const g = gmst(date);
   const sx = eci.x * Math.cos(g) + eci.y * Math.sin(g);

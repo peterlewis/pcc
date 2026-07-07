@@ -90,7 +90,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=95'), import('./charts.js?v=93'), import('./realdev.js?v=96'), import('./emu-driver.js?v=31'), import('./ppsts.js?v=14')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=95'), import('./charts.js?v=93'), import('./realdev.js?v=96'), import('./emu-driver.js?v=32'), import('./ppsts.js?v=14')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -1635,13 +1635,16 @@ class Component extends DcLite {
   toggleMode(key) {
     const def = this.modeDef(key); if (!def) return;
     const on = !this.state.modesEnabled[key];
+    // Refuse to disable the last enabled mode — the firmware always shows SOMETHING, and leaving
+    // modes_enabled[] empty desyncs the UI (which would claim 'iso8601') from a blank/stuck face.
+    if (!on && this.MODE_DEFS.map((d) => d.key).filter((k) => this.state.modesEnabled[k]).length <= 1) return;
     const modesEnabled = { ...this.state.modesEnabled, [key]: on };
     const patch = { modesEnabled };
     if (on) patch.currentMode = key;
     else if (this.state.currentMode === key) {
       const rest = this.MODE_DEFS.map((d) => d.key).filter((k) => modesEnabled[k]);
-      patch.currentMode = rest[0] || 'iso8601';
-      if (rest[0]) this.pushMode(this.modeDef(rest[0]).mode, true);   // re-assert so something stays on the face
+      patch.currentMode = rest[0];
+      this.pushMode(this.modeDef(rest[0]).mode, true);   // re-assert so something stays on the face
     }
     this.setState(patch);
     this.pushMode(def.mode, on);
