@@ -71,5 +71,40 @@ chk('outward radiation (near/far digits out of phase)', lagged);
 for (let t = 0; t < 1200 && emu.ckActive(); t++) tickMs(10);
 chk('heartbeat terminated', emu.ckActive() === 0);
 
+// ---- pendulum (forced): unison open, disorder, mathematical catch at tick 300 ----
+console.log('pendulum:');
+emu.ckSet(3, 99);
+chk('scan active', emu.ckActive() === 1);
+const pv = [[], []];
+for (let t = 0; t < 340 && emu.ckActive(); t++) {
+  tickMs(10);
+  pv[0].push(emu.ckLevel(0, 3)); pv[1].push(emu.ckLevel(5, 3));
+}
+// early (unison ramp): digits together; mid: apart; end: both at 16 (the catch)
+const mid = Math.floor(pv[0].length * 0.55);
+let apart = false;
+for (let t = mid - 40; t < mid + 40 && t < pv[0].length; t++) if (Math.abs(pv[0][t] - pv[1][t]) >= 4) apart = true;
+chk('mid-piece disorder (digits >= 4 levels apart)', apart);
+chk('the catch: both digits at 16 at the end', pv[0][pv[0].length - 1] === 16 && pv[1][pv[1].length - 1] === 16);
+chk('pendulum terminated', emu.ckActive() === 0);
+const swings = pv[0].filter(v => v <= 5).length;
+chk(`swings reach the low floor (${swings} samples at <=5, >= 4)`, swings >= 4);
+
+// ---- trust (forced, locked case): x-ray dip, wave, unified pulse ----
+console.log('trust:');
+emu.ckSet(4, 99);
+chk('scan active', emu.ckActive() === 1);
+let sawDipAll = false, sawWaveEdge = false, minPulse = 16;
+for (let t = 0; t < 250 && emu.ckActive(); t++) {
+  tickMs(10);
+  if (emu.ckLevel(0, 3) === 2 && emu.ckLevel(8, 3) === 2) sawDipAll = true;
+  if (emu.ckLevel(0, 3) === 16 && emu.ckLevel(8, 3) === 2) sawWaveEdge = true;   // HH lit, ms still dark
+  if (t > 115 && emu.ckActive()) minPulse = Math.min(minPulse, emu.ckLevel(3, 3));
+}
+chk('x-ray dip covers the row', sawDipAll);
+chk('relight wave (MSB lit while ms still x-ray)', sawWaveEdge);
+chk(`locked signature pulse dips (min ${minPulse} <= 13)`, minPulse <= 13);
+chk('trust terminated', emu.ckActive() === 0);
+
 console.log(`\n${pass}/${pass + fail} passed${fail ? ' — FAILURES ABOVE' : ''}`);
 process.exit(fail ? 1 : 0);

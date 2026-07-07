@@ -92,7 +92,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=106'), import('./sim.js?v=94'), import('./charts.js?v=93'), import('./realdev.js?v=94'), import('./emu-driver.js?v=28'), import('./ppsts.js?v=14'), import('./demo7.js?v=3')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=107'), import('./sim.js?v=94'), import('./charts.js?v=93'), import('./realdev.js?v=94'), import('./emu-driver.js?v=29'), import('./ppsts.js?v=14'), import('./demo7.js?v=3')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -678,7 +678,42 @@ class Component extends DcLite {
       if (f._emuStandby !== this.state.standby) { if (f.setStandby) f.setStandby(this.state.standby); f._emuStandby = this.state.standby; }
       f.applyDeviceFrame(frame);
     }
+    this.driveCuckoo(frame);
     this.driveShowcase(frame);
+  }
+
+  // FIRMWARE cuckoo animations (the clock4 `cuckoo` branch): when the engine's dither interleave
+  // is running, render its per-segment levels on the time face through the same setSegField
+  // surface the web showcase uses — the firmware is the choreographer, the face is a screen.
+  // On branches without the engine (rollup today) cuckooActive() is a constant 0 and this is
+  // inert. Level rows: 0..5 = the six big digits, 6..8 = ds/cs/ms; colons stay on their own
+  // TIM2 PWM path (the field's colon values come from computeField as usual).
+  driveCuckoo(frame) {
+    if (!this.emu || !this.emu.cuckooActive) return;
+    // Both time faces: the open display AND the folded entry clock — a cuckoo that fires while
+    // the clock is folded plays on the fold. (The firmware separately refuses to start pieces
+    // in MODE_STANDBY, the hardware's true "closed" state, and displayOff aborts a running one.)
+    const targets = [this.faces.dispTime, this.faces.entryTime].filter((f) => f && f.setSegField);
+    if (!targets.length) return;
+    if (!this.emu.cuckooActive()) {
+      if (this._ckOn) { this._ckOn = false; if (!this._sc) for (const t of targets) t.setSegField(null); }
+      return;
+    }
+    if (this._sc) return;                    // the web showcase owns the face if both run
+    for (const t of targets) {
+      const field = t.computeField({ time: frame.time }, Date.now());
+      const geo = t.segGeometry();
+      for (const e of geo.els) {
+        if (e.kind !== 'digit') continue;
+        const row = e.role === 'big' ? e.src : (e.role === 'small' ? 6 + e.src : -1);
+        if (row < 0 || !field[e.cell]) continue;
+        const f = field[e.cell];
+        for (let s = 0; s < 7; s++) if (f.segs[s] > 0) f.segs[s] = this.emu.cuckooLevel(row, s) / 16;
+        if (f.dp > 0) f.dp = this.emu.cuckooLevel(row, 7) / 16;
+      }
+      t.setSegField(field);
+    }
+    this._ckOn = true;
   }
 
   // SHOWCASE / CUCKOO: the minute-locked segment choreography (demo7.js) driving the two display

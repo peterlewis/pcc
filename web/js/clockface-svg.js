@@ -439,9 +439,14 @@ export function createClockFaceSVG(container, opts = {}) {
   // face's cells: digits {segs:[7 x 0..1], dp:0..1}, colons {a:0..1, b:0..1}. Values are linear
   // light; the ghost floor rule matches setColon (an element never dims below the unlit ghost).
   // ----------------------------------------------------------------------------------------
+  // Field painting is CONTINUOUS: unlike setColon's on/off rule (where anything at or below the
+  // ghost must rest ON the ghost), a 16-level dither surface needs its bottom half. v <= 0.02 is
+  // "off" (the unlit ghost); anything above paints lit red from a faint floor upward, so a 2/16
+  // x-ray level is visibly a faint red digit, not indistinguishable from unlit.
+  const FIELD_FLOOR = 0.10;
   function paintSegLevel(desc, s, v) {
-    const litOp = state.brightness * v;
-    const key = litOp > DIM_ALPHA ? Math.round(litOp * 200) : -1;
+    const litOp = v > 0.02 ? Math.max(FIELD_FLOOR, state.brightness * v) : 0;
+    const key = litOp > 0 ? Math.round(litOp * 200) : -1;
     const cp = desc.crispSegs[s], gp = desc.glowSegs[s];
     if (cp._fk === key) return;
     cp._fk = key;
@@ -454,8 +459,8 @@ export function createClockFaceSVG(container, opts = {}) {
     }
   }
   function paintDotLevel(dot, v) {
-    const litOp = state.brightness * v;
-    const key = litOp > DIM_ALPHA ? Math.round(litOp * 200) : -1;
+    const litOp = v > 0.02 ? Math.max(FIELD_FLOOR, state.brightness * v) : 0;
+    const key = litOp > 0 ? Math.round(litOp * 200) : -1;
     if (dot._fk === key) return;
     dot._fk = key;
     if (key >= 0) {
