@@ -15,6 +15,41 @@ const XKE = 0.0743669161331734;  // sqrt(MU) in Earth-radii^1.5 / min  (SGP4 uni
 // CelesTrak sends Access-Control-Allow-Origin:* so a browser fetch works over https.
 const TLE_URL = 'https://celestrak.org/NORAD/elements/gp.php?GROUP=gps-ops&FORMAT=tle';
 
+// CelesTrak rate-limits — and BLOCKS — IPs that re-download the same GP group too often; their stated
+// policy is "cache it, don't re-fetch more than once every few hours". A fresh tracker was created on
+// every page load and fetched unconditionally, so heavy reloading during dev got the IP blocked. GPS
+// TLEs stay good for days (the two-body + J2 propagation above is well under a degree a full day past
+// epoch), so we persist the raw set in localStorage and only touch the network when it's stale. This
+// caps CelesTrak hits at ~2/day per browser no matter how often the app reloads.
+const TLE_CACHE_KEY = 'pcc.tle.gps-ops';
+const TLE_FAIL_KEY = 'pcc.tle.gps-ops.failedAt';
+const TLE_CACHE_TTL_MS = 12 * 3600 * 1000;    // 12 h — how long a good fetch is reused
+const TLE_FAIL_BACKOFF_MS = 60 * 60 * 1000;   // 1 h — after a failure, don't re-poke CelesTrak
+
+function readTleCache() {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    const o = JSON.parse(localStorage.getItem(TLE_CACHE_KEY) || 'null');
+    return (o && typeof o.txt === 'string' && Number.isFinite(o.t)) ? o : null;   // { t: epochMs, txt }
+  } catch (e) { return null; }
+}
+function writeTleCache(txt) {
+  try {
+    if (typeof localStorage !== 'undefined')
+      localStorage.setItem(TLE_CACHE_KEY, JSON.stringify({ t: Date.now(), txt }));
+  } catch (e) { /* private mode / quota — cache is best-effort */ }
+}
+function readTleFailAt() {
+  try { const v = typeof localStorage !== 'undefined' ? +localStorage.getItem(TLE_FAIL_KEY) : 0; return Number.isFinite(v) ? v : 0; }
+  catch (e) { return 0; }
+}
+function writeTleFailAt(ts) {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    if (ts) localStorage.setItem(TLE_FAIL_KEY, String(ts)); else localStorage.removeItem(TLE_FAIL_KEY);
+  } catch (e) { /* best-effort */ }
+}
+
 // ---- TLE parsing -------------------------------------------------------------------------
 function parseTle(name, l1, l2) {
   const num = (s) => parseFloat(s);
@@ -116,21 +151,39 @@ export function createSatTracker() {
     get loaded() { return loaded; },
     get count() { return sats.length; },
     async load(fetchImpl = (typeof fetch !== 'undefined' ? fetch : null)) {
-      if (!fetchImpl) return false;
-      // Bound the request: CelesTrak occasionally goes unreachable (its origin refuses or, worse,
-      // accepts the socket and never replies). Without a deadline that leaves the promise pending
-      // for the browser's full ~30 s connect timeout, so the "no real sats, using synthetic" state
-      // never resolves. Abort at 8 s → fail fast → the virtual GPS falls back cleanly.
-      const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      const timer = ctrl && typeof setTimeout !== 'undefined' ? setTimeout(() => ctrl.abort(), 8000) : null;
-      try {
-        const r = await fetchImpl(TLE_URL, { mode: 'cors', signal: ctrl ? ctrl.signal : undefined });
-        if (!r.ok) return false;
-        sats = parseTleText(await r.text());
+      const cached = readTleCache();
+      // 1. Fresh cache → serve it, NO network. This is the path that keeps us off CelesTrak's block
+      //    list: a page reload within the TTL never hits the wire.
+      if (cached && (Date.now() - cached.t) < TLE_CACHE_TTL_MS) {
+        sats = parseTleText(cached.txt);
         loaded = sats.length > 0;
-        return loaded;
-      } catch (e) { return false; }
-      finally { if (timer) clearTimeout(timer); }
+        if (loaded) return true;
+      }
+      // 2. Stale / absent cache → fetch once, bounded — UNLESS a recent fetch already failed. Re-poking
+      //    CelesTrak on every reload while the IP is blocked only prolongs the block, so honour a 1 h
+      //    backoff after any failure. CelesTrak can also accept the socket and never reply, so without a
+      //    deadline the promise hangs for the browser's ~30 s connect timeout; abort at 8 s. A good
+      //    fetch refreshes the cache (next reload is free) and clears the failure marker.
+      const backedOff = (() => { const f = readTleFailAt(); return f && (Date.now() - f) < TLE_FAIL_BACKOFF_MS; })();
+      if (fetchImpl && !backedOff) {
+        const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timer = ctrl && typeof setTimeout !== 'undefined' ? setTimeout(() => ctrl.abort(), 8000) : null;
+        try {
+          const r = await fetchImpl(TLE_URL, { mode: 'cors', signal: ctrl ? ctrl.signal : undefined });
+          if (r.ok) {
+            const txt = await r.text();
+            const parsed = parseTleText(txt);
+            if (parsed.length) { sats = parsed; loaded = true; writeTleCache(txt); writeTleFailAt(0); return true; }
+          }
+          writeTleFailAt(Date.now());   // reached CelesTrak but got !ok or an unusable/empty body (rate-limit page) → back off
+        } catch (e) {
+          writeTleFailAt(Date.now());   // offline / blocked / timeout → back off, don't hammer
+        } finally { if (timer) clearTimeout(timer); }
+      }
+      // 3. Network unavailable or failed → a STALE cache (a day-old constellation) still beats none.
+      //    Only if there's truly nothing do we give up and let the virtual GPS use its synthetic ramp.
+      if (cached) { sats = parseTleText(cached.txt); loaded = sats.length > 0; return loaded; }
+      return false;
     },
     loadText(txt) { sats = parseTleText(txt); loaded = sats.length > 0; return loaded; },
     // Satellites currently above `maskDeg` for the observer, brightest (highest) first. Records
