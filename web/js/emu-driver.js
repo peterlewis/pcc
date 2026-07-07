@@ -69,9 +69,6 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     digitFade: w('emu_digit_fade','number',['number']),   // holdover-fade per-digit intensity 0..255
     uUsFade: w('emu_holdover_u_us','number',[]),          // live 3σ TIE bound U(τ) in µs (what digits fade by)
     forceHoldover: w('emu_force_holdover','void',['number']),   // pin the holdover age (s) → recompute fade
-    cuckooActive: w('emu_cuckoo_active','number',[]),            // firmware cuckoo engine running?
-    cuckooLevel: w('emu_cuckoo_level','number',['number','number']), // per-segment dwell level 0..16
-    cuckooSet: w('emu_cuckoo_set','void',['number','number']),   // config / force-start test hook
   };
 
   let state = { lat, lon, configText: config, signal: true, vbus: true, adc: 2600, geo: 'default',
@@ -361,11 +358,6 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
       state.fadeAge = 0;
       E.configLine('significance_fade = ' + (on ? 'on' : 'off'));
     },
-    // firmware cuckoo animations (cuckoo branch; inert 0/16 elsewhere)
-    cuckooActive() { return !!E.cuckooActive(); },
-    cuckooLevel(d, s2) { return E.cuckooLevel(d, s2); },
-    cuckooForce(anim) { E.cuckooSet(anim, 99); },
-    cuckooConfig(anim, interval) { E.cuckooSet(anim, interval); },
     holdoverFadeOn() { return state.holdoverFade; },
     // --- config: twiddle / export / import (all via the real firmware parser) ---
     applyConfig(txt) { state.configText = txt; boot(); },      // reboot with new config.txt
