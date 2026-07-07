@@ -479,9 +479,13 @@ export function createSession(opts = {}) {
     // ---- exports ----
     toCSV() {
       const rows = ['t_iso,lat,lon,alt_m,east_m,north_m,hdop,pdop,vdop,sats,fix'];
-      const d = S.dopHist, f = S.fixHist;
-      S.posHist.forEach((p, i) => {
-        const dd = d[d.length - S.posHist.length + i] || {}, ff = f[f.length - S.posHist.length + i] || {};
+      // Join DOP / fix to positions by TIMESTAMP, not array offset: posHist is pushed only on a
+      // valid fix while dopHist/fixHist are pushed every second, so any fix outage desynchronises
+      // the arrays and an offset join pairs a position with DOP/sats from a different second.
+      const dByT = new Map(); for (const dd of S.dopHist) dByT.set(dd.t, dd);
+      const fByT = new Map(); for (const ff of S.fixHist) fByT.set(ff.t, ff);
+      S.posHist.forEach((p) => {
+        const dd = dByT.get(p.t) || {}, ff = fByT.get(p.t) || {};
         rows.push([new Date(p.t * 1000).toISOString(), p.lat.toFixed(7), p.lon.toFixed(7), p.alt.toFixed(1),
         p.e.toFixed(3), p.n.toFixed(3), (dd.h || 0).toFixed(2), (dd.p || 0).toFixed(2), (dd.v || 0).toFixed(2), ff.sats || 0, ff.type || 0].join(','));
       });

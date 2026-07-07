@@ -87,11 +87,37 @@ export function createRealDevice(session) {
         if (S.nmeaLog.length > 420) S.nmeaLog.splice(0, S.nmeaLog.length - 420);
     }
 
+    /// Tear down all real-device telemetry so the app can fall to STANDBY (or a
+    /// clean simulation) with no lingering real data. Shared by the explicit
+    /// disconnect() and the physical-unplug status edge.
+    function clearRealBuffers() {
+        S.real = false;
+        S.connected = false;
+        S.fix.valid = false;
+        S.fix.type = 0;
+        S.sats = [];
+        S.gtrails.clear(); S.trails.clear(); gtrailLast.clear(); trailLast.clear();
+        if (S.cn0Hist && S.cn0Hist.clear) S.cn0Hist.clear();
+        if (Array.isArray(S.posHist)) S.posHist.length = 0;
+        if (Array.isArray(S.dopHist)) S.dopHist.length = 0;
+        if (Array.isArray(S.fixHist)) S.fixHist.length = 0;
+        if (S.pps && Array.isArray(S.pps.list)) S.pps.list.length = 0;   // TIMING KPIs go honest (no stale stream)
+        lastHistT = 0; lastCn0T = 0;
+        // Restore the observer we adopted from the device fix back to whatever it
+        // was before connecting, so the sim resumes from the honest default.
+        if (obsAtConnect) { S.obs.lat = obsAtConnect.lat; S.obs.lon = obsAtConnect.lon; S.obsUserSet = !!obsAtConnect.userSet; obsAtConnect = null; }
+        S.portLabel = '';
+    }
+
     /// Translate a GSVBuffer snapshot (items: {id, prn, constellation,
     /// elevation, azimuth, snr}) into the EXACT sim S.sats[] item shape and
     /// replace S.sats. We rebuild the whole array each snapshot because the
     /// buffer already merges/dedupes across constellations for us.
     function mergeSats(sats) {
+        // A GSV debounce timer scheduled just before an unplug/disconnect can fire
+        // after teardown; without this guard it would repopulate S.sats and the
+        // trail/cn0 buffers with vanished-device satellites in STANDBY.
+        if (!S.connected || !S.real) return;
         const out = [];
         const now = Date.now();
         const tSec = Math.floor(now / 1000);
@@ -333,7 +359,16 @@ export function createRealDevice(session) {
             clock.addEventListener('status', (e) => {
                 const d = e.detail || {};
                 S.connected = !!d.connected;
-                if (!d.connected) { S.real = false; S.rebooting = false; } // device dropped (unplug / reboot) — leave real-device mode so the UI stops mirroring
+                if (!d.connected) {
+                    // Device dropped (physical unplug / reboot). Leave real-device mode AND tear the
+                    // accumulated real telemetry down — otherwise the app falls into STANDBY (whose
+                    // invariant is "no telemetry") while the SKY/SIGNAL/POSITION/TIMING rooms keep
+                    // drawing the vanished device's real trails/history, and a later simulation would
+                    // merge that stale real data. The explicit disconnect() path already does this;
+                    // an unplug must too.
+                    S.real = false; S.rebooting = false;
+                    clearRealBuffers();
+                }
                 if (d.message) log(`[serial] ${d.message}`, d.connected === false);
             });
             clock.addEventListener('error', (e) => {
@@ -390,21 +425,7 @@ export function createRealDevice(session) {
             try { clock && clock.releaseNMEA?.(); } catch { /* ignore */ }
             try { await clock?.disconnect(); } catch { /* ignore */ }
             clock = null;
-            S.real = false;
-            S.connected = false;
-            S.fix.valid = false;
-            S.fix.type = 0;
-            S.sats = [];
-            S.gtrails.clear(); S.trails.clear(); gtrailLast.clear(); trailLast.clear();
-            if (S.cn0Hist && S.cn0Hist.clear) S.cn0Hist.clear();
-            if (Array.isArray(S.posHist)) S.posHist.length = 0;
-            if (Array.isArray(S.dopHist)) S.dopHist.length = 0;
-            if (Array.isArray(S.fixHist)) S.fixHist.length = 0;
-            lastHistT = 0; lastCn0T = 0;
-            // Restore the observer we adopted from the device fix back to whatever
-            // it was before connecting, so the sim resumes from the honest default.
-            if (obsAtConnect) { S.obs.lat = obsAtConnect.lat; S.obs.lon = obsAtConnect.lon; S.obsUserSet = !!obsAtConnect.userSet; obsAtConnect = null; }
-            S.portLabel = '';
+            clearRealBuffers();
         },
 
         ingestLine,

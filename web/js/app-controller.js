@@ -87,7 +87,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=108'), import('./sim.js?v=94'), import('./charts.js?v=93'), import('./realdev.js?v=94'), import('./emu-driver.js?v=30'), import('./ppsts.js?v=14')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=108'), import('./sim.js?v=95'), import('./charts.js?v=93'), import('./realdev.js?v=95'), import('./emu-driver.js?v=30'), import('./ppsts.js?v=14')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -525,6 +525,14 @@ class Component extends DcLite {
     try { p = JSON.parse(localStorage.getItem(this.skyHistKey(kind)) || 'null'); } catch (e) {}
     if (!p || p.v !== 1) return;
     if (Date.now() - p.savedAt > 12 * 3600e3) return;   // half a sidereal lap — older sky is stale
+    // Adopt the saved observer BEFORE restoring, so the connect-time obs-seed (realdev.js: first
+    // GGA clears the trails when the fix moved >1e-4 deg from S.obs) sees the location the history
+    // was actually collected at. Same place -> the seed is a no-op and the restored sky survives;
+    // genuinely moved -> the seed still (correctly) clears the now-stale trails. Without this the
+    // restore was wiped ~1 s after connect for every user not sitting at the default meridian.
+    if (kind === 'real' && p.obs && Number.isFinite(p.obs.lat) && Number.isFinite(p.obs.lon) && S.obs && !S.obsUserSet) {
+      S.obs.lat = p.obs.lat; S.obs.lon = p.obs.lon;
+    }
     const into = (arr, m) => { for (const [k, v] of arr || []) if (!m.has(k)) m.set(k, v); };
     into(p.trails, S.trails); into(p.gtrails, S.gtrails); into(p.cn0, S.cn0Hist);
     if (!S.posHist.length && p.posHist) S.posHist.push(...p.posHist);
@@ -1164,11 +1172,16 @@ class Component extends DcLite {
       }
     }
     this.mirrorDeviceClock();
-    // Telemetry logging — CONNECTED real data only. Edge-detect connect/disconnect here (rather
-    // than importing the logger into realdev.js) so simulation can never reach the log.
+    // Telemetry logging — CONNECTED real data only, and ONLY when the user has opted in. The
+    // opt-in gate must sit on beginSession/record too, not just the UI: the logger's contract is
+    // "no silent persistence", so nothing (not even the sessions row with the observer's home
+    // coordinates) may be written while logging is off. Edge-detect here (rather than importing
+    // the logger into realdev.js) so simulation can never reach the log. Disabling mid-session
+    // ends the open session cleanly.
     if (this.telemetryLog) {
       const S = this.session.S;
-      const real = !!(S && S.real && S.connected);
+      const on = this.telemetryLog.enabled;
+      const real = !!(S && S.real && S.connected && on);
       if (real && !this._wasReal) {
         this.telemetryLog.beginSession({ observerLat: S.obs && S.obs.lat, observerLon: S.obs && S.obs.lon, portLabel: S.portLabel || '' });
       } else if (!real && this._wasReal) {
