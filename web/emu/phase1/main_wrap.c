@@ -290,7 +290,7 @@ void emu_cuckoo_set(int anim, int interval){
 #if EMU_HAS_CUCKOO
   if (anim >= 0 && anim < CKA_COUNT) cuckoo_animation = (uint8_t)anim;
   if (interval == 99) { ck_carry_n = 5; ck_start(cuckoo_animation); }
-  else if (interval >= 0 && interval <= 2) cuckoo_interval = (uint8_t)interval;
+  else if (interval >= 0 && interval <= 60) cuckoo_interval = (uint8_t)interval;
 #else
   (void)anim; (void)interval;
 #endif
@@ -307,6 +307,11 @@ int emu_colon_civil(void){ return colonMode; }   /* lean branch: one colon mode,
 int emu_colon_alt(void){ return colonMode; }
 #endif
 /* Named mode ids — reference these instead of magic numbers that rot if the enum reorders. */
+#if EMU_HAS_CUCKOO
+int emu_MODE_CUCKOO_SHOWCASE(void){ return MODE_CUCKOO_SHOWCASE; }
+#else
+int emu_MODE_CUCKOO_SHOWCASE(void){ return -1; }
+#endif
 int emu_MODE_UNIX(void){ return MODE_UNIX; }
 int emu_MODE_ISO_ORDINAL(void){ return MODE_ISO_ORDINAL; }
 int emu_MODE_ISO_WEEK(void){ return MODE_ISO_WEEK; }

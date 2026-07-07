@@ -62,6 +62,14 @@ const lv = [];
 for (let t = 0; t < 250; t++) { tickMs(10); lv.push(emu.ckLevel(2, 3)); if (!emu.ckActive()) break; }
 const mn = Math.min(...lv), mx = Math.max(...lv);
 chk(`digit breathes (range ${mn}..${mx}, floor >= 4, peak >= 14)`, mn >= 4 && mx >= 14);
+// the sub-second digits breathe a COMPRESSED range (8..16): counting digits must stay
+// legible and must never dip into significance-fade territory
+emu.ckSet(1, 99);
+const sm = [];
+for (let t = 0; t < 220 && emu.ckActive(); t++) { tickMs(10); sm.push(emu.ckLevel(8, 3)); }
+for (let t = 0; t < 1200 && emu.ckActive(); t++) tickMs(10);
+const smn = Math.min(...sm), smx = Math.max(...sm);
+chk(`ms digit compressed (range ${smn}..${smx}, floor >= 8)`, smn >= 8 && smx >= 14);
 // distance lag: hours-tens (dist 2) vs ms digit (dist 5) should differ mid-wave
 emu.ckSet(1, 99);
 tickMs(400);
@@ -105,6 +113,22 @@ chk('x-ray dip covers the row', sawDipAll);
 chk('relight wave (MSB lit while ms still x-ray)', sawWaveEdge);
 chk(`locked signature pulse dips (min ${minPulse} <= 13)`, minPulse <= 13);
 chk('trust terminated', emu.ckActive() === 0);
+
+// ---- MODE_CUCKOO_SHOWCASE end-to-end: config line -> real parser -> buttons -> tour plays ----
+console.log('showcase mode:');
+const cfgLine = w('emu_config_line', 'void', ['string']);
+const mode = w('emu_mode', 'number'), b1 = w('emu_button1');
+const mcs = w('emu_MODE_CUCKOO_SHOWCASE', 'number');
+cfgLine('MODE_CUCKOO_SHOWCASE = enabled');
+let reached = false;
+for (let i = 0; i < 40 && !reached; i++) { b1(); if (mode() === mcs()) reached = true; }
+chk('config enables the mode and buttons reach it', reached);
+let played = false;
+for (let t = 0; t < 900 && !played; t++) { tickMs(10); if (emu.ckActive()) played = true; }
+chk('the tour announces and plays a piece', played);
+b1();   // leave the mode; any running piece finishes and the tour resets
+for (let t = 0; t < 1500 && emu.ckActive(); t++) tickMs(10);
+chk('left the mode cleanly', emu.ckActive() === 0 && mode() !== mcs());
 
 console.log(`\n${pass}/${pass + fail} passed${fail ? ' — FAILURES ABOVE' : ''}`);
 process.exit(fail ? 1 : 0);
