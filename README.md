@@ -47,7 +47,6 @@ It's verified rather than assumed: 4,511 display checks against independently co
 | --- | --- |
 | [`web/`](web/) | **The app** — source. Built to `docs/` by CI and served on Pages. See [`web/README.md`](web/README.md). |
 | [`web/emu/`](web/emu/) | The firmware emulator: `clock4` submodule, emscripten shim, and the conformance suite. |
-| [`chrony-bridge/`](chrony-bridge/) | Host daemon feeding the clock's GPS time into [chrony](https://chrony-project.org/) as a local NTP source. |
 | [`.github/workflows/pages.yml`](.github/workflows/pages.yml) | Compiles the firmware WASM + builds `web/`, deploys to GitHub Pages on every push to `main`. |
 
 `main` is **web-only**. The original native macOS menu-bar app is paused and preserved on the [`macos-app`](https://github.com/peterlewis/pcc/tree/macos-app) branch:
@@ -56,10 +55,6 @@ It's verified rather than assumed: 4,511 display checks against independently co
 git fetch && git switch macos-app
 cd macos && swift build && swift run PCC
 ```
-
-## chrony-bridge (NTP)
-
-A browser can't open a UDP port, so for a real local NTP source there's a small daemon that reads the clock's serial stream and feeds chrony through its `SOCK` refclock — handy on a headless Linux / Raspberry Pi box. Setup and honest accuracy notes in [`chrony-bridge/README.md`](chrony-bridge/README.md).
 
 ## Related
 
