@@ -41,6 +41,11 @@ class Component extends DcLite {
     // The honest-digits panel's GPS-drop / time-lapse are a SIMULATION-ONLY demo ("drill"); folded away
     // behind a chip by default so the panel leads with the readout, not a party trick. Session-only.
     drillOpen: false,
+    showcase: false,
+    // CUCKOO: scheduled showcase flourishes off the displayed time — 'off' | 'hour' (the full
+    // minute-long cycle at the top of the hour) | 'quarter' (that, plus a short heartbeat chime
+    // at :15/:30/:45). Persisted: a cuckoo clock that forgets it's a cuckoo clock is just a clock.
+    cuckoo: localStorage.getItem('pccweb.cuckoo') || 'off',
     tzOverride: 'auto', matrixFreq: '1.6',
     skyHeatmap: false, skyHorizon: false, skyTrails: true, skyLabels: true,
     window: 900,
@@ -87,8 +92,8 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=105'), import('./sim.js?v=94'), import('./charts.js?v=93'), import('./realdev.js?v=94'), import('./emu-driver.js?v=28'), import('./ppsts.js?v=14')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
-      this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT;
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=106'), import('./sim.js?v=94'), import('./charts.js?v=93'), import('./realdev.js?v=94'), import('./emu-driver.js?v=28'), import('./ppsts.js?v=14'), import('./demo7.js?v=3')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7]) => {
+      this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
       // The WASM firmware emulator drives the display faces (the emulator IS the clock). Async
@@ -673,6 +678,61 @@ class Component extends DcLite {
       if (f._emuStandby !== this.state.standby) { if (f.setStandby) f.setStandby(this.state.standby); f._emuStandby = this.state.standby; }
       f.applyDeviceFrame(frame);
     }
+    this.driveShowcase(frame);
+  }
+
+  // SHOWCASE / CUCKOO: the minute-locked segment choreography (demo7.js) driving the two display
+  // faces through their setSegField surface. The emulator keeps ticking underneath — the engine
+  // only decorates/modulates the live glyph mask, so time stays correct throughout.
+  // Manual (SHOWCASE button) loops until stopped. The cuckoo scheduler fires automatically off
+  // the DISPLAYED time: the full minute-long cycle at the top of the hour, a short heartbeat
+  // chime at :15/:30/:45 when set to quarter-hourly.
+  setCuckoo(v) {
+    try { localStorage.setItem('pccweb.cuckoo', v); } catch (e) {}
+    this._cuckooKey = null;   // allow the schedule to fire fresh after a change
+    this.setState({ cuckoo: v });
+  }
+
+  driveShowcase(frame) {
+    const d = this.faces.dispDate, t = this.faces.dispTime;
+    if (!d || !t || !d.setSegField || !this.D7) return;
+    const wantManual = this.state.showcase;
+
+    // cuckoo scheduler (only when nothing is already playing)
+    if (!this._sc && !wantManual && this.state.cuckoo !== 'off' && this.appMode() !== 'standby') {
+      const big = (frame.time && frame.time.big) || [];
+      if (big.length === 6 && big.every((v) => typeof v === 'number')) {
+        const hh = big[0] * 10 + big[1], mm = big[2] * 10 + big[3], ss = big[4] * 10 + big[5];
+        const key = hh + ':' + mm;
+        const isHour = mm === 0, isQuarter = mm % 15 === 0 && mm !== 0;
+        if (ss === 0 && this._cuckooKey !== key && (isHour || (isQuarter && this.state.cuckoo === 'quarter'))) {
+          this._cuckooKey = key;
+          this._sc = this.D7.createShowcase({ dateFace: d, timeFace: t, program: isHour ? 'hour' : 'chime' });
+          this._scMode = 'auto'; this._scD = d; this._scT = t;
+        }
+      }
+    }
+    // manual toggle
+    if (wantManual && (!this._sc || this._scMode !== 'manual')) {
+      if (this._sc) this._sc.stop();   // an auto chime yields to the button
+      else { this._sc = this.D7.createShowcase({ dateFace: d, timeFace: t, program: 'loop' }); this._scMode = 'manual'; this._scD = d; this._scT = t; }
+    }
+    if (!wantManual && this._scMode === 'manual' && this._sc) this._sc.stop();
+
+    if (!this._sc) return;
+    // dc-lite recreates faces on layout changes — a stale engine would drive dead DOM.
+    if (this._scD !== d || this._scT !== t) { this._sc = null; this._scMode = null; return; }
+    const S = this.session && this.session.S;
+    const fields = this._sc.frame(Date.now(), frame, { sats: (S && S.sats) || [] });
+    if (!fields) {   // exit ramp finished — land on the live face
+      const wasManual = this._scMode === 'manual';
+      this._sc = null; this._scMode = null;
+      d.setSegField(null); t.setSegField(null);
+      if (wasManual && this.state.showcase) this.setState({ showcase: false });
+      return;
+    }
+    d.setSegField(fields.date);
+    t.setSegField(fields.time);
   }
 
   set2(patch) {
@@ -2064,6 +2124,25 @@ class Component extends DcLite {
       // DRILL disclosure — folds the sim-only demo toggles away so the honest readout leads.
       onDrillTog: () => this.setState({ drillOpen: !this.state.drillOpen }),
       drillOpenStr: st.drillOpen ? 'true' : 'false', drillChev: st.drillOpen ? '▾' : '▸',
+      // SHOWCASE: start immediately; stop rides the engine's 0.5 s exit ramp back to the live
+      // face (driveShowcase flips the state off when the ramp lands). Needs a running clock —
+      // in standby there is no emulator frame to choreograph, so the chip is disabled.
+      onShowcase: () => {
+        if (this.appMode() === 'standby') return;
+        if (this.state.showcase) { if (this._sc) this._sc.stop(); else this.setState({ showcase: false }); }
+        else this.setState({ showcase: true });
+      },
+      scLabel: st.showcase ? '■ STOP SHOWCASE' : '◆ SHOWCASE',
+      scBtnStyle: 'display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10px;letter-spacing:.12em;'
+        + (this.appMode() === 'standby'
+          ? 'color:var(--txt3);opacity:.4;cursor:default;'
+          : st.showcase
+            ? 'color:var(--led);border-color:var(--led) !important;cursor:pointer;'
+            : 'color:var(--txt3);cursor:pointer;')
+        + 'background:transparent;border:1px solid var(--line2);border-radius:var(--r-1);padding:6px 11px',
+      // CUCKOO schedule segmented control (persisted)
+      ssCkOff: this.seg(st.cuckoo === 'off', true), ssCkHr: this.seg(st.cuckoo === 'hour', false), ssCkQt: this.seg(st.cuckoo === 'quarter', false),
+      onCkOff: () => this.setCuckoo('off'), onCkHr: () => this.setCuckoo('hour'), onCkQt: () => this.setCuckoo('quarter'),
       // Emulator config.txt: APPLY through the real firmware parser + reboot; EXPORT/IMPORT a file.
       // Stage E — when a real Mk IV is attached, APPLY also mirrors every setting onto the
       // physical clock live over serial (runtime-only; see mirrorConfigToDevice).

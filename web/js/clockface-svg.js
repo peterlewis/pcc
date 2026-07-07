@@ -375,7 +375,7 @@ export function createClockFaceSVG(container, opts = {}) {
       const crisp = el('circle', { cx, cy, r, fill: tokens.ledDim, opacity: '1' });
       glowGroup.appendChild(glow);
       crispGroup.appendChild(crisp);
-      return { glow, crisp };
+      return { glow, crisp, cx, cy };   // cx/cy retained for segGeometry()
     };
     return {
       kind: 'colon', which: cell.which,
@@ -422,11 +422,138 @@ export function createClockFaceSVG(container, opts = {}) {
     // keep the inset in sync if tokens changed via CSS
     if (refs.bg) refs.bg.setAttribute('fill', tokens.inset);
 
+    // SHOWCASE override: an explicit per-element intensity field (set via setSegField) paints
+    // instead of the model. The model above was still computed — callers can keep pushing device
+    // frames while the field drives the pixels, so dropping the field lands on live time instantly.
+    if (state.segField) { renderField(state.segField); return; }
+
     for (let ri = 0; ri < layout.rows.length; ri++) {
       const row = layout.rows[ri];
       if (row.type === 'date') renderDateRow(ri, row, model.dateRow);
       else renderTimeRow(ri, row, timeModel, step);
     }
+  }
+
+  // ----------------------------------------------------------------------------------------
+  // Per-element intensity field (the SHOWCASE surface). A field is an array aligned with this
+  // face's cells: digits {segs:[7 x 0..1], dp:0..1}, colons {a:0..1, b:0..1}. Values are linear
+  // light; the ghost floor rule matches setColon (an element never dims below the unlit ghost).
+  // ----------------------------------------------------------------------------------------
+  function paintSegLevel(desc, s, v) {
+    const litOp = state.brightness * v;
+    const key = litOp > DIM_ALPHA ? Math.round(litOp * 200) : -1;
+    const cp = desc.crispSegs[s], gp = desc.glowSegs[s];
+    if (cp._fk === key) return;
+    cp._fk = key;
+    if (key >= 0) {
+      cp.setAttribute('fill', tokens.led); cp.setAttribute('opacity', String(litOp));
+      if (GLOW) { gp.setAttribute('fill', tokens.led); gp.setAttribute('opacity', String(litOp)); }
+    } else {
+      cp.setAttribute('fill', tokens.ledDim); cp.setAttribute('opacity', String(DIM_ALPHA));
+      if (GLOW) gp.setAttribute('opacity', '0');
+    }
+  }
+  function paintDotLevel(dot, v) {
+    const litOp = state.brightness * v;
+    const key = litOp > DIM_ALPHA ? Math.round(litOp * 200) : -1;
+    if (dot._fk === key) return;
+    dot._fk = key;
+    if (key >= 0) {
+      dot.crisp.setAttribute('fill', tokens.led); dot.crisp.setAttribute('opacity', String(litOp));
+      if (GLOW) dot.glow.setAttribute('opacity', String(litOp));
+    } else {
+      dot.crisp.setAttribute('fill', tokens.ledDim); dot.crisp.setAttribute('opacity', String(DIM_ALPHA));
+      if (GLOW) dot.glow.setAttribute('opacity', '0');
+    }
+  }
+  function renderField(field) {
+    const rowCells = cellEls[0];
+    if (!rowCells) return;
+    for (let i = 0; i < rowCells.length; i++) {
+      const desc = rowCells[i], fv = field[i];
+      if (!desc || !fv) continue;
+      if (desc.kind === 'colon') { paintDotLevel(desc.top, fv.a || 0); paintDotLevel(desc.bot, fv.b || 0); continue; }
+      desc._sig = null;   // field writes bypass paintGlyph's diff — invalidate so normal render repaints
+      for (let s = 0; s < 7; s++) paintSegLevel(desc, s, (fv.segs && fv.segs[s]) || 0);
+      const dpv = fv.dp || 0;
+      // reuse paintDP's positioning, but with continuous intensity
+      paintDP(desc, dpv > 0.02, Math.max(dpv, 0));
+    }
+  }
+
+  // The intensity field the NORMAL renderer would paint for a given device frame — the live
+  // "glyph mask" (0/1 per segment × fades × the real colon table value). Pure; no DOM.
+  function computeField(model, when) {
+    const ms = typeof when === 'number' ? when : Date.now();
+    const tm = model.time || { mode: 'off' };
+    const step = (tm.colonStep != null) ? (tm.colonStep % 200) : (Math.floor(ms / 10) % 200);
+    const out = [];
+    const row = layout.rows[0];
+    if (!row) return out;
+    if (row.type === 'date') {
+      const str = model.dateRow || '';
+      const cellByte = new Array(10).fill(0), cellDP = new Array(10).fill(false);
+      let ci = 0;
+      for (const ch of str) {
+        if (ch === '.') { if (ci > 0) cellDP[ci - 1] = true; continue; }
+        if (ci >= 10) break;
+        cellByte[ci] = dateGlyph(ch, state.inverted); ci++;
+      }
+      for (let i = 0; i < 10; i++) {
+        const logical = state.inverted ? 9 - i : i;
+        const segs = new Array(7).fill(0);
+        for (let s = 0; s < 7; s++) if (cellByte[i] >= 0 && segOn(cellByte[i], s)) segs[s] = 1;
+        out[logical] = { segs, dp: cellDP[i] ? 1 : 0 };
+      }
+      return out;
+    }
+    for (let k = 0; k < row.cells.length; k++) {
+      const cell = row.cells[k];
+      if (cell.kind === 'colon') {
+        const b = (tm.mode !== 'off' && tm.colonsOn !== false) ? colonTbl[cell.which][step] : 0;
+        out[k] = { a: b, b };
+        continue;
+      }
+      if (tm.mode === 'off') { out[k] = { segs: new Array(7).fill(0), dp: 0 }; continue; }
+      const val = cell.role === 'small' ? tm.small[cell.src] : tm.big[cell.src];
+      let byte;
+      if (val === 'BLANK') byte = -1;
+      else if (val === 'DASH') byte = DASH;
+      else byte = LUT_TIME[val] ?? -1;
+      const fade = (cell.role === 'small' && tm.smallFade) ? (tm.smallFade[cell.src] ?? 1) : 1;
+      const segs = new Array(7).fill(0);
+      for (let s = 0; s < 7; s++) if (byte >= 0 && segOn(byte, s)) segs[s] = fade;
+      const dpOn = !!(cell.dp && tm.dp);
+      out[k] = { segs, dp: dpOn ? (tm.dpFade != null ? tm.dpFade : 1) : 0 };
+    }
+    return out;
+  }
+
+  // Element geometry for choreography: per cell, the centroid of each segment / dot / DP in
+  // viewBox units, plus the viewBox itself and the inversion flag (the date board is rotated
+  // 180° by its container — callers flip to get visual coordinates).
+  function computeGeometry() {
+    const els = [];
+    const rowCells = cellEls[0] || [];
+    for (let i = 0; i < rowCells.length; i++) {
+      const desc = rowCells[i];
+      if (desc.kind === 'colon') {
+        els.push({ cell: i, kind: 'colon', which: desc.which,
+          a: { x: desc.top.cx, y: desc.top.cy }, b: { x: desc.bot.cx, y: desc.bot.cy } });
+        continue;
+      }
+      const box = desc.box;
+      const segs = SEG_POLYS.map((poly) => {
+        let sx = 0, sy = 0;
+        for (const p of poly) { sx += p[0]; sy += p[1]; }
+        return { x: box.left + (sx / poly.length) * box.sc, y: box.top + (sy / poly.length) * box.sc };
+      });
+      const inv = state.inverted;
+      const dp = { x: inv ? box.left - DP_OFF_X : box.left + box.gw + DP_OFF_X,
+                   y: inv ? box.top + DP_OFF_Y : box.top + box.gh - DP_OFF_Y };
+      els.push({ cell: i, kind: 'digit', role: desc.cell.role || 'date', src: desc.cell.src, segs, dp });
+    }
+    return { els, vb: { ...vbParams }, inverted: !!state.inverted };
   }
 
   // Light a single digit cell's 7 segments + optional DP from a byte (byte<0 = fully blank).
@@ -578,6 +705,11 @@ export function createClockFaceSVG(container, opts = {}) {
     refreshTokens() { tokens = resolveTokens(); render(); },
     applyDeviceFrame(frame) { state.deviceFrame = frame; render(); },
     clearDeviceFrame() { state.deviceFrame = null; render(); },
+    // SHOWCASE surface: explicit per-element intensity field (null → back to the live model),
+    // the live glyph-mask the model WOULD paint, and element geometry for choreography.
+    setSegField(field) { state.segField = field; render(); },
+    computeField,
+    segGeometry() { if (!svg) build(); return computeGeometry(); },
     setHwSpec(list) { state.hwSpec = list; if (state.hardware) { build(); render(); } },
     setHwCalibrate(on) { state.hwCalibrate = !!on; if (state.hardware) { build(); render(); } },
     setClockOffset(ms) { clockOffsetMs = Number.isFinite(ms) ? ms : 0; },
