@@ -117,13 +117,20 @@ export function createSatTracker() {
     get count() { return sats.length; },
     async load(fetchImpl = (typeof fetch !== 'undefined' ? fetch : null)) {
       if (!fetchImpl) return false;
+      // Bound the request: CelesTrak occasionally goes unreachable (its origin refuses or, worse,
+      // accepts the socket and never replies). Without a deadline that leaves the promise pending
+      // for the browser's full ~30 s connect timeout, so the "no real sats, using synthetic" state
+      // never resolves. Abort at 8 s → fail fast → the virtual GPS falls back cleanly.
+      const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = ctrl && typeof setTimeout !== 'undefined' ? setTimeout(() => ctrl.abort(), 8000) : null;
       try {
-        const r = await fetchImpl(TLE_URL, { mode: 'cors' });
+        const r = await fetchImpl(TLE_URL, { mode: 'cors', signal: ctrl ? ctrl.signal : undefined });
         if (!r.ok) return false;
         sats = parseTleText(await r.text());
         loaded = sats.length > 0;
         return loaded;
       } catch (e) { return false; }
+      finally { if (timer) clearTimeout(timer); }
     },
     loadText(txt) { sats = parseTleText(txt); loaded = sats.length > 0; return loaded; },
     // Satellites currently above `maskDeg` for the observer, brightest (highest) first. Records
