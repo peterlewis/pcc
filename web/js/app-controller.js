@@ -82,7 +82,7 @@ class Component extends DcLite {
       hdrBar: localStorage.getItem('pccweb.hdrbar') === '1',
     });
     this.reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=105'), import('./sim.js?v=92'), import('./charts.js?v=92'), import('./realdev.js?v=92'), import('./emu-driver.js?v=27')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=105'), import('./sim.js?v=93'), import('./charts.js?v=92'), import('./realdev.js?v=92'), import('./emu-driver.js?v=27')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -2464,10 +2464,16 @@ class Component extends DcLite {
       eCsvN: fx + ' ROWS · ≈' + Math.max(1, Math.round(fx * 0.1)) + ' KB',
       eGpxN: Math.ceil(fx / 5) + ' TRKPTS',
       eNmeaN: rx + ' SENTENCES',
+      eSatN: (() => {
+        if (!S) return '0 PTS';
+        let pts = 0; for (const tr of S.trails.values()) pts += tr.length;
+        return pts + ' PTS · ' + S.trails.size + ' SATS';
+      })(),
       onDlCsv: () => this.session && this.dl('pcc-session.csv', 'text/csv', this.session.toCSV()),
       onDlJson: () => this.session && this.dl('pcc-session.json', 'application/json', this.session.toJSON()),
       onDlGpx: () => this.session && this.dl('pcc-session.gpx', 'application/gpx+xml', this.session.toGPX()),
       onDlNmea: () => this.session && this.dl('pcc-session.nmea', 'text/plain', this.session.toNMEA()),
+      onDlSat: () => this.session && this.dl('pcc-session-sats.csv', 'text/csv', this.session.toSatCSV()),
       // Persistent telemetry log (IndexedDB) — the data-safety controls. Opt-in; never simulation.
       cbTelLog: this.cb(!!(this.telemetryLog && this.telemetryLog.enabled)),
       onTelLog: () => { if (!this.telemetryLog) return; this.telemetryLog.setEnabled(!this.telemetryLog.enabled); this.setState({}); },

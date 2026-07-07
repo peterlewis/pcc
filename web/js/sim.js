@@ -501,5 +501,23 @@ export function createSession(opts = {}) {
       }, null, 2);
     },
     toNMEA() { return S.nmeaLog.filter((l) => l.dir === 'rx').map((l) => l.text).join('\n'); },
+    // Satellite history CSV — the sky views' own buffers exported: trails (az/el @ 30 s/pt) joined
+    // with the C/N0 sample nearest each point (cn0Hist @ 1 s/pt; blank if none within 15 s — the
+    // two histories have different retention, so either can outlive the other). Rows grouped by
+    // satellite, chronological within each. 'used' exists only in the live snapshot, not in the
+    // per-point history, so it is omitted rather than back-filled from the present.
+    toSatCSV() {
+      const rows = ['t_iso,sat,az_deg,el_deg,cn0_dbhz'];
+      for (const key of [...S.trails.keys()].sort()) {
+        const cn0 = S.cn0Hist.get(key) || [];
+        let j = 0;
+        for (const p of S.trails.get(key)) {
+          while (j < cn0.length - 1 && Math.abs(cn0[j + 1].t - p.t) <= Math.abs(cn0[j].t - p.t)) j++;
+          const c = cn0.length && Math.abs(cn0[j].t - p.t) <= 15 ? cn0[j].v.toFixed(1) : '';
+          rows.push([new Date(p.t * 1000).toISOString(), key, p.az.toFixed(1), p.el.toFixed(1), c].join(','));
+        }
+      }
+      return rows.join('\n');
+    },
   };
 }

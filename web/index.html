@@ -1365,6 +1365,16 @@
               </div>
               <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 12px">
                 <div>
+                  <div style="font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--txt)">SATELLITE CSV</div>
+                  <div style="font-size:11px;color:var(--txt3);margin-top:2px">Sky history — az/el per satellite (1 pt / 30 s) with nearest C/N&#8320;</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;flex:none">
+                  <span style="font-family:var(--mono);font-size:10px;color:var(--txt3)">{{eSatN}}</span>
+                  <button onClick="{{onDlSat}}" style="font-family:var(--sans);font-size:12px;padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt);cursor:pointer" style-hover="border-color:var(--txt3)">DOWNLOAD</button>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 12px;border-top:1px solid var(--line)">
+                <div>
                   <div style="font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--txt)">RAW NMEA</div>
                   <div style="font-size:11px;color:var(--txt3);margin-top:2px">Received sentences as captured, checksums intact</div>
                 </div>
@@ -1388,6 +1398,6 @@
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=184"></script>
+<script type="module" src="js/app-controller.js?v=185"></script>
 </body>
 </html>
