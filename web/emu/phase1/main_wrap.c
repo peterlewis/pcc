@@ -90,7 +90,27 @@ void emu_boot(unsigned int t){
   setNextTimestamp(currentTime);
   setPrecision();
 }
+/* --- Colon DMA model --------------------------------------------------------------------
+ * On hardware the colon PWM tables (buffer_colons_L/R[200], 10 ms/step, 2 s cycle) are cycled
+ * into TIM2->CCR1/CCR2 by a FREE-RUNNING DMA; colonAnimationSync() (= HAL_DMA_Abort +
+ * HAL_DMA_Start on TIM5 CH1/CH2) restarts it from index 0 at a PPS whose currentTime is even.
+ * currentTime's parity is NOT stable inside a second — the .900 prep pre-increments it and the
+ * RMC decode rewrites it at ~.300 — so reconstructing the index from live parity (the old
+ * emu_colon_step) played the table in chopped, reordered segments. Model the DMA itself: a ms
+ * counter that free-runs with SysTick and zeroes exactly where the firmware restarts the real
+ * DMA. Defining HAL_DMA_Start/Abort natively here overrides the no-op --js-library stubs (a
+ * native definition always wins over a JS-library fallback), so every firmware call site —
+ * even-second PPS sync, future ones — hooks the model with no emulator-side guessing. */
+static uint32_t colon_dma_ms;   /* ms since the colon DMA last (re)started */
+HAL_StatusTypeDef HAL_DMA_Start(DMA_HandleTypeDef *hdma, uint32_t src, uint32_t dst, uint32_t len){
+  (void)src; (void)dst; (void)len;
+  if (hdma == &hdma_tim5_ch1) colon_dma_ms = 0;   /* colonAnimationStart(): table index 0 */
+  return HAL_OK;
+}
+HAL_StatusTypeDef HAL_DMA_Abort(DMA_HandleTypeDef *hdma){ (void)hdma; return HAL_OK; }
+
 void emu_tick(void){
+  colon_dma_ms++;               /* the colon DMA free-runs in the SysTick (1 ms) domain */
 #ifdef EMU_NATIVE64
   if (g_systick) g_systick();
 #else
@@ -166,6 +186,7 @@ void emu_boot_cold(unsigned int t){
   tc_hse_resid=tc_lse_resid=0; tc_n_hse=tc_n_lse=0;
   tc_seed=0; tc_seed_pending=0; tc_seed_lo=tc_seed_hi=0; tc_learn=tc_apply=tc_rtc=0; tc_disp_state='-';
   for (int i=0;i<40;i++){ tc_bins[i].hse_sum=tc_bins[i].lse_sum=0; tc_bins[i].hse_n=tc_bins[i].lse_n=0; }
+  colon_dma_ms = 0;             /* power-on: colon DMA starts from table index 0 */
   setNextTimestamp(currentTime);
   SetPPS( &PPS );          /* PPS_Init's job: COUNT_NORMAL setPrecision never installs one */
   setPrecision();
@@ -206,14 +227,12 @@ void emu_force_holdover2(unsigned pps_secs, unsigned cal_secs){
 /* Active colon animation + the civil/alt references. LST/SOLAR install colonModeAlt so the alt
  * timebases read as "not civil time" at a glance (an intentional honesty feature). */
 int emu_colon_mode(void){ return colonMode; }
-/* The firmware colon animation is a 200-entry PWM table (buffer_colons_L/R) DMA-cycled at
- * 10 ms/step and resynced to even-second boundaries (colonAnimationSync). Reconstruct the DMA
- * read index from the live sub-second counters + second parity, so the face can drive its colon
- * at the firmware's REAL phase (PPS-disciplined) instead of wall-clock ms. */
+/* The colon DMA read index (see the colon DMA model above emu_tick): free-running 10 ms steps,
+ * zeroed by the firmware's own colonAnimationSync() at even-second PPS. This is the index the
+ * hardware DMA would be reading — NOT a reconstruction from currentTime parity, which flips
+ * mid-second (.900 prep, RMC decode) and chopped the animation into segments. */
 int emu_colon_step(void){
-  int s = decisec*10 + centisec;               /* 0..99, 10 ms per step */
-  if ((uint32_t)currentTime & 1) s += 100;     /* odd second = 2nd half of the 2 s window */
-  return s % 200;
+  return (int)((colon_dma_ms / 10u) % 200u);
 }
 #if EMU_HAS_ALT
 int emu_colon_civil(void){ return colonModeCivil; }

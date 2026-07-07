@@ -101,15 +101,18 @@ export function drawSky(canvas, tok, data, opts) {
   ctx.fillText('30°', cx + 3, cy - (60 / 90) * R - 5);
   ctx.fillText('60°', cx + 3, cy - (30 / 90) * R - 5);
 
-  // trails (age-faded)
+  // trails (age-faded). The fade normalises over the TRAIL length control (default = the full
+  // 90 min buffer), so a shorter trail fades to nothing over its own span — same visual
+  // language as the long one, just a shorter ribbon.
   if (opts.trails) {
     const now = data.now;
+    const span = opts.trailAge || 5400;
     for (const [key, tr] of data.trails) {
       const sat = data.sats.find((s) => s.key === key);
       const col = tok[sat ? sat.tok : 'gps'] || tok.txt3;
       for (let i = 1; i < tr.length; i++) {
         if (tr[i].el < -2 || tr[i - 1].el < -2) continue;
-        const age = (now - tr[i].t) / 5400;
+        const age = (now - tr[i].t) / span;
         if (age > 1) continue;
         ctx.strokeStyle = col; ctx.globalAlpha = 0.55 * (1 - age) + 0.04;
         ctx.beginPath();

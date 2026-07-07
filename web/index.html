@@ -838,6 +838,12 @@
                 <button onClick="{{oTrails}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbTrails}}"></span>TRAILS</button>
                 <button onClick="{{oLabels}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:12px;color:var(--txt)"><span style="{{cbLabels}}"></span>LABELS</button>
                 <span style="flex:1"></span>
+                <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">TRAIL</span>
+                <div style="display:flex;border:1px solid var(--line)">
+                  <button onClick="{{oTrail15}}" style="{{ssTrail15}}">15M</button>
+                  <button onClick="{{oTrail45}}" style="{{ssTrail45}}">45M</button>
+                  <button onClick="{{oTrail90}}" style="{{ssTrail90}}">MAX</button>
+                </div>
                 <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">WINDOW</span>
                 <div style="display:flex;border:1px solid var(--line)">
                   <button onClick="{{oWinLive}}" style="{{ssWinLive}}">LIVE</button>
@@ -1382,6 +1388,6 @@
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=183"></script>
+<script type="module" src="js/app-controller.js?v=184"></script>
 </body>
 </html>

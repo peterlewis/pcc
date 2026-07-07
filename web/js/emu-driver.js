@@ -6,7 +6,7 @@
 // NOTE: bump the ?v= whenever the firmware WASM is rebuilt — clock-fw.mjs keeps one URL, so without
 // a cache-bust a dev-server tab can pair NEW app JS with a STALE cached firmware (e.g. a renamed
 // config key silently ignored). Production is immune: the build inlines this module into the bundle.
-import factory from '../emu/clock-fw.mjs?v=2';
+import factory from '../emu/clock-fw.mjs?v=3';
 import { VirtualGPS } from '../emu/sim-gps.mjs?v=3';
 import { createSatTracker } from './sat-tracker.js?v=2';
 

@@ -44,6 +44,10 @@ class Component extends DcLite {
     tzOverride: 'auto', matrixFreq: '1.6',
     skyHeatmap: false, skyHorizon: false, skyTrails: true, skyLabels: true,
     window: 900,
+    // TRAIL length (s): how much ribbon each sat drags in the sky/map/globe views. With 12 h of
+    // restored history a full 90 min per sat reads as clutter, so default mid (45 min); 5400 = MAX
+    // (the fade horizon / the full trail buffer — pre-control behaviour, bit-for-bit).
+    skyTrailAge: 2700,
     sigMedian: true, sigFilter: 'all',
     posWindow: 1800,
     globeTerm: true, globeTrails: true, globeLabels: false, globeGrat: true, globeRotate: true, globeClock: true,
@@ -78,7 +82,7 @@ class Component extends DcLite {
       hdrBar: localStorage.getItem('pccweb.hdrbar') === '1',
     });
     this.reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=105'), import('./sim.js?v=92'), import('./charts.js?v=91'), import('./realdev.js?v=92'), import('./emu-driver.js?v=26')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=105'), import('./sim.js?v=92'), import('./charts.js?v=92'), import('./realdev.js?v=92'), import('./emu-driver.js?v=27')]).then(([CF, CFSVG, SIM, CH, RD, ED]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -1226,15 +1230,17 @@ class Component extends DcLite {
     if (name === 'dacCurve') return CH.drawDacCurve(el, T, st.dacCurve, this._dacDrag);
     if (name === 'sky') {
       const trails = new Map();
+      // Effective trail cutoff = the tighter of the chart WINDOW and the TRAIL length control.
+      const cut = Math.min(st.window >= 5400 ? 5400 : st.window, st.skyTrailAge);
       if (st.skyTrails) for (const [k, tr] of S.trails) {
-        const f = st.window >= 5400 ? tr : tr.filter((p) => nowS - p.t <= st.window);
+        const f = tr.filter((p) => nowS - p.t <= cut);
         if (f.length > 1) trails.set(k, f);
       }
       return CH.drawSky(el, T, {
         sats: S.sats, trails, now: nowS,
         sun: this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon),
         moon: this.SIM.moonPos(Date.now(), S.obs.lat, S.obs.lon),
-      }, { heatmap: st.skyHeatmap, horizon: st.skyHorizon, trails: st.skyTrails, labels: st.skyLabels });
+      }, { heatmap: st.skyHeatmap, horizon: st.skyHorizon, trails: st.skyTrails, labels: st.skyLabels, trailAge: cut });
     }
     if (name === 'cn0elev') return CH.drawCn0Elev(el, T, S.sats, st.sigMedian);
     if (name === 'cn0time') {
@@ -1248,9 +1254,18 @@ class Component extends DcLite {
     if (name === 'phase') return CH.drawPhase(el, T, S.pps.list, 1800, nowS, (S.pps.flags & 2) ? 0 : (S.pps.lastEdge || 0));
     if (name === 'stair') return CH.drawStair(el, T, S.pps.samples, 1800, nowS, S.pps.temp);
     if (name === 'ppmtemp') return CH.drawPpmTemp(el, T, S.pps.samples, this._timing && this._timing.fit);
+    // Ground tracks carry no timestamps (gtrails = plain points at ~45 s cadence), so the TRAIL
+    // length control maps to a tail slice: 45 s per point, full buffer (40 pts) at MAX.
+    const gcut = (g) => {
+      const n = Math.round(st.skyTrailAge / 45);
+      if (n >= 40) return g;
+      const m = new Map();
+      for (const [k, tr] of g) m.set(k, tr.length > n ? tr.slice(-n) : tr);
+      return m;
+    };
     if (name === 'globe') {
       return CH.drawGlobe(el, T, {
-        rot: this.globeRot, land: this.land, sats: S.sats, gtrails: S.gtrails,
+        rot: this.globeRot, land: this.land, sats: S.sats, gtrails: gcut(S.gtrails),
         sun: this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon), obs: S.obs,
         opts: { terminator: st.globeTerm, trails: st.globeTrails, labels: st.globeLabels, graticule: st.globeGrat },
         dark: st.theme === 'dark',
@@ -1258,7 +1273,7 @@ class Component extends DcLite {
     }
     if (name === 'map') {
       return CH.drawMap(el, T, {
-        land: this.land, sats: S.sats, gtrails: S.gtrails,
+        land: this.land, sats: S.sats, gtrails: gcut(S.gtrails),
         sun: this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon), obs: S.obs,
         opts: { trails: st.globeTrails, labels: st.globeLabels, graticule: st.globeGrat },
         dark: st.theme === 'dark',
@@ -2253,6 +2268,10 @@ class Component extends DcLite {
       oWin15: () => this.setState({ window: 900 }, () => this.drawChart('sky')),
       oWin1h: () => this.setState({ window: 3600 }, () => this.drawChart('sky')),
       oWinAll: () => this.setState({ window: 5400 }, () => this.drawChart('sky')),
+      ssTrail15: this.seg(st.skyTrailAge === 900, true), ssTrail45: this.seg(st.skyTrailAge === 2700, false), ssTrail90: this.seg(st.skyTrailAge === 5400, false),
+      oTrail15: () => this.setState({ skyTrailAge: 900 }, () => this.drawChart('sky')),
+      oTrail45: () => this.setState({ skyTrailAge: 2700 }, () => this.drawChart('sky')),
+      oTrail90: () => this.setState({ skyTrailAge: 5400 }, () => this.drawChart('sky')),
     };
     if (!S) {
       Object.assign(out, { fLat: '—', fLon: '—', fAlt: '—', fHdop: '—', fFix: '—', fSatsUV: '—', fGrid: '—', cSunAlt: '—', cSunAz: '—', cMoonAlt: '—', cMoonAz: '—', cMoonPhase: '—', cMoonIllum: '—', cRise: '—', cSet: '—', sStarted: '—', sPasses: '—', sObs: '—', sPeak: '—', sCover: '—', nGps: '·', nGlo: '·', nGal: '·', nBds: '·' });
