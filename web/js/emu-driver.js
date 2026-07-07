@@ -19,9 +19,9 @@ const decode = (b) => { const p=b&0x7f; if(p===0)return 'BLANK'; if(p===DASH)ret
 // (main.h) and the face's COLON_MODES are the SAME order, so this is 1:1 by index.
 const COLON_NAME = ['slowfade', 'heartbeat', 'sawtooth', 'alt_sawtooth', 'toggle', 'solid'];
 
-// Standalone-demo fallback ONLY (emu/clock-emu.html): a rich mode set so the demo page has
-// something to cycle. The APP always passes the golden config.txt instead — config is the
-// single source of truth for what the clock enables. Real keys, real firmware parser.
+// Fallback config ONLY (used when createEmuDriver gets no config). The APP always passes the
+// golden config.txt instead — config is the single source of truth for what the clock enables.
+// Real keys, real firmware parser.
 export const DEFAULT_CONFIG = [
   'colon_mode = heartbeat',       // civil colon (matches the shipped device config.txt)
   'MODE_ISO8601_STD = enabled',

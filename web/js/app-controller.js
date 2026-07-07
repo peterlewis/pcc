@@ -82,6 +82,11 @@ class Component extends DcLite {
       hdrBar: localStorage.getItem('pccweb.hdrbar') === '1',
     });
     this.reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // Build provenance for the FIRMWARE & DATA panel — written by build.mjs (deploy AND local
+    // builds). Absent (fresh clone, dev server, no build yet) → the panel says so honestly.
+    fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
+      if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
+    }).catch(() => {});
     Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=105'), import('./sim.js?v=94'), import('./charts.js?v=93'), import('./realdev.js?v=94'), import('./emu-driver.js?v=27'), import('./ppsts.js?v=14')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT;
       this.session = SIM.createSession({ preroll: 1560 });
@@ -1757,7 +1762,7 @@ class Component extends DcLite {
     return Object.assign({},
       this.rvShell(), this.rvDisplay(), this.rvConnect(), this.rvSats(),
       this.rvSignal(), this.rvPosition(), this.rvTiming(), this.rvGlobe(),
-      this.rvWeather(), this.rvMonitor(), this.rvExport());
+      this.rvWeather(), this.rvMonitor(), this.rvExport(), this.rvFirmware());
   }
 
   rvShell() {
@@ -2459,6 +2464,42 @@ class Component extends DcLite {
       onClear: () => { if (S) { S.nmeaLog.length = 0; this._monFrozen = []; this.setState({}); } },
       onSendCmd: () => this.sendCmd(),
       onCmdKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); this.sendCmd(); } },
+    };
+  }
+
+  // DEVICE→UPDATES "FIRMWARE & DATA": what firmware the in-app emulator IS (version + exact
+  // clock4 commit the WASM was compiled from — build.mjs writes build-info.json), the tz data
+  // shipped alongside, and a user-triggered GitHub check of the rollup branch head.
+  rvFirmware() {
+    const bi = this.buildInfo;
+    const kb = (b) => (b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB');
+    const zone = (() => { try { const z = this.emu && this.emu.tz(); return z && z.zone ? z.zone : null; } catch (e) { return null; } })();
+    const upd = this._fwUpd || { s: '', c: 'var(--txt3)' };
+    return {
+      fwVer: bi ? bi.version + ' — WASM, BUILT FROM SOURCE' : 'BUILT FROM SOURCE (run build.mjs for provenance)',
+      fwSrc: bi ? 'clock4 @ ' + bi.fwSha.slice(0, 7) + ' (' + bi.fwBranch + ')' : 'web/emu/firmware submodule',
+      fwBuilt: bi ? bi.builtAt + (bi.emcc ? ' · emcc ' + bi.emcc : '') : '—',
+      fwTz: (bi && bi.tzrules ? 'IANA RULES ' + kb(bi.tzrules) : 'IANA RULES (tzrules.bin)')
+        + (bi && bi.tzmap ? ' · ZONEDETECT MAP ' + kb(bi.tzmap) + ' (LAZY)' : ' · ZONEDETECT MAP (LAZY)')
+        + (zone ? ' · ACTIVE ' + zone.toUpperCase() : ''),
+      fwUpdState: upd.s, fwUpdC: upd.c,
+      onFwCheck: () => {
+        this._fwUpd = { s: 'CHECKING GITHUB…', c: 'var(--txt2)' };
+        this.setState({});
+        fetch('https://api.github.com/repos/peterlewis/clock4/commits/rollup', { headers: { Accept: 'application/vnd.github+json' } })
+          .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .then((j) => {
+            const sha = j.sha || '';
+            const date = ((j.commit || {}).committer || {}).date || '';
+            const head = sha.slice(0, 7) + (date ? ' · ' + date.slice(0, 10) : '');
+            this._fwUpd = !sha ? { s: 'CHECK FAILED — UNEXPECTED RESPONSE', c: 'var(--acq)' }
+              : (bi && bi.fwSha === sha) ? { s: 'UP TO DATE — rollup @ ' + head, c: 'var(--lock)' }
+              : bi ? { s: 'NEWER FIRMWARE ON rollup — ' + head + ' (BUILT FROM ' + bi.fwSha.slice(0, 7) + ')', c: 'var(--acq)' }
+              : { s: 'rollup HEAD ' + head + ' — LOCAL BUILD COMMIT UNKNOWN', c: 'var(--txt2)' };
+            this.setState({});
+          })
+          .catch(() => { this._fwUpd = { s: 'CHECK FAILED — OFFLINE OR RATE-LIMITED', c: 'var(--acq)' }; this.setState({}); });
+      },
     };
   }
 

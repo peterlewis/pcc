@@ -90,37 +90,37 @@ for (const dir of ['fonts', 'globe', 'data']) {
   if (existsSync(src)) cpSync(src, resolve(docs, dir), { recursive: true });
 }
 
-// 3b. Emulator page (emu/clock-emu.html): the REAL clock4 firmware in WebAssembly. Bundle its
-//     inline module (clockface + virtual-GPS + the SINGLE_FILE wasm) into one self-contained
-//     ES module and inline it, so docs/emu.html works over https AND file:// with no fetches.
-let emuHtml = readFileSync(resolve(web, 'emu', 'clock-emu.html'), 'utf8');
-const emuScriptRe = /<script type="module">([\s\S]*?)<\/script>/;
-const emuMatch = emuHtml.match(emuScriptRe);
-if (!emuMatch) throw new Error('module <script> not found in emu/clock-emu.html');
-// The SINGLE_FILE emscripten module is built for node,web; its Node-only branch (createRequire
-// via node:module) is guarded by ENVIRONMENT_IS_NODE and never runs in a browser — mark node:*
-// external so esbuild leaves those dynamic imports alone. es2022 target allows top-level await.
-const externalNode = { name: 'external-node', setup(b) { b.onResolve({ filter: /^node:/ }, () => ({ external: true })); } };
-const emuBuild = await esbuild.build({
-  stdin: { contents: emuMatch[1], resolveDir: resolve(web, 'emu'), loader: 'js' },
-  bundle: true, format: 'esm', minify: true, target: 'es2022', legalComments: 'none',
-  plugins: [stripQuery, externalNode], write: false,
-});
-const emuBundle = emuBuild.outputFiles[0].text;
-emuHtml = emuHtml.replace(emuScriptRe, `<script type="module">\n${emuBundle}\n</script>`);
-mkdirSync(resolve(docs, 'emu'), { recursive: true });   // same relative path as dev (emu/clock-emu.html)
-writeFileSync(resolve(docs, 'emu', 'clock-emu.html'), emuHtml);
-// Emulator runtime binaries fetched at runtime by the app (the firmware .mjs/.wasm are bundled via
-// SINGLE_FILE, but these are streamed): the firmware IANA tz engine (tzrules.bin) and the ZoneDetect
-// map (tzmap.bin, Git LFS). Without these the app's timezone engine silently falls back to browser Intl.
+// 3b. Emulator runtime binaries fetched at runtime by the app (the firmware .mjs/.wasm are bundled
+//     via SINGLE_FILE, but these are streamed): the firmware IANA tz engine (tzrules.bin) and the
+//     ZoneDetect map (tzmap.bin, Git LFS). Without these the app's timezone engine silently falls
+//     back to browser Intl. (The old standalone emu/clock-emu.html demo page is gone — the app's
+//     clock faces ARE the emulator.)
+mkdirSync(resolve(docs, 'emu'), { recursive: true });
 for (const bin of ['tzrules.bin', 'tzmap.bin']) {
   const src = resolve(web, 'emu', bin);
   if (existsSync(src)) { cpSync(src, resolve(docs, 'emu', bin)); console.log(`copied docs/emu/${bin} (${kb(statSync(src).size)} KB)`); }
   else console.warn(`WARN: web/emu/${bin} missing — the deployed tz engine will fall back to browser Intl`);
 }
-const emuExternal = [...emuHtml.matchAll(/\b(?:src|href)\s*=\s*["'](https?:)?\/\/[^"']+/gi)].map((m) => m[0]);
-console.log(`built docs/emu/clock-emu.html (${kb(emuHtml.length)} KB, self-contained firmware wasm)`);
-if (emuExternal.length) { console.error('WARNING external refs in emu:', emuExternal); process.exit(1); }
+
+// 3c. Build provenance for the DEVICE→UPDATES "FIRMWARE & DATA" panel: firmware version string
+//     (parsed from the submodule's version.c), the exact submodule commit the WASM was compiled
+//     from, build time, emcc version, tz data sizes. Written to docs/ (deployed) AND web/ (so a
+//     local dev server serves the same panel after any build; the web/ copy is gitignored).
+const fwDir = resolve(web, 'emu', 'firmware');
+const sh = (cmd, cwd) => { try { return execSync(cmd, { cwd, encoding: 'utf8' }).trim(); } catch { return ''; } };
+const verC = (() => { try { return readFileSync(resolve(fwDir, 'mk4-time', 'Core', 'Src', 'version.c'), 'utf8'); } catch { return ''; } })();
+const buildInfo = {
+  version: ((verC.match(/VERSION_STRING\s+"([^"]+)"/) || [])[1] || 'unknown').trim(),
+  fwSha: sh('git rev-parse HEAD', fwDir),
+  fwBranch: sh('git config -f .gitmodules submodule.web/emu/firmware.branch', resolve(web, '..')) || 'rollup',
+  builtAt: new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC',
+  emcc: hasEmcc ? ((sh('emcc --version').match(/\d+\.\d+\.\d+(?:-\w+)?/) || [])[0] || '') : '',
+  tzrules: existsSync(resolve(web, 'emu', 'tzrules.bin')) ? statSync(resolve(web, 'emu', 'tzrules.bin')).size : 0,
+  tzmap: existsSync(resolve(web, 'emu', 'tzmap.bin')) ? statSync(resolve(web, 'emu', 'tzmap.bin')).size : 0,
+};
+writeFileSync(resolve(docs, 'build-info.json'), JSON.stringify(buildInfo, null, 1));
+writeFileSync(resolve(web, 'build-info.json'), JSON.stringify(buildInfo, null, 1));
+console.log(`build-info: ${buildInfo.version} · clock4 @ ${buildInfo.fwSha.slice(0, 7)} (${buildInfo.fwBranch})`);
 
 // 4. Report + guard against any external reference sneaking into index.html.
 const external = [...html.matchAll(/\b(?:src|href)\s*=\s*["'](https?:)?\/\/[^"']+/gi)].map((m) => m[0]);
