@@ -16,8 +16,12 @@ virtual-COM stream as the normal NMEA, framed as a standard proprietary NMEA sen
 coexists cleanly and is checksum-validated):
 
 ```
-$PMTXTS,<seq>,<epoch>,<subms>,<systick>,<load>,<calerr>,<sincecal>,<temp>,<flags>*CC
+$PMTXTS,<seq>,<epoch>,<subms>,<systick>,<load>,<calerr>,<sincecal>,<temp>,<flags>[,<dwt_pps>,<sof_frame>,<dwt_sof>]*CC
 ```
+
+The last three fields are an **optional SOF-correlation tail** (see below) — present only when the
+firmware has a live USB Start-Of-Frame anchor. A parser that only needs the timing phase can read the
+first nine fields and ignore any extra; the trailing `*CC` checksum still covers the whole body.
 
 | field | type | meaning |
 |-------|------|---------|
@@ -30,7 +34,23 @@ $PMTXTS,<seq>,<epoch>,<subms>,<systick>,<load>,<calerr>,<sincecal>,<temp>,<flags
 | `sincecal` | u32 | seconds since the last successful RTC calibration (holdover age) |
 | `temp` | i16 | STM32 die temperature in °C (proxy for the crystal temperature) |
 | `flags` | hex | bit0 `data_valid`, bit1 `had_pps`, bit2 `rtc_good` |
+| `dwt_pps` | u32 | *(SOF tail)* `DWT->CYCCNT` (12.5 ns, free-running) latched at the PPS edge |
+| `sof_frame` | u11 | *(SOF tail)* USB frame number of the most recent Start-Of-Frame (matches the host's bus frame mod 2048) |
+| `dwt_sof` | u32 | *(SOF tail)* `DWT->CYCCNT` at that SOF |
 | `CC` | hex | standard NMEA XOR checksum of the chars between `$` and `*` |
+
+### SOF correlation — a good USB timestamp without a hardware PPS wire
+
+USB is host-polled, so the *arrival* of a `$PMTXTS` packet carries several milliseconds of jitter that
+swamps the clock's ~180 µs precision. The SOF tail sidesteps it: the firmware anchors the PPS edge to a
+USB Start-Of-Frame (via the shared `DWT` cycle counter), and the host — which can read each USB frame's
+own arrival time in hardware (macOS `IOUSBDeviceInterface::GetBusFrameNumberWithTime`) — reconstructs the
+edge as `hostTime(sof_frame) + (dwt_pps − dwt_sof) / f_dwt`, immune to delivery lateness. `f_dwt`
+self-calibrates from consecutive `dwt_pps` deltas (~80 M/s), so no core-clock constant is assumed.
+Measured on real hardware: **~110 ms raw arrival jitter → ~174 µs SOF-corrected**, at the device floor.
+The tail is emitted only while `pps = on` and a real SOF anchor exists; the emulator (no USB SOF) and the
+first edge after (re)enumeration emit the plain nine-field form. Reference host harness:
+`experiments/sof-timing/harness.c`.
 
 ## Host computations (`web/js/ppsts.js`)
 - **Phase position at the edge** (ms): `phaseMs = subms + (load - systick)/(load + 1)`.

@@ -165,7 +165,10 @@ int main(int argc, char **argv){
           if (ext && havePrevDwt){ int32_t d=(int32_t)(dwt_pps-prevDwtPps); if (d>60000000 && d<100000000){ f_dwt = haveDwtRate ? 0.9*f_dwt+0.1*d : d; haveDwtRate=1; } }
           if (ext){ prevDwtPps=dwt_pps; havePrevDwt=1; }
           long dframe = 0; double dwtoff_us = 0;
-          if (ext && gotFrame){
+          // Require a CALIBRATED f_dwt: the very first extended sample has only the 80 MHz guess, whose
+          // ~ppm error would inject a spurious sub-µs bias into that sample's estimate. Excluding it (not
+          // yet haveDwtRate) keeps the reported RMS honest — the device rate is known from sample 2 on.
+          if (ext && gotFrame && haveDwtRate){
             // map device 11-bit sof_frame to the nearest host bus frame, then to host time
             dframe = (long)((sof_frame - (unsigned)(hf & 0x7FF)) & 0x7FF);
             if (dframe > 1024) dframe -= 2048;        // signed nearest in [-1024,1023]
