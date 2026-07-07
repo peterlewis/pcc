@@ -87,7 +87,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=108'), import('./sim.js?v=95'), import('./charts.js?v=93'), import('./realdev.js?v=95'), import('./emu-driver.js?v=30'), import('./ppsts.js?v=14')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=108'), import('./sim.js?v=95'), import('./charts.js?v=93'), import('./realdev.js?v=96'), import('./emu-driver.js?v=30'), import('./ppsts.js?v=14')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -148,19 +148,6 @@ class Component extends DcLite {
     cancelAnimationFrame(this._dispRAF);
     clearInterval(this.hz);
     Object.values(this.faces).forEach((f) => f && f.destroy && f.destroy());
-  }
-
-  componentDidUpdate(prevProps, prevState) {
-    if (!prevProps || !this.ready) return;
-    // Display remount: refs attach children-before-parents, so the canvas ref callbacks
-    // run before dispWrap is back. Re-run the sizer here, after the whole subtree is attached.
-    if (prevState && prevState.section !== 'display' && this.state.section === 'display') {
-      cancelAnimationFrame(this._dispRAF);
-      this._dispRAF = requestAnimationFrame(() => this.sizeDispBar());
-    }
-    if (prevProps.glowIntensity !== this.props.glowIntensity || prevProps.ghostIntensity !== this.props.ghostIntensity) {
-      this.allFaces((f) => f.setTokens(this.faceTokens()));
-    }
   }
 
   // 'weather' retired from the routable sections while the feature is rebuilt (COMING SOON pill on
@@ -1845,7 +1832,6 @@ class Component extends DcLite {
       out['roomBg_' + room] = on ? 'var(--strip)' : 'transparent';
       out['roomC_' + room] = on ? 'var(--txt-hi)' : 'var(--txt2)';
       out['roomE_' + room] = on ? 'var(--led)' : 'transparent';
-      out['roomI_' + room] = on ? 'var(--led)' : 'var(--line2)';
       out['roomDot_' + room] = dots[room];
     }
     out.roomSky = curRoom === 'sky';

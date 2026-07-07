@@ -1,65 +1,57 @@
 # PCC Web
 
-Browser build of [PCC](../README.md), driving a Precision Clock Mk IV over [Web Serial](https://developer.mozilla.org/docs/Web/API/Web_Serial_API).
+The Precision Clock Companion app — source. Built to `../docs/` by CI and served on GitHub Pages. See the [top-level README](../README.md) for what it is and how it's deployed.
 
-> [!WARNING]
-> Work in progress — now the active focus of the project, but still maturing, so not everything works yet. (The native [macOS app](../macos/) is paused.)
-
-**[Open PCC Web →](https://peterlewis.github.io/pcc/web/)**
+> [!NOTE]
+> The clock face is the real `clock4` firmware compiled to WebAssembly (see `emu/`), not a re-implementation. Everything renders from the firmware's own display buffers.
 
 ## Requirements
 
-- Chromium-based browser (Chrome, Edge, Arc, Brave, Opera) on desktop. Safari and Firefox don't implement Web Serial.
+- Chromium-based browser (Chrome, Edge, Arc, Brave, Opera) for the hardware connection — Safari and Firefox don't implement Web Serial, but can still run the emulator.
 - HTTPS or `localhost`.
-
-## What it does
-
-- Drive the clock: display modes, text, countdowns, brightness, raw `key = value` commands
-- Polar sky view: live sats, sector heatmap, horizon mask, age-faded trails
-- 3D globe (globe.gl, offline — same HTML as the Mac app)
-- Pass history in IndexedDB with retention + time-window filter
-- GPS info, sun/moon, raw serial monitor
-- Follows OS light/dark
-
-## What it doesn't (by design)
-
-| Feature | Why |
-| --- | --- |
-| NTP server | No UDP listen from a browser |
-| Firmware / timezone updates | No USB mass-storage mount |
-| Native map | MapKit-only |
-| WeatherKit | Apple-only |
-| AI insights | Foundation Models are Mac-only |
 
 ## Run locally
 
 ```bash
-git clone https://github.com/peterlewis/pcc.git
-cd pcc
-bash web/serve.sh
+bash serve.sh          # http://localhost:8765 — live source, no build step
 ```
 
-Serves on `http://localhost:8765`. `file://` won't work — needs HTTP(S).
+`file://` won't work — the modules need HTTP(S). To produce the deployed static bundle:
+
+```bash
+npm install && node build.mjs      # → ../docs/ (needs emscripten to compile the firmware)
+```
 
 ## Structure
 
 ```
 web/
-├── index.html          # UI shell, tabs, controls
-├── css/app.css         # styling; CSS-var palette auto-swaps on prefers-color-scheme
-├── js/
-│   ├── app.js          # DOM wiring
-│   ├── serial.js       # Web Serial wrapper
-│   ├── nmea.js         # GGA / RMC / GSV parsers
-│   ├── astronomy.js    # sun / moon / sunrise-sunset
-│   ├── satpass.js      # ← mirrors macos/Sources/PCC/SatPass.swift
-│   ├── skytrailstore.js# ← mirrors macos/Sources/PCC/SkyTrailStore.swift
-│   ├── polar.js        # ← mirrors SkyView.swift
-│   └── globe.js        # ← mirrors SkyGlobeView.swift
-└── globe/              # ← byte-identical copy of macos/Sources/PCC/Resources/Globe/
+├── index.html          # the UI: a dc-lite template with {{binding}} placeholders
+├── css/                # base.css + pcc-tokens.css (inlined at build; light/dark via CSS vars)
+├── build.mjs           # bundles the app + compiles the firmware WASM → ../docs/
+├── emu/                # the firmware emulator
+│   ├── firmware/       #   clock4 submodule (@ rollup) — the real C source
+│   ├── phase1/         #   emscripten shim (main_wrap.c + HAL stubs) + build.sh + conformance suite
+│   └── clock-fw.mjs    #   compiled WASM (gitignored; built from source)
+└── js/
+    ├── app-controller.js   # the app: state machine, rooms, the rAF drive loop, all bindings
+    ├── dc-lite.js          # tiny template/reactive-render runtime
+    ├── clockface.js /-svg.js  # the two clock-face renderers (canvas + SVG), fed device frames
+    ├── emu-driver.js       # wraps the WASM firmware + virtual GPS + input shims
+    ├── sim-gps (emu/) / sim.js  # virtual GPS + the simulation session/state
+    ├── realdev.js          # bridges a real Mk IV (Web Serial) into the same session state
+    ├── serial.js / nmea.js / ppsts.js  # Web Serial, NMEA parsers, $PMTXTS timing
+    ├── charts.js           # every SKY/TIMING chart (polar, globe, map, phase, drift, …)
+    ├── sat-tracker.js / satpass.js  # live TLE → SGP4-lite sat positions
+    ├── default-config.js   # the golden config.txt the app + emulator boot from
+    ├── review.js / decimate.js  # the recorded-data scrub timeline
+    ├── telemetrylog.js / skytrailstore  # opt-in persistence
+    └── datasources.js / datalink/  # REST date-row sources; Timex Datalink (hidden, WIP)
 ```
 
-Several JS modules mirror Swift files 1:1 — see [MAC_PARITY.md](../MAC_PARITY.md).
+## Honesty model
+
+Three states, never mixed: **Standby** (system time, no telemetry), **Simulation** (opt-in, labelled, virtual GPS through the real firmware path), **Connected** (a real Mk IV; its data never mingles with simulated). Persistence is opt-in and kind-separated.
 
 ## Feedback
 

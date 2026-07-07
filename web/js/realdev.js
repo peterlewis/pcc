@@ -13,7 +13,7 @@
 // Chromium only (Web Serial). Gate the connect button on isSupported().
 
 import { Clock } from './serial.js?v=12';
-import { parseGGA, parseRMC, parseGSA, GSVBuffer, constellationFromTalker } from './nmea.js?v=1';
+import { parseGGA, parseRMC, parseGSA, GSVBuffer } from './nmea.js?v=2';
 import { parsePMTXTS, centrePhase } from './ppsts.js?v=14';
 // subSatellitePoint reconstructs a sat's ground point from observer-relative
 // az/el (all GSV gives us) — the exact inverse of the sim's forward azel(). The

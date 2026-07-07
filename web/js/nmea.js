@@ -90,7 +90,7 @@ export function parseRMC(line) {
     const day = parseInt(dateStr.slice(0, 2), 10);
     const mon = parseInt(dateStr.slice(2, 4), 10);
     const yr  = parseInt(dateStr.slice(4, 6), 10);
-    if ([hh, mm, day, mon, yr].some(n => !Number.isFinite(n))) return null;
+    if ([hh, mm, ss, day, mon, yr].some(n => !Number.isFinite(n))) return null;
 
     const utc = new Date(Date.UTC(2000 + yr, mon - 1, day, hh, mm, Math.floor(ss),
                                   Math.round((ss - Math.floor(ss)) * 1000)));
