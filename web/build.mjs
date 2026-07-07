@@ -109,8 +109,10 @@ for (const bin of ['tzrules.bin', 'tzmap.bin']) {
 const fwDir = resolve(web, 'emu', 'firmware');
 const sh = (cmd, cwd) => { try { return execSync(cmd, { cwd, encoding: 'utf8' }).trim(); } catch { return ''; } };
 const verC = (() => { try { return readFileSync(resolve(fwDir, 'mk4-time', 'Core', 'Src', 'version.c'), 'utf8'); } catch { return ''; } })();
+const verD = (() => { try { return readFileSync(resolve(fwDir, 'mk4-date', 'Core', 'Src', 'version.c'), 'utf8'); } catch { return ''; } })();
 const buildInfo = {
   version: ((verC.match(/VERSION_STRING\s+"([^"]+)"/) || [])[1] || 'unknown').trim(),
+  dateVersion: ((verD.match(/VERSION_STRING\s+"([^"]+)"/) || [])[1] || '').trim(),  // date board versions on its own train (0.0.1→0.0.2)
   fwSha: sh('git rev-parse HEAD', fwDir),
   fwBranch: sh('git config -f .gitmodules submodule.web/emu/firmware.branch', resolve(web, '..')) || 'rollup',
   builtAt: new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC',
@@ -120,7 +122,7 @@ const buildInfo = {
 };
 writeFileSync(resolve(docs, 'build-info.json'), JSON.stringify(buildInfo, null, 1));
 writeFileSync(resolve(web, 'build-info.json'), JSON.stringify(buildInfo, null, 1));
-console.log(`build-info: ${buildInfo.version} · clock4 @ ${buildInfo.fwSha.slice(0, 7)} (${buildInfo.fwBranch})`);
+console.log(`build-info: ${buildInfo.version}${buildInfo.dateVersion ? ' (date ' + buildInfo.dateVersion.replace(/^Version /, '') + ')' : ''} · clock4 @ ${buildInfo.fwSha.slice(0, 7)} (${buildInfo.fwBranch})`);
 
 // 4. Report + guard against any external reference sneaking into index.html.
 const external = [...html.matchAll(/\b(?:src|href)\s*=\s*["'](https?:)?\/\/[^"']+/gi)].map((m) => m[0]);

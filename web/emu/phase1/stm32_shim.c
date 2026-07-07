@@ -2,6 +2,7 @@
 #include "stm32l476xx.h"
 /* RAM-backed instances of every peripheral the firmware touches */
 SysTick_Type shim_SysTick; SCB_Type shim_SCB;
+DWT_Type shim_DWT; CoreDebug_Type shim_CoreDebug;   /* SOF-correlation: DWT->CYCCNT + CoreDebug->DEMCR (inert here — no USB SOF in the emu, so the $PMTXTS SOF tail stays ungated/absent) */
 RTC_TypeDef shim_RTC;
 TIM_TypeDef shim_TIM1, shim_TIM2, shim_TIM5, shim_TIM7;
 GPIO_TypeDef shim_GPIOA, shim_GPIOB, shim_GPIOC;

@@ -2481,7 +2481,7 @@ class Component extends DcLite {
     const zone = (() => { try { const z = this.emu && this.emu.tz(); return z && z.zone ? z.zone : null; } catch (e) { return null; } })();
     const upd = this._fwUpd || { s: '', c: 'var(--txt3)' };
     return {
-      fwVer: bi ? bi.version + ' — WASM, BUILT FROM SOURCE' : 'BUILT FROM SOURCE (run build.mjs for provenance)',
+      fwVer: bi ? bi.version + ' — WASM, BUILT FROM SOURCE' + (bi.dateVersion ? ' · DATE BOARD ' + bi.dateVersion.replace(/^Version\s*/i, '').trim() : '') : 'BUILT FROM SOURCE (run build.mjs for provenance)',
       fwSrc: bi ? 'clock4 @ ' + bi.fwSha.slice(0, 7) + ' (' + bi.fwBranch + ')' : 'web/emu/firmware submodule',
       fwBuilt: bi ? bi.builtAt + (bi.emcc ? ' · emcc ' + bi.emcc : '') : '—',
       fwTz: (bi && bi.tzrules ? 'IANA RULES ' + kb(bi.tzrules) : 'IANA RULES (tzrules.bin)')

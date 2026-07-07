@@ -4,6 +4,7 @@
    so the firmware's register hot-paths (RTC->BKP31R, SysTick->LOAD, USART->TDR, ...)
    hit WASM linear memory instead of trapping. Applied AFTER the CMSIS/HAL headers. */
 extern SysTick_Type shim_SysTick; extern SCB_Type shim_SCB;
+extern DWT_Type shim_DWT; extern CoreDebug_Type shim_CoreDebug;
 extern RTC_TypeDef shim_RTC;
 extern TIM_TypeDef shim_TIM1, shim_TIM2, shim_TIM5, shim_TIM7;
 extern GPIO_TypeDef shim_GPIOA, shim_GPIOB, shim_GPIOC;
@@ -14,6 +15,8 @@ extern EXTI_TypeDef shim_EXTI; extern PWR_TypeDef shim_PWR;
 extern DMA_TypeDef shim_DMA1, shim_DMA2;
 #undef SysTick
 #undef SCB
+#undef DWT
+#undef CoreDebug
 #undef RTC
 #undef TIM1
 #undef TIM2
@@ -34,6 +37,8 @@ extern DMA_TypeDef shim_DMA1, shim_DMA2;
 #undef DMA2
 #define SysTick (&shim_SysTick)
 #define SCB (&shim_SCB)
+#define DWT (&shim_DWT)
+#define CoreDebug (&shim_CoreDebug)
 #define RTC (&shim_RTC)
 #define TIM1 (&shim_TIM1)
 #define TIM2 (&shim_TIM2)
