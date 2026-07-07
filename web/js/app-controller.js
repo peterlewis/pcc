@@ -484,6 +484,46 @@ class Component extends DcLite {
     if (S && S.real) return 'connected';
     return this.state.sim ? 'simulation' : 'standby';
   }
+  // ---------- sky-history persistence ----------
+  // The SKY accumulations (az/el trails, ground tracks, C/N0 + pos/DOP/fix histories) build up over
+  // hours and used to die on every reload. Persist them, honouring the three-state model: REAL and
+  // SIM histories live in separate buckets and only ever restore into their own kind — sim data can
+  // never dress up as a real sky. A deliberate SIMULATION STOP clears its bucket (ending the fiction
+  // ends its history); a reload or an accidental unplug of a real clock gets its sky back.
+  skyHistKey(kind) { return 'pccweb.skyHist.' + kind; }
+  saveSkyHistory() {
+    const S = this.session && this.session.S;
+    if (!S || !S.connected) return;
+    const kind = S.real ? 'real' : 'sim';
+    const m2a = (m) => [...m.entries()];
+    const payload = {
+      v: 1, savedAt: Date.now(), obs: S.obs ? { lat: S.obs.lat, lon: S.obs.lon } : null,
+      trails: m2a(S.trails), gtrails: m2a(S.gtrails),
+      cn0: [...S.cn0Hist.entries()].map(([k, h]) => [k, h.slice(-600)]),   // trim: quota headroom
+      posHist: S.posHist, dopHist: S.dopHist, fixHist: S.fixHist,
+    };
+    try { localStorage.setItem(this.skyHistKey(kind), JSON.stringify(payload)); }
+    catch (e) {
+      // quota: retry without the bulkier histories — the sky trails are the part people miss
+      try { payload.cn0 = []; payload.posHist = []; payload.dopHist = []; payload.fixHist = [];
+        localStorage.setItem(this.skyHistKey(kind), JSON.stringify(payload)); } catch (e2) {}
+    }
+  }
+  restoreSkyHistory(kind) {
+    const S = this.session && this.session.S;
+    if (!S) return;
+    let p = null;
+    try { p = JSON.parse(localStorage.getItem(this.skyHistKey(kind)) || 'null'); } catch (e) {}
+    if (!p || p.v !== 1) return;
+    if (Date.now() - p.savedAt > 12 * 3600e3) return;   // half a sidereal lap — older sky is stale
+    const into = (arr, m) => { for (const [k, v] of arr || []) if (!m.has(k)) m.set(k, v); };
+    into(p.trails, S.trails); into(p.gtrails, S.gtrails); into(p.cn0, S.cn0Hist);
+    if (!S.posHist.length && p.posHist) S.posHist.push(...p.posHist);
+    if (!S.dopHist.length && p.dopHist) S.dopHist.push(...p.dopHist);
+    if (!S.fixHist.length && p.fixHist) S.fixHist.push(...p.fixHist);
+    if (this.session.log) this.session.log('rx', 'sky history restored (' + kind + ', saved ' + Math.round((Date.now() - p.savedAt) / 60000) + ' min ago)');
+  }
+
   // STANDBY face: the user's own system time, no GPS fix. Big row = HH:MM:SS (24h), the three
   // sub-second digits DASHED (honest "no fix" — exactly what a real Mk IV shows before it locks),
   // decimal point off, colon steady (no PPS heartbeat to sync to). Same firmware-shaped frame the
@@ -500,11 +540,13 @@ class Component extends DcLite {
     if (on) {
       if (this.emu && this.emu.reboot) this.emu.reboot();                 // fresh cold-boot reveal
       if (this.session && !this.session.S.connected) { this.session.connect(); this.session.log && this.session.log('tx', 'SIMULATION START'); }
+      this.restoreSkyHistory('sim');   // reload continuity — sim history only ever restores into sim
       // Ask the browser for a location ONLY here — when the user opts into a simulation. Standby
       // never prompts; a real clock brings its own GPS fix. Skip if already located (device/manual).
       if (this.emu && this.emu.state && this.emu.state().geo === 'default') this.geolocate(true);
     } else {
       if (this.session && this.session.S.connected && !this.session.S.real) { this.session.disconnect(); this.session.log && this.session.log('tx', 'SIMULATION STOP'); }
+      try { localStorage.removeItem(this.skyHistKey('sim')); } catch (e) {}   // deliberate stop ends the fiction AND its history
       this.setState({ scenario: 'locked' });
     }
     this.syncFaces();
@@ -1126,6 +1168,10 @@ class Component extends DcLite {
       this._wasReal = real;
       if (real) this.telemetryLog.record(S);   // dedupes on the whole second; fire-and-forget
     }
+    // Sky-history persistence: snapshot the accumulations every 30 s while a session is live, so a
+    // reload (or an accidental unplug) doesn't erase hours of collected sky. Kind-separated buckets.
+    this._skySaveTick = (this._skySaveTick || 0) + 1;
+    if (this._skySaveTick >= 30 && this.session && this.session.S.connected) { this._skySaveTick = 0; this.saveSkyHistory(); }
     this.vbat = 4.021 + 0.013 * Math.sin(Date.now() / 60000);
     if (this.state.diag === 'satview') this.allFaces((f) => f.setModeCtx({ gps: String(this.session.S.fix.sats) }));
     if (this.state.diag === 'vbat') this.allFaces((f) => f.setModeCtx({ vbat: this.vbat }));
@@ -2097,6 +2143,7 @@ class Component extends DcLite {
     try {
       await this.realdev.connect();
       try { localStorage.setItem('pcc.realDeviceSeen', '1'); } catch (e) { /* private mode */ }
+      this.restoreSkyHistory('real');   // reload/unplug continuity — a real sky only restores into a real session
       this.setState({});
     } catch (e) {
       if (this.session) this.session.log('rx', 'ERR: ' + ((e && e.message) || 'connect cancelled'), true);
