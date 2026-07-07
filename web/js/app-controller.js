@@ -2677,10 +2677,19 @@ class Component extends DcLite {
   // ---- REVIEW MODE — the scrub drives the whole app to the playhead time ----
   // Reconstruct session.S (sats, fix, and every history buffer the rooms read) from the log
   // window up to t, so Sky / Signal / Position / Timing render the PAST with no room changes.
+  // First index i where arr[i].t >= target (arr sorted ascending by .t). Standard lower-bound.
+  _lbT(arr, target) {
+    let lo = 0, hi = arr.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m].t < target) lo = m + 1; else hi = m; }
+    return lo;
+  }
   reconstructReview(t, W = 1800) {
     const R = this._review, S = this.session && this.session.S;
     if (!R || !S) return;
-    const win = R.samples.filter((r) => r.t >= t - W && r.t <= t);
+    // R.samples is time-sorted (prepReview); binary-search the [t-W, t] window instead of scanning
+    // the whole (up to 200k-row) array every scrub frame / playback tick.
+    const lo = this._lbT(R.samples, t - W), hi = this._lbT(R.samples, t + 1);
+    const win = R.samples.slice(lo, hi);
     const D2R = Math.PI / 180;
     let refLat = S.obs && S.obs.lat, refLon = S.obs && S.obs.lon;
     const firstFix = win.find((r) => r.fix);
