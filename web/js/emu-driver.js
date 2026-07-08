@@ -394,6 +394,9 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
         signal: state.signal, vbus: state.vbus, geo: state.geo,
         sincePps: E.hadPps() ? (E.sincePps()>>>0) : null,
         gpsState: gps.state, satsReal: tracker.loaded,
+        // Surface a CelesTrak-source problem to the UI (there is no synthetic sat fallback any more):
+        // blocked = 403/429 policy stop; satProblem carries the human-readable reason.
+        satBlocked: tracker.blocked, satProblem: tracker.lastProblem,
       };
     },
   };

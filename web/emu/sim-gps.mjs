@@ -35,11 +35,9 @@ function rmc(date, lat, lon, valid) {
   const body = `GPRMC,${t},${valid ? 'A' : 'V'},${fmtLat(lat)},${fmtLon(lon)},0.0,0.0,${d},,`;
   return sentence(body);
 }
-// $GxGSV — satellites in view (only the count field is consumed by decodeGSV).
-function gsv(sats) {
-  return sentence(`GPGSV,1,1,${pad(Math.min(sats, 99), 2)},01,45,090,40`);
-}
 // $GxGSV from a REAL sat list [{prn,el,az,cn0}] — up to 4 sats per message, count in field 3.
+// An empty list yields "GPGSV,1,1,00" — an honest "no satellites in view", which is exactly what
+// we want when CelesTrak is unreachable (there is NO synthetic constellation any more).
 function gsvReal(sats) {
   const total = Math.max(1, Math.ceil(sats.length / 4));
   const lines = [];
@@ -73,11 +71,6 @@ export class VirtualGPS {
 
   setSignal(on) { this.signal = on; }
 
-  satsAt(sec) {                    // ramp 0 -> ~11 over the acquisition window
-    if (!this.signal) return 0;
-    return Math.min(11, Math.max(0, Math.floor(sec * 11 / this.acquireSec)));
-  }
-
   // Called every animation frame with the real seconds elapsed since the previous call.
   // Advances the sim clock, fires PPS at each second boundary, emits the NMEA burst mid-second.
   advance(dt, wallDate) {
@@ -90,7 +83,6 @@ export class VirtualGPS {
       this._burst = false;
       const locked = this.signal && sec >= this.acquireSec;
       if (locked) { this.emu.pps(); this._drainPendSV(); }   // discipline the phase
-      this.sats = this.satsAt(sec);
       this.state = !this.signal ? 'NO SIGNAL'
                  : locked ? 'LOCKED'
                  : 'ACQUIRING';
@@ -102,21 +94,15 @@ export class VirtualGPS {
       if (this.signal) {
         const locked = sec >= this.acquireSec;
         this.emu.feedNmea(rmc(wallDate, this.lat, this.lon, locked));
-        // REAL constellation when the provider actually HAS sats (the TLE fetch can fail — offline,
-        // CelesTrak down); otherwise the plausible synthetic ramp. Checking the provider's RESULT,
-        // not the function: a provider that yields null must fall back, or every GSV reports 00
-        // satellites and the face honestly shows "0 SATS" forever.
+        // ONLY the REAL CelesTrak constellation. If the TLE fetch has nothing to give (offline,
+        // CelesTrak down, or policy-blocked), there are no satellites to report: shownSats is empty
+        // and the GSV honestly carries a 00 count. We NEVER fabricate a synthetic constellation.
+        // During acquisition the real sats are revealed progressively (top-N by elevation).
         const all = (this.satProvider && this.satProvider()) || [];
-        if (all.length) {
-          // report the top-N by elevation, ramping N up during acquisition.
-          const n = locked ? all.length : Math.floor(all.length * Math.min(1, sec / this.acquireSec));
-          this.shownSats = all.slice(0, n);
-          this.sats = this.shownSats.length;
-          for (const line of gsvReal(this.shownSats)) this.emu.feedNmea(line);
-        } else {
-          this.shownSats = [];
-          if (this.sats > 0) this.emu.feedNmea(gsv(this.sats));
-        }
+        const n = locked ? all.length : Math.floor(all.length * Math.min(1, sec / this.acquireSec));
+        this.shownSats = all.slice(0, n);
+        this.sats = this.shownSats.length;
+        for (const line of gsvReal(this.shownSats)) this.emu.feedNmea(line);
         this._drainPendSV();
       }
     }

@@ -411,7 +411,10 @@ class Component extends DcLite {
     const s = this.emu.state();
     const src = s.geo === 'device' ? 'DEVICE GPS' : s.geo === 'manual' ? 'MANUAL'
       : s.geo === 'denied' ? 'DEFAULT · LOCATION DENIED' : 'DEFAULT';
-    const sats = s.satsReal ? (this.emu.sats().length + ' REAL SATS IN VIEW') : 'SIM SATS';
+    // Sat data is CelesTrak-only now — no synthetic fallback. Honest tag: the real count when we have
+    // TLEs (live or cached), else why we don't (policy block vs simply no data yet).
+    const sats = s.satsReal ? (this.emu.sats().length + ' REAL SATS IN VIEW')
+      : (s.satBlocked ? 'SAT DATA BLOCKED (CELESTRAK)' : 'NO SAT DATA');
     return s.lat.toFixed(3) + ', ' + s.lon.toFixed(3) + ' · ' + src + ' · ' + sats;
   }
   // Timezone tell — honest about which time the clock is showing. The real device auto-detects
