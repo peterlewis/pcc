@@ -23,8 +23,16 @@ const TLE_URL = 'https://celestrak.org/NORAD/elements/gp.php?GROUP=gps-ops&FORMA
 // caps CelesTrak hits at ~2/day per browser no matter how often the app reloads.
 const TLE_CACHE_KEY = 'pcc.tle.gps-ops';
 const TLE_FAIL_KEY = 'pcc.tle.gps-ops.failedAt';
-const TLE_CACHE_TTL_MS = 12 * 3600 * 1000;    // 12 h — how long a good fetch is reused
-const TLE_FAIL_BACKOFF_MS = 60 * 60 * 1000;   // 1 h — after a failure, don't re-poke CelesTrak
+const TLE_BLOCK_KEY = 'pcc.tle.gps-ops.blockedAt';
+const TLE_CACHE_TTL_MS = 12 * 3600 * 1000;     // 12 h — how long a good fetch is reused
+const TLE_FAIL_BACKOFF_MS = 60 * 60 * 1000;    // 1 h  — transient failure (timeout/offline/5xx): brief backoff
+// A 403/429 is a deliberate CelesTrak usage-policy block, NOT a transient blip. Per CelesTrak's own
+// guidance (ts.kelso@celestrak.org, 2026-07-08): "check for any non-HTTP 200 responses, and if found,
+// immediately stop querying and report the problem to a human for investigation." So on a policy block we
+// stop hard — a long backoff so we never hammer a firewall — and report it loudly rather than silently
+// re-polling. https://celestrak.org/usage-policy.php
+const TLE_BLOCK_BACKOFF_MS = 24 * 3600 * 1000; // 24 h — policy block (403/429): hard stop, do not re-poke
+const USAGE_POLICY_URL = 'https://celestrak.org/usage-policy.php';
 
 function readTleCache() {
   try {
@@ -39,15 +47,34 @@ function writeTleCache(txt) {
       localStorage.setItem(TLE_CACHE_KEY, JSON.stringify({ t: Date.now(), txt }));
   } catch (e) { /* private mode / quota — cache is best-effort */ }
 }
-function readTleFailAt() {
-  try { const v = typeof localStorage !== 'undefined' ? +localStorage.getItem(TLE_FAIL_KEY) : 0; return Number.isFinite(v) ? v : 0; }
+function readStampAt(key) {
+  try { const v = typeof localStorage !== 'undefined' ? +localStorage.getItem(key) : 0; return Number.isFinite(v) ? v : 0; }
   catch (e) { return 0; }
 }
-function writeTleFailAt(ts) {
+function writeStampAt(key, ts) {
   try {
     if (typeof localStorage === 'undefined') return;
-    if (ts) localStorage.setItem(TLE_FAIL_KEY, String(ts)); else localStorage.removeItem(TLE_FAIL_KEY);
+    if (ts) localStorage.setItem(key, String(ts)); else localStorage.removeItem(key);
   } catch (e) { /* best-effort */ }
+}
+const readTleFailAt = () => readStampAt(TLE_FAIL_KEY);
+const writeTleFailAt = (ts) => writeStampAt(TLE_FAIL_KEY, ts);
+const readTleBlockedAt = () => readStampAt(TLE_BLOCK_KEY);
+const writeTleBlockedAt = (ts) => writeStampAt(TLE_BLOCK_KEY, ts);
+
+// The "report the problem to a human" hook CelesTrak asks for. In a browser app the honest human-facing
+// channel is the console (a developer/operator sees it) plus a getter the UI can surface. Cleared on the
+// next good fetch. Kept deliberately loud for a policy block so the cause is never a silent mystery.
+let lastTleProblem = null;   // { status, message, at } | null
+function reportTleProblem(status, message) {
+  lastTleProblem = { status, message, at: Date.now() };
+  const line = `[sat-tracker] TLE fetch problem${status ? ' (HTTP ' + status + ')' : ''}: ${message}`;
+  try {
+    if (typeof console !== 'undefined') {
+      if (status === 403 || status === 429) console.error(`${line}\n  → Automatic updates paused. Review CelesTrak's usage policy: ${USAGE_POLICY_URL}`);
+      else console.warn(line);
+    }
+  } catch (e) { /* no console — nothing else to do */ }
 }
 
 // ---- TLE parsing -------------------------------------------------------------------------
@@ -150,6 +177,10 @@ export function createSatTracker() {
   return {
     get loaded() { return loaded; },
     get count() { return sats.length; },
+    // The most recent TLE-fetch problem (or null), so the app can surface a policy block to the human
+    // rather than leaving it buried in the console. { status, message, at }.
+    get lastProblem() { return lastTleProblem; },
+    get blocked() { const b = readTleBlockedAt(); return !!(b && (Date.now() - b) < TLE_BLOCK_BACKOFF_MS); },
     async load(fetchImpl = (typeof fetch !== 'undefined' ? fetch : null)) {
       const cached = readTleCache();
       // 1. Fresh cache → serve it, NO network. This is the path that keeps us off CelesTrak's block
@@ -164,8 +195,9 @@ export function createSatTracker() {
       //    backoff after any failure. CelesTrak can also accept the socket and never reply, so without a
       //    deadline the promise hangs for the browser's ~30 s connect timeout; abort at 8 s. A good
       //    fetch refreshes the cache (next reload is free) and clears the failure marker.
+      const blocked = (() => { const b = readTleBlockedAt(); return b && (Date.now() - b) < TLE_BLOCK_BACKOFF_MS; })();
       const backedOff = (() => { const f = readTleFailAt(); return f && (Date.now() - f) < TLE_FAIL_BACKOFF_MS; })();
-      if (fetchImpl && !backedOff) {
+      if (fetchImpl && !blocked && !backedOff) {
         const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
         const timer = ctrl && typeof setTimeout !== 'undefined' ? setTimeout(() => ctrl.abort(), 8000) : null;
         try {
@@ -173,11 +205,28 @@ export function createSatTracker() {
           if (r.ok) {
             const txt = await r.text();
             const parsed = parseTleText(txt);
-            if (parsed.length) { sats = parsed; loaded = true; writeTleCache(txt); writeTleFailAt(0); return true; }
+            if (parsed.length) {   // success → cache it and clear BOTH the fail and block markers
+              sats = parsed; loaded = true; writeTleCache(txt);
+              writeTleFailAt(0); writeTleBlockedAt(0); lastTleProblem = null;
+              return true;
+            }
+            // HTTP 200 but no usable TLEs — CelesTrak can serve a 200 error/notice page. Treat as a failure
+            // and report it; do not pretend it was data.
+            reportTleProblem(200, 'reached CelesTrak but the body held no usable TLE data');
+            writeTleFailAt(Date.now());
+          } else if (r.status === 403 || r.status === 429) {
+            // Deliberate usage-policy block. Stop querying (long backoff) and report to a human — exactly
+            // what CelesTrak asks of well-behaved clients. Never re-poke a firewall on a short timer.
+            reportTleProblem(r.status, 'CelesTrak usage-policy block — automatic GPS-TLE updates paused');
+            writeTleBlockedAt(Date.now()); writeTleFailAt(Date.now());
+          } else {
+            reportTleProblem(r.status, 'unexpected non-200 response from CelesTrak');
+            writeTleFailAt(Date.now());   // 5xx / other transient non-200 → brief backoff
           }
-          writeTleFailAt(Date.now());   // reached CelesTrak but got !ok or an unusable/empty body (rate-limit page) → back off
         } catch (e) {
-          writeTleFailAt(Date.now());   // offline / blocked / timeout → back off, don't hammer
+          // offline / DNS / CORS / 8 s abort → transient; brief backoff, don't hammer. Not a policy block.
+          reportTleProblem(0, `network error reaching CelesTrak (${e && e.name === 'AbortError' ? 'timed out' : (e && e.message) || 'failed'})`);
+          writeTleFailAt(Date.now());
         } finally { if (timer) clearTimeout(timer); }
       }
       // 3. Network unavailable or failed → a STALE cache (a day-old constellation) still beats none.
