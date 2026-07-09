@@ -2379,8 +2379,11 @@ class Component extends DcLite {
     const streaming = !!(S && S.pps && S.pps.list && S.pps.list.length);
     const noPps = !!(S && S.real && !streaming); // real hardware, no PPS stream yet → dash the timing KPIs
     const noData = !streaming;                   // NO live PPS at all (standby, or real-without-stream) → nothing honest to show
+    // msFolds: samples where the firmware's subms raced its SysTick cascade and reported the same
+    // phase 1 ms off (folded in realdev.js). Shown so the heal is visible, not silent.
+    const folds = S && S.real && S.pps && S.pps.msFolds ? ' · MS-RACE FOLDED ×' + S.pps.msFolds : '';
     const banner = S && S.real
-      ? (streaming ? '$PMTXTS · LIVE · DRAFT FW (pps=on)' : '$PMTXTS · SEND "pps = on" TO STREAM')
+      ? (streaming ? '$PMTXTS · LIVE · DRAFT FW (pps=on)' + folds : '$PMTXTS · SEND "pps = on" TO STREAM')
       : (S && S.connected ? '$PMTXTS · SIMULATED STREAM' : '$PMTXTS · DRAFT-FIRMWARE FEATURE — pps=on');
     return {
       ppsBanner: banner,

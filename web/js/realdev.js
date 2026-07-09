@@ -14,7 +14,7 @@
 
 import { Clock } from './serial.js?v=12';
 import { parseGGA, parseRMC, parseGSA, GSVBuffer } from './nmea.js?v=2';
-import { parsePMTXTS, parsePMTXTC, centrePhase } from './ppsts.js?v=15';
+import { parsePMTXTS, parsePMTXTC, centrePhase, foldPhase1ms } from './ppsts.js?v=15';
 // subSatellitePoint reconstructs a sat's ground point from observer-relative
 // az/el (all GSV gives us) — the exact inverse of the sim's forward azel(). The
 // import also runs satpass.js's augmentConstellations() IIFE, which sets
@@ -215,8 +215,15 @@ export function createRealDevice(session) {
         }
         ppsLastSeq = r.seq;
 
-        // phase jitter series (µs), centred about the second boundary like the sim's `us`
-        P.list.push({ t: ts, us: centrePhase(r.phaseMs) * 1000 });
+        // phase jitter series (µs), centred about the second boundary like the sim's `us` — then
+        // fold the 1 ms ms-attribution race (subms vs SysTick cascade, see foldPhase1ms) so the
+        // chart shows the CLOCK, not the race. Folds are counted and surfaced in the Timing banner
+        // rather than healed silently.
+        const usRaw = centrePhase(r.phaseMs) * 1000;
+        const us = foldPhase1ms(usRaw, P.phaseRef);
+        if (us !== usRaw) P.msFolds = (P.msFolds || 0) + 1;
+        P.phaseRef = us;
+        P.list.push({ t: ts, us });
         if (P.list.length > 1800) P.list.shift();
 
         // one drift/temp sample per successful RTC calibration (calerr changes)
@@ -443,6 +450,7 @@ export function createRealDevice(session) {
             S.pps.flags = 0;
             S.pps.temp = 0; S.pps.ppm = 0; S.pps.seq = 0;
             S.pps.calerr = 0; S.pps.sincecal = 0; S.pps.lastEdge = 0;
+            S.pps.phaseRef = null; S.pps.msFolds = 0;   // fresh fold state per device session
             ppsLastSeq = null;
             ppsLastCalerr = null;
             S.tc = null;   // learned model belongs to ONE device — never show a previous clock's

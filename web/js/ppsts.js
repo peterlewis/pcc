@@ -92,6 +92,20 @@ export function centrePhase(phaseMs) {
   return phaseMs > 500 ? phaseMs - 1000 : phaseMs;
 }
 
+// Resolve the 1 ms ATTRIBUTION AMBIGUITY in a phase sample. A disciplined clock's PPS edge sits
+// within ~1 µs of the firmware's ms rollover (PPS zeroes the counters, so the next edge lands at
+// the 999→000 cascade), and the latched subms is assembled from software digit counters that race
+// the PPS capture — the SAME physical phase is reported either side of the boundary, two readings
+// exactly 1 ms apart. Hardware capture 2026-07-09 (v0.0.5, 90 s): 82 samples at +999 µs, 8 at
+// −1 µs; folded, the true spread was σ 19 ns. Fold `us` to whichever 1 ms-equivalent lies nearest
+// `ref` (the previous folded sample — phase moves ns/second, so it's an unambiguous reference).
+export function foldPhase1ms(us, ref) {
+  if (ref == null || !Number.isFinite(ref)) return us;
+  let best = us;
+  for (const c of [us - 1000, us + 1000]) if (Math.abs(c - ref) < Math.abs(best - ref)) best = c;
+  return best;
+}
+
 // Robust phase statistics (µs): median + MAD instead of mean + σ. Real hardware shows
 // occasional single-sample ~−1 ms excursions — a lost/incoherent ms-tick when an IRQ-masked
 // window (USB MSC, flash, RTC writes) straddles the capture — which are artifacts of that one
