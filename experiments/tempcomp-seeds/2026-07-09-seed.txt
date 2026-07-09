@@ -1,0 +1,13 @@
+# Mk IV learned tempcomp model — snapshot 2026-07-09 ~20:35 UTC (firmware v0.0.5, state L→S)
+# Captured via "tc_dump = on" over serial; written into config.txt as an evolving tc_seed
+# warm-start the same evening (template lines 134-150 filled; tc_seed = on).
+# hse n=74115  lse n=1166  die 26..36 C  (post-write verify: n=74367/1170, state S)
+tc_t0 = 40
+tc_hse_b = 0.00227
+tc_hse_c = -0.000412
+tc_lse_a = 15.3113
+tc_lse_b = -0.67777
+tc_lse_c = -0.031479
+tc_seed = on
+tc_seed_lo = 26
+tc_seed_hi = 36
