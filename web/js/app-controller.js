@@ -90,7 +90,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=95'), import('./charts.js?v=93'), import('./realdev.js?v=96'), import('./emu-driver.js?v=32'), import('./ppsts.js?v=14')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=95'), import('./charts.js?v=93'), import('./realdev.js?v=97'), import('./emu-driver.js?v=32'), import('./ppsts.js?v=15')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -1182,6 +1182,18 @@ class Component extends DcLite {
       }
       this._wasReal = real;
       if (real) this.telemetryLog.record(S);   // dedupes on the whole second; fire-and-forget
+    }
+    // Firmware learned-model refresh: the on-die tempcomp model evolves slowly, so re-request the
+    // read-back every 5 min while a real clock streams (sent once at connect in realdev.js). Logged
+    // as tx like every other command — no silent chatter.
+    this._tcDumpTick = (this._tcDumpTick || 0) + 1;
+    if (this._tcDumpTick >= 300) {
+      this._tcDumpTick = 0;
+      const S2 = this.session.S;
+      if (S2 && S2.real && S2.connected && this.realdev) {
+        this.realdev.send('tc_dump = on');
+        if (this.session.log) this.session.log('tx', 'tc_dump = on');
+      }
     }
     // Sky-history persistence: snapshot the accumulations every 30 s while a session is live, so a
     // reload (or an accidental unplug) doesn't erase hours of collected sky. Kind-separated buckets.
@@ -2401,6 +2413,28 @@ class Component extends DcLite {
       compLine: fit && fit.ready && this.PT
         ? this.PT.tcSeedBlock({ k0: fit.k0, k1: fit.k1, k2: fit.k2, tlo: fit.tMin, thi: fit.tMax, n: fit.n, rms: fit.rms }).configBlock
         : (fit ? `# characterising — need ≥30 samples & ≥8 °C span (have ${fit.n}, ${fit.spread.toFixed(1)} °C)` : '# tc seed — awaiting timing stream'),
+      // FIRMWARE LEARNED MODEL — the device's own on-die tempcomp state, read back over serial
+      // ("tc_dump = on" → $PMTXTC H/L + a state header, parsed in realdev.js → S.tc). Distinct from
+      // the host fit above: this is what the CLOCK ITSELF has learned and steers holdover with.
+      ...((() => {
+        const tc = S && S.real ? S.tc : null;
+        if (!S || !S.real) return { fwTcState: S && S.connected ? 'REAL HARDWARE ONLY — SIM HAS NO ON-DIE MODEL' : 'CONNECT A CLOCK TO READ ITS MODEL',
+          fwTcStateC: 'var(--txt3)', fwTcHse: '—', fwTcLse: '—', fwTcRange: '—', fwTcMeta: '—' };
+        if (!tc || (!tc.hse && !tc.lse)) return { fwTcState: 'AWAITING tc_dump REPLY…', fwTcStateC: 'var(--acq)',
+          fwTcHse: '—', fwTcLse: '—', fwTcRange: '—', fwTcMeta: 'sent "tc_dump = on" at connect' };
+        const stateName = { A: 'APPLYING — HOLDOVER STEERING ACTIVE', F: 'FROZEN — config.txt OVERRIDES LEARNING',
+          L: 'LEARNING', S: 'SEEDED — EVOLVING FROM WARM-START', '-': 'IDLE' }[tc.state] || ('STATE ' + (tc.state || '?'));
+        const h = tc.hse, l = tc.lse;
+        const age = Math.max(0, Math.floor(Date.now() / 1000) - tc.at);
+        return {
+          fwTcState: stateName,
+          fwTcStateC: (h && h.valid) || (l && l.valid) ? 'var(--lock)' : 'var(--acq)',
+          fwTcHse: h ? `${h.n.toLocaleString()} samples · b ${h.b.toFixed(5)} · c ${h.c.toFixed(6)} ppm/°C${h.valid ? '' : ' · NOT YET VALID'}` : '—',
+          fwTcLse: l ? `${l.n.toLocaleString()} samples · a ${l.a.toFixed(4)} ppm · b ${l.b.toFixed(5)} · c ${l.c.toFixed(6)}${l.valid ? '' : ' · NOT YET VALID'}` : '—',
+          fwTcRange: tc.die ? `${tc.die[0]}–${tc.die[1]} °C DIE` : (h ? `${h.tmin}–${h.tmax} °C DIE` : '—'),
+          fwTcMeta: `tc_dump · ${age < 5 ? 'just now' : age + ' s ago'} · refreshes every 5 min`,
+        };
+      })()),
     };
   }
 

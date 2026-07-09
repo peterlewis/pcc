@@ -53,6 +53,39 @@ export function parsePMTXTS(line) {
   };
 }
 
+// Parse one $PMTXTC line — the firmware's learned-tempcomp model read-back, emitted in reply to
+// "tc_dump = on" over serial. Two variants (split so each fits the firmware's NMEA buffer):
+//   $PMTXTC,H,<n>,<tmin>,<tmax>,<b>,<c>,<V|->*CK   HSE model: b ppm/°C, c ppm/°C² about tc_t0.
+//                                                  ('a' has an arbitrary instrument origin and is
+//                                                  never printed — steering uses temp DIFFERENCES.)
+//   $PMTXTC,L,<n>,<a>,<b>,<c>,<V|->*CK             LSE model: absolute ppm at tc_t0 + slope + curvature.
+// Returns { kind:'H'|'L', checksumOK, n, ..., valid } or null if it isn't a $PMTXTC line.
+export function parsePMTXTC(line) {
+  if (typeof line !== 'string') return null;
+  line = line.trim();
+  if (!line.startsWith('$PMTXTC,')) return null;
+  const star = line.lastIndexOf('*');
+  if (star < 8) return null;
+  const body = line.slice(1, star);
+  const csTxt = line.slice(star + 1, star + 3);
+  let cks = 0;
+  for (let i = 0; i < body.length; i++) cks ^= body.charCodeAt(i);
+  const checksumOK = /^[0-9a-fA-F]{2}$/.test(csTxt) && parseInt(csTxt, 16) === cks;
+  const f = body.split(',');
+  if (f[0] !== 'PMTXTC') return null;
+  if (f[1] === 'H' && f.length >= 8) {
+    const n = +f[2], tmin = +f[3], tmax = +f[4], b = +f[5], c = +f[6];
+    if ([n, tmin, tmax, b, c].some(Number.isNaN)) return null;
+    return { kind: 'H', checksumOK, n, tmin, tmax, b, c, valid: f[7] === 'V' };
+  }
+  if (f[1] === 'L' && f.length >= 7) {
+    const n = +f[2], a = +f[3], b = +f[4], c = +f[5];
+    if ([n, a, b, c].some(Number.isNaN)) return null;
+    return { kind: 'L', checksumOK, n, a, b, c, valid: f[6] === 'V' };
+  }
+  return null;
+}
+
 // Centre a sub-second phase (0..1000 ms) about zero, so values that straddle the second
 // boundary (e.g. 999.8 and 0.3) don't inflate the statistics. Result in (-500, +500] ms.
 export function centrePhase(phaseMs) {

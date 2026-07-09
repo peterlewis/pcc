@@ -14,7 +14,7 @@
 
 import { Clock } from './serial.js?v=12';
 import { parseGGA, parseRMC, parseGSA, GSVBuffer } from './nmea.js?v=2';
-import { parsePMTXTS, centrePhase } from './ppsts.js?v=14';
+import { parsePMTXTS, parsePMTXTC, centrePhase } from './ppsts.js?v=15';
 // subSatellitePoint reconstructs a sat's ground point from observer-relative
 // az/el (all GSV gives us) — the exact inverse of the sim's forward azel(). The
 // import also runs satpass.js's augmentConstellations() IIFE, which sets
@@ -347,6 +347,32 @@ export function createRealDevice(session) {
             return;
         }
 
+        // $PMTXTC — the firmware's learned tempcomp model (reply to "tc_dump = on") → S.tc.
+        // Two checksummed sentences: H (system-clock HSE model) and L (battery-RTC LSE model).
+        if (text.startsWith('$PMTXTC,')) {
+            const r = parsePMTXTC(text);
+            if (r && r.checksumOK) {
+                const tc = (S.tc = S.tc || { hse: null, lse: null, state: '', die: null, at: 0 });
+                if (r.kind === 'H') tc.hse = { n: r.n, tmin: r.tmin, tmax: r.tmax, b: r.b, c: r.c, valid: r.valid };
+                else tc.lse = { n: r.n, a: r.a, b: r.b, c: r.c, valid: r.valid };
+                tc.at = Math.floor(Date.now() / 1000);
+            }
+            return;
+        }
+
+        // tc_dump's human header carries the learn-state letter (A applying · F frozen · L learning ·
+        // S seeded · - idle) and the observed die range — the only place the firmware reports them.
+        if (text.startsWith('# tempcomp:')) {
+            const m = text.match(/die (-?\d+)\.\.(-?\d+) C, state (\S)/);
+            if (m) {
+                const tc = (S.tc = S.tc || { hse: null, lse: null, state: '', die: null, at: 0 });
+                tc.die = [+m[1], +m[2]];
+                tc.state = m[3];
+                tc.at = Math.floor(Date.now() / 1000);
+            }
+            return;
+        }
+
         // Everything else ($PMTX ACKs, boot banners, plain text): logged only.
     }
 
@@ -379,6 +405,7 @@ export function createRealDevice(session) {
             await clock.connect();     // user-gesture required (button handler)
             clock.requestNMEA();       // ref-counted: turn the firehose on
             clock.send('pps = on');    // ask the firmware to stream $PMTXTS per PPS edge
+            clock.send('tc_dump = on'); // read back the learned tempcomp model → $PMTXTC → S.tc
 
             // Enter real-device mode. Clear any stale sim telemetry so the rooms
             // start from the device's honest state and fill in as sentences land.
@@ -418,6 +445,7 @@ export function createRealDevice(session) {
             S.pps.calerr = 0; S.pps.sincecal = 0; S.pps.lastEdge = 0;
             ppsLastSeq = null;
             ppsLastCalerr = null;
+            S.tc = null;   // learned model belongs to ONE device — never show a previous clock's
         },
 
         async disconnect() {
@@ -426,6 +454,7 @@ export function createRealDevice(session) {
             try { await clock?.disconnect(); } catch { /* ignore */ }
             clock = null;
             clearRealBuffers();
+            S.tc = null;   // the model readout leaves with the device
         },
 
         ingestLine,

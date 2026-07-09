@@ -1094,6 +1094,17 @@
               </section>
               <section style="background:var(--panel);border:1px solid var(--line)">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
+                  <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">TEMP COMPENSATION — FIRMWARE LEARNED MODEL</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:{{fwTcStateC}}">{{fwTcState}}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">HSE — system clock</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fwTcHse}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">LSE — battery RTC</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fwTcLse}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Learned die range</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{fwTcRange}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px"><span style="font-size:12px;color:var(--txt2)">Read back</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt3)">{{fwTcMeta}}</span></div>
+                <div style="padding:0 12px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--txt3);line-height:1.6">WHAT THE CLOCK ITSELF HAS LEARNED ON-DIE ("tc_dump = on" → $PMTXTC) — THE MODEL IT STEERS HOLDOVER WITH.</div>
+              </section>
+              <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
                   <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">TEMP COMPENSATION — SOFTWARE TCXO</span>
                   <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">HOST FIT · CROSS-CHECK OF ON-DIE LEARNING</span>
                 </div>
@@ -1398,6 +1409,6 @@
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=200"></script>
+<script type="module" src="js/app-controller.js?v=201"></script>
 </body>
 </html>
