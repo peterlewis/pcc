@@ -163,7 +163,9 @@ export function createRealDevice(session) {
             if (sp && (now - (gtrailLast.get(key) || 0) >= 30000)) {
                 let gt = S.gtrails.get(key);
                 if (!gt) { gt = []; S.gtrails.set(key, gt); }
-                gt.push({ lat: sp.lat, lon: sp.lon });
+                // t lets the renderers split the polyline at disconnect gaps instead of drawing
+                // a chord from the last pre-disconnect point to wherever the sat is now.
+                gt.push({ lat: sp.lat, lon: sp.lon, t: tSec });
                 if (gt.length > 40) gt.shift();
                 gtrailLast.set(key, now);
             }

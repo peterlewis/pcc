@@ -90,7 +90,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=95'), import('./charts.js?v=93'), import('./realdev.js?v=97'), import('./emu-driver.js?v=32'), import('./ppsts.js?v=15')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=98'), import('./emu-driver.js?v=32'), import('./ppsts.js?v=15')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -2405,7 +2405,8 @@ class Component extends DcLite {
       fitSpread: fit ? fit.spread.toFixed(1) + ' °C' : '—',
       fitRms: fit ? fit.rms.toFixed(2) + ' ppm' : '—',
       fitN: fit ? String(fit.n) : '0',
-      fitStatus: fit ? (fit.ready ? (fit.lineOnly ? 'READY — LINE FIT' : 'READY — QUADRATIC') : 'COLLECTING — NEED ≥30 SAMPLES / ≥8 °C') : 'AWAITING SAMPLES',
+      fitStatus: fit ? (fit.ready ? (fit.lineOnly ? 'READY — LINE FIT' : 'READY — QUADRATIC') : 'COLLECTING — NEED ≥30 SAMPLES / ≥8 °C')
+        : (streaming ? 'COLLECTING — NEED ≥30 SAMPLES / ≥8 °C' : 'AWAITING SAMPLES'),
       fitStatusC: fit && fit.ready ? 'var(--lock)' : 'var(--acq)',
       // Emit the tempcomp firmware's REAL seed vocabulary (tc_t0 / tc_lse_a/b/c / tc_seed) — the
       // legacy `temp_comp = k0,k1,k2` key was never parsed by any firmware. The block is only shown
@@ -2415,7 +2416,13 @@ class Component extends DcLite {
       compStateC: noData ? 'var(--txt3)' : (fit && fit.ready ? 'var(--lock)' : 'var(--txt2)'),
       compLine: fit && fit.ready && this.PT
         ? this.PT.tcSeedBlock({ k0: fit.k0, k1: fit.k1, k2: fit.k2, tlo: fit.tMin, thi: fit.tMax, n: fit.n, rms: fit.rms }).configBlock
-        : (fit ? `# characterising — need ≥30 samples & ≥8 °C span (have ${fit.n}, ${fit.spread.toFixed(1)} °C)` : '# tc seed — awaiting timing stream'),
+        : (fit ? `# characterising — need ≥30 samples & ≥8 °C span (have ${fit.n}, ${fit.spread.toFixed(1)} °C)`
+          : (streaming && S && S.pps && S.pps.samples && S.pps.samples.length
+            ? (() => {   // stream live but the fit hasn't engaged: say what's been collected, not "awaiting"
+                const t = S.pps.samples.map((x) => x.temp);
+                return `# characterising — collecting samples (${S.pps.samples.length}, ${(Math.max(...t) - Math.min(...t)).toFixed(1)} °C span; need ≥30 & ≥8 °C)`;
+              })()
+            : '# tc seed — awaiting timing stream')),
       // FIRMWARE LEARNED MODEL — the device's own on-die tempcomp state, read back over serial
       // ("tc_dump = on" → $PMTXTC H/L + a state header, parsed in realdev.js → S.tc). Distinct from
       // the host fit above: this is what the CLOCK ITSELF has learned and steers holdover with.

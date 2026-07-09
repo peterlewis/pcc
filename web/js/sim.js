@@ -402,7 +402,7 @@ export function createSession(opts = {}) {
       if (tAbs % 45 === 0) {
         let gt = S.gtrails.get(s.key);
         if (!gt) { gt = []; S.gtrails.set(s.key, gt); }
-        gt.push({ lat: s.geo.lat, lon: s.geo.lon });
+        gt.push({ lat: s.geo.lat, lon: s.geo.lon, t: tAbs });   // t → renderers split at gaps
         if (gt.length > 40) gt.shift();
       }
     }

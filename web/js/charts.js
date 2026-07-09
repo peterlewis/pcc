@@ -1,9 +1,29 @@
 // charts.js — flat instrument-grade canvas charts for PCC Web.
 // Discipline: hairline graticules, square markers, mono labels, no gradients, no glow.
 
-import { robustPhaseStats } from './ppsts.js?v=14';
+import { robustPhaseStats } from './ppsts.js?v=15';
 
 const TAU = Math.PI * 2;
+
+// Should a ground-trail polyline BREAK between consecutive points a→b? Trail history deliberately
+// persists across a disconnect (recorded history is a feature) — but a reconnect minutes later
+// would otherwise draw a straight chord from each sat's last pre-disconnect point to wherever it
+// is now, slicing across the globe/map. Break on: a real time gap (points land every 30–45 s, so
+// >150 s = a gap), a missing-timestamp boundary (history saved before points carried `t`), an
+// implausible jump for a single step (legacy no-t points; even a LEO track moves ≲3° per step),
+// or a dateline wrap (`wrapLon`, the equirectangular map's seam).
+export function trailBreak(a, b, wrapLon) {
+  const dLon = Math.abs(b.lon - a.lon);
+  if (wrapLon && dLon > 180) return true;                                 // map seam crossing
+  // An impossible single step breaks UNCONDITIONALLY — even a fast sim track moves ≲4° per
+  // 30–45 s point, so >12° is a data boundary whatever the timestamps claim.
+  if (Math.abs(b.lat - a.lat) + Math.min(dLon, 360 - dLon) > 12) return true;
+  if (a.t != null && b.t != null) {
+    const dt = b.t - a.t;
+    return dt > 150 || dt < 0;      // real time gap — or incoherent (backwards) time = boundary
+  }
+  return (a.t != null) !== (b.t != null);                                 // old/new history boundary
+}
 
 export function c2d(canvas) {
   const w = canvas.clientWidth || 300, h = canvas.clientHeight || 150;
@@ -117,6 +137,7 @@ export function drawSky(canvas, tok, data, opts) {
       const col = tok[sat ? sat.tok : 'gps'] || tok.txt3;
       for (let i = 1; i < tr.length; i++) {
         if (tr[i].el < -2 || tr[i - 1].el < -2) continue;
+        if (tr[i].t - tr[i - 1].t > 150) continue;   // disconnect gap — don't bridge it
         const age = (now - tr[i].t) / span;
         if (age > 1) continue;
         ctx.strokeStyle = col; ctx.globalAlpha = 0.55 * (1 - age) + 0.04;
@@ -682,12 +703,17 @@ export function drawGlobe(canvas, tok, g) {
   ctx.strokeStyle = 'rgba(150,190,230,0.42)'; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
 
-  // ground trails (per-constellation, subtle)
+  // ground trails (per-constellation, subtle; trailBreak splits at disconnect gaps — no chords)
   if (g.opts.trails) {
     for (const [key, tr] of g.gtrails) {
       const sat = g.sats.find((x) => x.key === key); if (!sat) continue;
-      ctx.strokeStyle = tok[sat.tok]; ctx.globalAlpha = 0.4; ctx.beginPath(); let s = false;
-      for (const p of tr) { const q = proj(p.lat, p.lon); if (q.vis) { s ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y); s = true; } else s = false; }
+      ctx.strokeStyle = tok[sat.tok]; ctx.globalAlpha = 0.4; ctx.beginPath(); let s = false, prev = null;
+      for (const p of tr) {
+        const q = proj(p.lat, p.lon);
+        if (!q.vis) { s = false; prev = p; continue; }
+        if (s && prev && trailBreak(prev, p)) s = false;
+        s ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y); s = true; prev = p;
+      }
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
@@ -797,13 +823,18 @@ export function drawMap(canvas, tok, g) {
     ctx.beginPath(); trace(); ctx.strokeStyle = 'rgba(150,175,215,0.28)'; ctx.lineWidth = 1; ctx.stroke();
   }
 
-  // real ground tracks — per-constellation, subtle (mirrors the globe's gtrails treatment)
+  // real ground tracks — per-constellation, subtle (mirrors the globe's gtrails treatment;
+  // trailBreak splits at disconnect gaps AND the ±180° seam — no chords, no full-width streaks)
   if (g.opts.trails && g.gtrails) {
     ctx.lineWidth = 1.3; ctx.globalAlpha = 0.4;
     for (const [key, tr] of g.gtrails) {
       const sat = g.sats.find((x) => x.key === key); if (!sat || tr.length < 2) continue;
-      ctx.strokeStyle = tok[sat.tok] || tok.txt3; ctx.beginPath(); let s = false;
-      for (const p of tr) { const q = P(p.lon, p.lat); s ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y); s = true; }
+      ctx.strokeStyle = tok[sat.tok] || tok.txt3; ctx.beginPath(); let s = false, prev = null;
+      for (const p of tr) {
+        const q = P(p.lon, p.lat);
+        if (s && prev && trailBreak(prev, p, true)) s = false;
+        s ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y); s = true; prev = p;
+      }
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
