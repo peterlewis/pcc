@@ -389,6 +389,10 @@ export function createRealDevice(session) {
         // Web Serial (Chromium) OR any browser when the pccd bridge can carry the connection.
         isSupported() { return Clock.isSupported() || BridgeClock.isSupported(); },
 
+        // Is the pccd daemon running? Resolves its /health JSON ({pccd, version, device, chrony})
+        // or null. The app polls this for the Connection room's live BRIDGE row.
+        detectBridge() { return BridgeClock.detect(); },
+
         async connect() {
             // Transport: if the pccd bridge daemon is running it OWNS the serial port (and is
             // feeding chrony), so direct Web Serial would fail anyway — auto-prefer the bridge.

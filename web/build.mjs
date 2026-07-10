@@ -125,7 +125,11 @@ writeFileSync(resolve(web, 'build-info.json'), JSON.stringify(buildInfo, null, 1
 console.log(`build-info: ${buildInfo.version}${buildInfo.dateVersion ? ' (date ' + buildInfo.dateVersion.replace(/^Version /, '') + ')' : ''} · clock4 @ ${buildInfo.fwSha.slice(0, 7)} (${buildInfo.fwBranch})`);
 
 // 4. Report + guard against any external reference sneaking into index.html.
-const external = [...html.matchAll(/\b(?:src|href)\s*=\s*["'](https?:)?\/\/[^"']+/gi)].map((m) => m[0]);
+// The page must make zero external network REQUESTS (src=, <link href>, imports). A plain <a href>
+// is user-clicked navigation, not a fetch — strip anchor tags before scanning so links (e.g. the
+// pccd release download panel) don't trip the guard.
+const scanned = html.replace(/<a\s[^>]*>/gi, '<a>');
+const external = [...scanned.matchAll(/\b(?:src|href)\s*=\s*["'](https?:)?\/\/[^"']+/gi)].map((m) => m[0]);
 console.log(`built docs/index.html (${kb(html.length)} KB, bundle ${kb(bundle.length)} KB)`);
 console.log(`assets: ${['fonts', 'globe', 'data'].filter((d) => existsSync(resolve(docs, d))).join(', ')}`);
 if (external.length) { console.error('WARNING external refs in index.html:', external); process.exit(1); }

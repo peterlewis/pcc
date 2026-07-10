@@ -90,10 +90,18 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=102'), import('./emu-driver.js?v=34'), import('./ppsts.js?v=15')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=103'), import('./emu-driver.js?v=34'), import('./ppsts.js?v=15')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
+      // pccd bridge presence: probed at boot and refreshed every 15 s. Drives the Connection
+      // room's live BRIDGE row and un-gates CONNECT DEVICE in browsers without Web Serial.
+      const probeBridge = () => this.realdev.detectBridge().then((j) => {
+        const next = j || null;
+        if (JSON.stringify(next) !== JSON.stringify(this.state.bridgeInfo || null)) this.setState({ bridgeInfo: next });
+      }).catch(() => {});
+      probeBridge();
+      this.bridgeTimer = setInterval(probeBridge, 15000);
       // The WASM firmware emulator drives the display faces (the emulator IS the clock). Async
       // (loads wasm); the render loop guards on this.emu until it's ready. It boots from the
       // GOLDEN config.txt — the same single source the UI state is seeded from — so the clock
@@ -1936,7 +1944,9 @@ class Component extends DcLite {
       standbyOn: _mode === 'standby',
       onStandbyConnect: () => this.connectRealDevice(),
       onStandbyExplore: () => this.setSim(true),
-      standbySerialNote: (typeof navigator !== 'undefined' && !!navigator.serial) ? 'WEB SERIAL READY — CHROME, EDGE OR OPERA' : 'NEEDS CHROME, EDGE OR OPERA FOR WEB SERIAL',
+      standbySerialNote: this.state.bridgeInfo ? 'PCC BRIDGE DETECTED — ANY BROWSER CONNECTS'
+        : (typeof navigator !== 'undefined' && !!navigator.serial) ? 'WEB SERIAL READY — OR RUN THE PCC BRIDGE'
+        : 'NO WEB SERIAL — RUN THE PCC BRIDGE (DEVICE › CONNECT)',
       sourceTag: (S && S.real) ? 'MK IV — LIVE · CONTROLS COMMAND DEVICE · BUTTONS NOT REPORTED' : this.emuSourceTag(),
       cbHdrBar: this.cb(st.hdrBar),
       oHdrBar: () => {
@@ -2211,6 +2221,7 @@ class Component extends DcLite {
     const conn = !!(S && S.connected);
     const realSeen = typeof localStorage !== 'undefined' && localStorage.getItem('pcc.realDeviceSeen') === '1';
     const serialOk = typeof navigator !== 'undefined' && !!navigator.serial;
+    const bridgeOk = !!st.bridgeInfo;
     const ctxOk = typeof window !== 'undefined' && window.isSecureContext;
     const chrom = typeof window !== 'undefined' && !!window.chrome;
     return {
@@ -2275,14 +2286,17 @@ class Component extends DcLite {
       readCfgDisabled: this.appMode() === 'standby' || !(typeof window !== 'undefined' && 'showOpenFilePicker' in window),
       readCfgStyle: this.btn(false, this.appMode() === 'standby' || !(typeof window !== 'undefined' && 'showOpenFilePicker' in window)),
       // SIMULATE is a toggle, never greyed by history — only blocked while a real device is live.
-      realDisabled: conn || !serialOk, connectDisabled: !!(S && S.real), discDisabled: !conn,
-      btnRealStyle: this.btn(true, conn || !serialOk), btnConnStyle: this.btn(false, !!(S && S.real)), btnDiscStyle: this.btn(false, !conn),
+      // CONNECT DEVICE needs A transport: Web Serial or a detected pccd bridge (any browser).
+      realDisabled: conn || !(serialOk || bridgeOk), connectDisabled: !!(S && S.real), discDisabled: !conn,
+      btnRealStyle: this.btn(true, conn || !(serialOk || bridgeOk)), btnConnStyle: this.btn(false, !!(S && S.real)), btnDiscStyle: this.btn(false, !conn),
       simBtnLabel: st.sim ? 'STOP SIMULATION' : 'SIMULATE',
       realSeen, isReal: !!(S && S.real),
       supSerial: serialOk ? 'AVAILABLE' : 'NOT AVAILABLE', supSerialC: serialOk ? 'var(--lock)' : 'var(--none)',
+      supBridge: bridgeOk ? ('DETECTED v' + (st.bridgeInfo.version || '?') + ' — ' + (st.bridgeInfo.device || 'no device')) : 'NOT RUNNING',
+      supBridgeC: bridgeOk ? 'var(--lock)' : 'var(--txt3)',
       supCtx: ctxOk ? 'SECURE' : 'INSECURE', supCtxC: ctxOk ? 'var(--lock)' : 'var(--none)',
       supChrom: chrom ? 'CHROMIUM' : 'NON-CHROMIUM', supChromC: chrom ? 'var(--lock)' : 'var(--acq)',
-      gateVisible: !serialOk || !ctxOk,
+      gateVisible: (!serialOk || !ctxOk) && !bridgeOk,
     };
   }
 

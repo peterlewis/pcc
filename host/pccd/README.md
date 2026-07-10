@@ -1,10 +1,10 @@
-# pccd — Precision Clock bridge daemon
+# pccd — Precision Clock bridge daemon (macOS + Linux)
 
 One small daemon that owns the Mk IV's serial port and fans it out to everything
 that wants it, simultaneously:
 
-- **chrony** gets a SOF-corrected PPS reference over the SOCK refclock protocol
-  → your Mac becomes a stratum-1 NTP source, disciplined by the clock.
+- **chrony** gets the clock's PPS over the SOCK refclock protocol
+  → your machine becomes a stratum-1 NTP source, disciplined by the clock.
 - **PCC (the web app)** gets the raw NMEA/telemetry line stream over a localhost
   WebSocket, with config commands flowing back — no Web Serial picker, no port
   contention, and it works in browsers that have no Web Serial at all (Safari,
@@ -16,44 +16,80 @@ Why a daemon and not a Service Worker: the port is exclusive-open (one owner),
 and browsers cannot emit UDP/NTP or feed chrony. A native process can do both
 and multiplex the browser on top.
 
-## Timing path
+## Install (prebuilt, from GitHub Releases)
 
-The clock's draft firmware ($PMTXTS with SOF extension, clock4 PR #5) latches
-its DWT cycle counter at the true PPS edge *and* at a named USB SOF frame.
-pccd asks IOKit for the host arrival time of that same frame
-(`GetBusFrameNumberWithTime`), bridges mach → wall time, and computes
+macOS (universal — Apple Silicon + Intel):
 
-    offset = UTC(edge) − host_wall(edge)
+    curl -L -o pccd https://github.com/peterlewis/pcc/releases/latest/download/pccd-macos-universal
+    chmod +x pccd
 
-with the USB transport jitter (~ms) removed — measured scatter is on the order
-of ±70 µs, limited by SOF quantisation, not serial timing. Frame-number deltas
-are taken mod 2048 (signed-nearest) and the DWT frequency self-calibrates from
-the 1 Hz edge cadence.
+Linux (static musl — runs on any distro; x86_64 and aarch64):
 
-## Build
+    curl -L -o pccd https://github.com/peterlewis/pcc/releases/latest/download/pccd-linux-$(uname -m)
+    chmod +x pccd
 
-    make            # clang, needs IOKit + CoreFoundation (macOS)
+`SHA256SUMS` is attached to each release. Every binary answers `./pccd -t`
+(SHA-1 / RFC 6455 handshake self-test) with `self-test OK`.
+
+Note (macOS): the binary is unsigned. Fetching it with `curl` avoids the
+browser quarantine flag; if you downloaded it with a browser instead, run
+`xattr -d com.apple.quarantine pccd` once.
+
+Note (Linux): reading the serial device usually needs membership of the
+`dialout` (Debian/Ubuntu) or `uucp` (Arch) group, or a udev rule.
+
+## Build from source
+
+    make            # clang/gcc; IOKit+CoreFoundation on macOS, no deps on Linux
+    make install    # -> /usr/local/bin/pccd
+
+`make` runs the self-test after compiling.
 
 ## Run
 
-    ./pccd                          # auto-picks /dev/cu.usbmodem*, dry-run prints offsets
-    ./pccd -d /dev/cu.usbmodemXXXX  # explicit device
+    ./pccd                          # auto-picks the device, dry-run prints offsets
+    ./pccd -d /dev/cu.usbmodemXXXX  # explicit device (macOS)
+    ./pccd -d /dev/ttyACM0          # explicit device (Linux)
     ./pccd -s /var/run/chrony.pcc.sock   # feed chrony (default is dry-run)
 
+Auto-pick looks for `/dev/cu.usbmodem*` on macOS, and
+`/dev/serial/by-id/*STM32*` then `/dev/ttyACM*` on Linux.
+
 Flags: `-d <device>` serial device, `-s <path>` chrony SOCK socket path,
-`-p <port>` HTTP/WS port (default 4192).
+`-p <port>` HTTP/WS port (default 4192), `-o <secs>` fixed offset trim,
+`-n` dry-run, `-v` verbose, `-t` self-test.
 
 The daemon listens on 127.0.0.1 only. It reconnects automatically when the
 clock re-enumerates (unplug, reboot, firmware flash).
 
+## Timing path — what accuracy to expect
+
+The clock's draft firmware ($PMTXTS with SOF extension, clock4 PR #5) latches
+its DWT cycle counter at the true PPS edge *and* at a named USB SOF frame.
+
+- **macOS**: IOKit's `GetBusFrameNumberWithTime` places that same frame on the
+  host clock in hardware, so pccd computes `offset = UTC(edge) − host_wall(edge)`
+  with USB transport jitter removed — measured scatter ~±70 µs. Samples log as
+  `[sof]`.
+- **Linux**: no userspace API names a SOF frame, so pccd stamps the $PMTXTS
+  *arrival* instead. The sentence is emitted within ~2 ms of the edge; accuracy
+  is a few ms, slightly late-biased (trim with `-o`, e.g. `-o 0.003`). Samples
+  log as `[arr]`. Still far better than internet NTP for a LAN.
+
 ## chrony setup
 
-In `/etc/chrony/chrony.conf` (or wherever your chrony keeps it):
+In `/etc/chrony/chrony.conf` (Linux) or `/opt/homebrew/etc/chrony.conf`
+(macOS, Homebrew chrony):
 
     refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4
 
-Start chrony first (it creates the socket), then pccd with `-s` pointing at the
-same path. `chronyc sources` should show `#* PCC` once samples flow.
+Use `precision 1e-2` on Linux (arrival-mode samples). Start chronyd first (it
+creates the socket), then pccd with `-s` pointing at the same path.
+`chronyc sources -v` should show `#* PCC` once samples flow.
+
+On macOS, also disable the system's own time sync so it doesn't fight chrony:
+System Settings → General → Date & Time → turn off "Set time and date
+automatically".
 
 ## PCC integration
 
@@ -72,3 +108,18 @@ from http://localhost (dev server) or use the packaged app.
 - daemon → client: `#PCCD v1 device=<path>` once, then every serial line verbatim.
 - client → daemon: one command per frame, e.g. `nmea = all`; the daemon appends
   CRLF and writes it to the port. Non-printable characters are dropped.
+
+## Releasing (maintainer note)
+
+Binaries are built locally and attached to a GitHub release:
+
+    # macOS universal
+    clang -O2 -Wall -Wextra -arch arm64 -arch x86_64 -o dist/pccd-macos-universal pccd.c \
+      -framework IOKit -framework CoreFoundation
+    # Linux static (per arch, via Docker)
+    docker run --rm --platform linux/arm64 -v "$PWD":/src:ro -v "$PWD/dist":/dist alpine:3.20 \
+      sh -c 'apk add -q gcc musl-dev && gcc -O2 -static -o /dist/pccd-linux-aarch64 /src/pccd.c && /dist/pccd-linux-aarch64 -t'
+    docker run --rm --platform linux/amd64 -v "$PWD":/src:ro -v "$PWD/dist":/dist alpine:3.20 \
+      sh -c 'apk add -q gcc musl-dev && gcc -O2 -static -o /dist/pccd-linux-x86_64 /src/pccd.c && /dist/pccd-linux-x86_64 -t'
+    (cd dist && shasum -a 256 pccd-* > SHA256SUMS)
+    gh release create pccd-v0.1 dist/pccd-* dist/SHA256SUMS --title "pccd v0.1" --notes "..."

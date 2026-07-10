@@ -761,7 +761,7 @@
             <section style="background:var(--panel);border:1px solid var(--line)">
               <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
                 <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">01 · CONNECTION</span>
-                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">WEB SERIAL</span>
+                <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">WEB SERIAL · PCC BRIDGE</span>
               </div>
               <div style="display:flex;align-items:center;gap:12px;padding:15px 12px;border-bottom:1px solid var(--line)">
                 <span style="width:10px;height:10px;flex:none;background:{{connLed}};box-shadow:0 0 9px {{connGlow}}"></span>
@@ -785,7 +785,7 @@
               <div style="display:flex;gap:8px;padding:0 12px 12px">
                 <button onClick="{{onReadConfig}}" disabled="{{readCfgDisabled}}" style="{{readCfgStyle}}">READ config.txt FROM DRIVE</button>
               </div>
-              <div style="padding:0 12px 12px;font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--txt3)">CONNECT DEVICE OPENS A REAL MK IV OVER WEB SERIAL — THE PRINCIPAL USE CASE. SIMULATE RUNS A CLEARLY-LABELLED DEMO FOR EXPLORING WITHOUT HARDWARE (ALWAYS AVAILABLE; ONLY PAUSED WHILE A REAL CLOCK IS LIVE, SINCE SIM AND REAL DATA NEVER MIX). READ config.txt PULLS THE DEVICE'S REAL SETTINGS FROM ITS USB DRIVE (SERIAL CAN'T READ CONFIG BACK).</div>
+              <div style="padding:0 12px 12px;font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--txt3)">CONNECT DEVICE OPENS A REAL MK IV — VIA THE PCC BRIDGE WHEN pccd IS RUNNING (ANY BROWSER), OTHERWISE WEB SERIAL. SIMULATE RUNS A CLEARLY-LABELLED DEMO FOR EXPLORING WITHOUT HARDWARE (ALWAYS AVAILABLE; ONLY PAUSED WHILE A REAL CLOCK IS LIVE, SINCE SIM AND REAL DATA NEVER MIX). READ config.txt PULLS THE DEVICE'S REAL SETTINGS FROM ITS USB DRIVE (SERIAL CAN'T READ CONFIG BACK).</div>
             </section>
             <div style="display:flex;flex-direction:column;gap:14px">
               <section style="background:var(--panel);border:1px solid var(--line)">
@@ -794,16 +794,33 @@
                   <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">LIVE CHECK</span>
                 </div>
                 <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Web Serial API</span><span style="font-family:var(--mono);font-size:12px;color:{{supSerialC}}">{{supSerial}}</span></div>
+                <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">PCC bridge (pccd)</span><span style="font-family:var(--mono);font-size:12px;color:{{supBridgeC}};text-align:right">{{supBridge}}</span></div>
                 <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Secure context</span><span style="font-family:var(--mono);font-size:12px;color:{{supCtxC}}">{{supCtx}}</span></div>
                 <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px"><span style="font-size:12px;color:var(--txt2)">Engine</span><span style="font-family:var(--mono);font-size:12px;color:{{supChromC}}">{{supChrom}}</span></div>
                 <sc-if value="{{gateVisible}}" hint-placeholder-val="{{false}}">
                   <div style="margin:0 12px 12px;padding:10px;background:var(--well);border:1px solid var(--line2)">
                     <div style="font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--none);margin-bottom:5px">THIS CONTEXT CANNOT REACH THE CLOCK</div>
-                    <div style="font-size:12px;color:var(--txt2);line-height:1.5">Web Serial needs a Chromium browser on <span style="font-family:var(--mono)">https</span> or <span style="font-family:var(--mono)">localhost</span>. The emulator and simulated session still run.</div>
+                    <div style="font-size:12px;color:var(--txt2);line-height:1.5">Web Serial needs a Chromium browser on <span style="font-family:var(--mono)">https</span> or <span style="font-family:var(--mono)">localhost</span> — or run the PCC BRIDGE below and any browser connects. The emulator and simulated session still run.</div>
                   </div>
                 </sc-if>
 
 
+              </section>
+              <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
+                  <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">PCC BRIDGE · pccd</span>
+                  <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">MACOS + LINUX</span>
+                </div>
+                <div style="padding:10px 12px 4px;font-size:12px;color:var(--txt2);line-height:1.55">A small daemon that owns the clock's serial port once and shares it: this app connects through it from <em>any</em> browser (no port contention, no picker), and chrony gets the clock's PPS — your machine becomes a stratum-1 time source. When pccd is running, CONNECT DEVICE uses it automatically.</div>
+                <div style="padding:8px 12px 0;font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--txt3)">DOWNLOAD — macOS (UNIVERSAL)</div>
+                <div style="margin:4px 12px;padding:8px;background:var(--well);border:1px solid var(--line2);overflow-x:auto"><code style="font-family:var(--mono);font-size:10px;color:var(--txt);white-space:pre;user-select:all">curl -L -o pccd https://github.com/peterlewis/pcc/releases/latest/download/pccd-macos-universal &amp;&amp; chmod +x pccd</code></div>
+                <div style="padding:6px 12px 0;font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--txt3)">DOWNLOAD — LINUX (STATIC · x86_64 / aarch64)</div>
+                <div style="margin:4px 12px;padding:8px;background:var(--well);border:1px solid var(--line2);overflow-x:auto"><code style="font-family:var(--mono);font-size:10px;color:var(--txt);white-space:pre;user-select:all">curl -L -o pccd https://github.com/peterlewis/pcc/releases/latest/download/pccd-linux-$(uname -m) &amp;&amp; chmod +x pccd</code></div>
+                <div style="padding:6px 12px 0;font-size:12px;color:var(--txt2);line-height:1.5">Run <span style="font-family:var(--mono);font-size:11px">./pccd</span> with the clock plugged in — this page detects it within seconds. All releases, checksums and source: <a href="https://github.com/peterlewis/pcc/releases" target="_blank" rel="noopener" style="color:var(--txt);font-family:var(--mono);font-size:11px">github.com/peterlewis/pcc/releases</a></div>
+                <div style="padding:10px 12px 0;font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--txt3)">OPTIONAL — FEED CHRONY (STRATUM-1 NTP)</div>
+                <div style="margin:4px 12px;padding:8px;background:var(--well);border:1px solid var(--line2);overflow-x:auto"><code style="font-family:var(--mono);font-size:10px;color:var(--txt);white-space:pre;user-select:all"># /etc/chrony/chrony.conf (Linux) · /opt/homebrew/etc/chrony.conf (macOS brew)
+refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
+                <div style="padding:2px 12px 12px;font-size:12px;color:var(--txt2);line-height:1.5">Start chronyd first (it creates the socket), then <span style="font-family:var(--mono);font-size:11px">./pccd -s /var/run/chrony.pcc.sock</span>. On Linux use <span style="font-family:var(--mono);font-size:11px">precision 1e-2</span> — PPS lands via arrival timestamps (~ms) there; macOS uses the USB frame clock (~0.1&nbsp;ms). Verify with <span style="font-family:var(--mono);font-size:11px">chronyc sources -v</span>.</div>
               </section>
               <section style="background:var(--panel);border:1px solid var(--line)">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
@@ -816,7 +833,7 @@
                 <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="width:8px;height:8px;flex:none;background:var(--acq)"></span><span style="font-family:var(--mono);font-size:11px;width:110px;color:var(--txt)">ACQUIRING</span><span style="font-size:11px;color:var(--txt3)">Connected, searching the sky</span></div>
                 <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="width:8px;height:8px;flex:none;background:var(--none)"></span><span style="font-family:var(--mono);font-size:11px;width:110px;color:var(--txt)">NO FIX</span><span style="font-size:11px;color:var(--txt3)">Signal lost — always labelled, never hue-only</span></div>
                 <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="width:8px;height:8px;flex:none;background:var(--acq)"></span><span style="font-family:var(--mono);font-size:11px;width:110px;color:var(--txt)">REBOOT</span><span style="font-size:11px;color:var(--txt3)">USB re-enumeration, auto-reconnect</span></div>
-                <div style="display:flex;align-items:center;gap:10px;padding:6px 12px"><span style="width:8px;height:8px;flex:none;background:var(--none)"></span><span style="font-family:var(--mono);font-size:11px;width:110px;color:var(--txt)">UNSUPPORTED</span><span style="font-size:11px;color:var(--txt3)">Browser gate — see support panel</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 12px"><span style="width:8px;height:8px;flex:none;background:var(--none)"></span><span style="font-family:var(--mono);font-size:11px;width:110px;color:var(--txt)">UNSUPPORTED</span><span style="font-size:11px;color:var(--txt3)">No Web Serial and no bridge — see support panel</span></div>
               </section>
             </div>
           </div>
@@ -1409,6 +1426,6 @@
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=210"></script>
+<script type="module" src="js/app-controller.js?v=211"></script>
 </body>
 </html>
