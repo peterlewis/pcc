@@ -92,7 +92,16 @@ this once and keeps retrying). Either
 
     sudo chmod 666 /var/run/chrony.pcc.sock     # after every chronyd (re)start
 
-or run pccd itself as root. Without this, chrony silently falls back to any
+or run pccd itself as root. **Beware: every chronyd restart (including config
+changes via ChronyControl) recreates the socket root-only**, so the chmod must
+be repeated — the durable setup is pccd as a root LaunchDaemon:
+
+    sudo make install
+    sudo cp com.pcc.pccd.plist /Library/LaunchDaemons/
+    sudo launchctl load -w /Library/LaunchDaemons/com.pcc.pccd.plist
+
+(stop any user-run ./pccd first — the serial port is exclusive-open; logs land
+in /var/log/pccd.log). Without a writable socket, chrony silently falls back to any
 `local stratum N` directive and *looks* synced (refid `7F7F0101`) while
 free-running — check `chronyc tracking` shows refid `PCC`, not `7F7F0101`.
 

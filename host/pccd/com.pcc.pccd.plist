@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- pccd as a LaunchDaemon (root): survives reboots and — because root can always write the
+     chrony SOCK socket — is immune to chronyd restarts recreating it with root-only permissions.
+     Install:
+       sudo make install
+       sudo cp com.pcc.pccd.plist /Library/LaunchDaemons/
+       sudo launchctl load -w /Library/LaunchDaemons/com.pcc.pccd.plist
+     (Stop any user-run ./pccd first — the serial port is exclusive-open.)
+     Logs: /var/log/pccd.log -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.pcc.pccd</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/pccd</string>
+    <string>-s</string>
+    <string>/var/run/chrony.pcc.sock</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/var/log/pccd.log</string>
+  <key>StandardErrorPath</key><string>/var/log/pccd.log</string>
+</dict>
+</plist>

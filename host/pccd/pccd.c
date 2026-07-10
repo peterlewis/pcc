@@ -187,19 +187,20 @@ static int serial_autopick(char *out, size_t n){
 struct sock_sample { struct timeval tv; double offset; int pulse; int leap; int _pad; int magic; };
 #define SOCK_MAGIC 0x534f434b
 static int g_chrony = -1;
+static int g_chrony_warned = 0;
 static void chrony_try_connect(void){
   if (g_chrony >= 0 || opt_dry) return;
   int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
   if (fd < 0) return;
   struct sockaddr_un a; memset(&a,0,sizeof a); a.sun_family=AF_UNIX;
   snprintf(a.sun_path,sizeof a.sun_path,"%s",opt_sock);
-  if (connect(fd,(struct sockaddr*)&a,sizeof a)==0){ g_chrony=fd; fprintf(stderr,"[pccd] chrony SOCK connected: %s\n",opt_sock); }
+  if (connect(fd,(struct sockaddr*)&a,sizeof a)==0){ g_chrony=fd; g_chrony_warned=0; fprintf(stderr,"[pccd] chrony SOCK connected: %s\n",opt_sock); }
   else {
     // chronyd creates the socket root-owned without the group/other write bit, so an unprivileged
-    // pccd gets EACCES — a silent retry loop here cost a debugging session. Say it ONCE, with the fix.
-    static int warned = 0;
-    if (errno==EACCES && !warned){
-      warned = 1;
+    // pccd gets EACCES — a silent retry loop here cost a debugging session. Warn once PER OUTAGE
+    // (chronyd restarts recreate the socket root-only, so this recurs; re-armed on every connect).
+    if (errno==EACCES && !g_chrony_warned){
+      g_chrony_warned = 1;
       fprintf(stderr,"[pccd] chrony socket %s exists but PERMISSION DENIED — run\n"
                      "[pccd]   sudo chmod 666 %s\n"
                      "[pccd] (after every chronyd restart), or run pccd itself as root.\n",opt_sock,opt_sock);
@@ -214,7 +215,10 @@ static void chrony_send(double wall_of_pps, double offset){
   s.tv.tv_usec = (suseconds_t)((wall_of_pps - (double)s.tv.tv_sec)*1e6);
   s.offset = offset;                                    // true - system
   s.pulse = 0; s.leap = 0; s.magic = SOCK_MAGIC;
-  if (send(g_chrony,&s,sizeof s,0) < 0){ close(g_chrony); g_chrony=-1; }
+  if (send(g_chrony,&s,sizeof s,0) < 0){
+    fprintf(stderr,"[pccd] chrony SOCK send failed (%s) — feed lost, reconnecting (did chronyd restart?)\n",strerror(errno));
+    close(g_chrony); g_chrony=-1;
+  }
 }
 
 // ---- SHA-1 (for the RFC 6455 handshake only — NOT a general-purpose crypto hash) ------------------
