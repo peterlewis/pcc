@@ -16,23 +16,15 @@ Why a daemon and not a Service Worker: the port is exclusive-open (one owner),
 and browsers cannot emit UDP/NTP or feed chrony. A native process can do both
 and multiplex the browser on top.
 
-## Install (prebuilt, from GitHub Releases)
+## Install
 
-macOS (universal — Apple Silicon + Intel):
-
-    curl -L -o pccd https://github.com/peterlewis/pcc/releases/latest/download/pccd-macos-universal
-    chmod +x pccd
-
-Linux (static musl — runs on any distro; x86_64 and aarch64):
-
-    curl -L -o pccd https://github.com/peterlewis/pcc/releases/latest/download/pccd-linux-$(uname -m)
-    chmod +x pccd
-
-`SHA256SUMS` is attached to each release. Every binary answers `./pccd -t`
+Prebuilt macOS + Linux binaries land on this repository's Releases page once
+the first release (v0.1) is published; until then, build from source below —
+it is a single C file with no dependencies. Every binary answers `./pccd -t`
 (SHA-1 / RFC 6455 handshake self-test) with `self-test OK`.
 
-Note (macOS): the binary is unsigned. Fetching it with `curl` avoids the
-browser quarantine flag; if you downloaded it with a browser instead, run
+Note (macOS): release binaries are unsigned. Fetching with `curl` avoids the
+browser quarantine flag; if downloaded with a browser instead, run
 `xattr -d com.apple.quarantine pccd` once.
 
 Note (Linux): reading the serial device usually needs membership of the
