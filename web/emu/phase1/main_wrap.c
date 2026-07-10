@@ -170,6 +170,7 @@ int  emu_MODE_SOLAR(void){ return -1; }
 /* --- brightness inject: firmware reads ADC1 (phototransistor); make it settable --- */
 static uint32_t emu_adc = 2048;
 void emu_set_adc(unsigned int v){ emu_adc = v; }
+void emu_set_dac(unsigned int v){ dac_target = (float)v; }   /* rail level: 4095 = dimmest (segbal tests) */
 uint32_t HAL_ADC_GetValue(ADC_HandleTypeDef* h){ (void)h; return emu_adc; }
 
 /* ================= PHASE 2 — virtual GPS: feed the REAL NMEA parser + PPS =================

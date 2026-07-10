@@ -21,6 +21,7 @@ const E = {
   bufb: w('emu_bufb', 'number', ['number']),
   bufcLo: w('emu_bufc_low', 'number', ['number']),
   bufcHi: w('emu_bufc_high', 'number', ['number']),
+  setDac: w('emu_set_dac', 'void', ['number']),
 };
 
 const BSEG = 0x01FC;                       // GPIOB segment bits (2..8); rest = cat select etc.
@@ -113,6 +114,19 @@ verify(200, 'strength 200 (gamma 2)');   // s = round(16*(N/8)^2), floor 1 for l
 E.configLine('seg_balance = 999');       // parse clamp → 300
 drive(20);
 verify(300, 'strength 999→clamped 300 (gamma 3)');
+
+// ---- rail-tracking: strength interpolates dim-anchor <-> bright-anchor by dac_target ---------
+E.configLine('seg_balance = 200');
+E.configLine('seg_balance_bright = 60');
+E.setDac(4095);                          // dimmest rail → effective strength = dim anchor (200)
+drive(20);
+verify(200, 'rail dim end (dac 4095) → eff 200');
+E.setDac(0);                             // full rail → effective strength = bright anchor (60)
+drive(20);
+verify(60, 'rail bright end (dac 0) → eff 60');
+E.configLine('seg_balance_bright = -1'); // unset → constant strength again, rail ignored
+drive(20);
+verify(200, 'bright anchor unset → constant 200 at full rail');
 
 // ---- live disable: firmware must fall back to the stock scan without corruption -------------
 E.configLine('seg_balance = off');

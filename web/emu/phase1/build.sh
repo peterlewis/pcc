@@ -33,7 +33,7 @@ INCS=(
 DEFS=(-DSTM32L476xx -DUSE_HAL_DRIVER -DUSE_FULL_LL_DRIVER)
 
 EXPORTS='["_emu_boot","_emu_boot_cold","_emu_tick","_emu_poll","_emu_now","_emu_mode",
-"_emu_button1","_emu_button2","_emu_enable_mode","_emu_set_pos","_emu_set_adc",
+"_emu_button1","_emu_button2","_emu_enable_mode","_emu_set_pos","_emu_set_adc","_emu_set_dac",
 "_emu_daterow","_emu_bufb","_emu_bufc_low","_emu_bufc_high","_emu_MODE_LST","_emu_MODE_SOLAR",
 "_emu_feed_nmea","_emu_pps","_emu_pendsv","_emu_pendsv_pending","_emu_force_holdover","_emu_force_holdover2",
 "_emu_set_vbus","_emu_config_line","_emu_set_tz_offset","_emu_tz_offset",
