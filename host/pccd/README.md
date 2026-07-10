@@ -97,8 +97,8 @@ changes via ChronyControl) recreates the socket root-only**, so the chmod must
 be repeated — the durable setup is pccd as a root LaunchDaemon:
 
     sudo make install
-    sudo cp com.pcc.pccd.plist /Library/LaunchDaemons/
-    sudo launchctl load -w /Library/LaunchDaemons/com.pcc.pccd.plist
+    sudo cp is.peterlew.pcc.d.plist /Library/LaunchDaemons/
+    sudo launchctl load -w /Library/LaunchDaemons/is.peterlew.pcc.d.plist
 
 (stop any user-run ./pccd first — the serial port is exclusive-open; logs land
 in /var/log/pccd.log). Without a writable socket, chrony silently falls back to any

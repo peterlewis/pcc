@@ -4,13 +4,13 @@
      chrony SOCK socket — is immune to chronyd restarts recreating it with root-only permissions.
      Install:
        sudo make install
-       sudo cp com.pcc.pccd.plist /Library/LaunchDaemons/
-       sudo launchctl load -w /Library/LaunchDaemons/com.pcc.pccd.plist
+       sudo cp is.peterlew.pcc.d.plist /Library/LaunchDaemons/
+       sudo launchctl load -w /Library/LaunchDaemons/is.peterlew.pcc.d.plist
      (Stop any user-run ./pccd first — the serial port is exclusive-open.)
      Logs: /var/log/pccd.log -->
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.pcc.pccd</string>
+  <key>Label</key><string>is.peterlew.pcc.d</string>
   <key>ProgramArguments</key>
   <array>
     <string>/usr/local/bin/pccd</string>
