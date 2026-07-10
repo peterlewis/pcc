@@ -90,7 +90,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=100'), import('./emu-driver.js?v=34'), import('./ppsts.js?v=15')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=102'), import('./emu-driver.js?v=34'), import('./ppsts.js?v=15')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -1936,7 +1936,7 @@ class Component extends DcLite {
       standbyOn: _mode === 'standby',
       onStandbyConnect: () => this.connectRealDevice(),
       onStandbyExplore: () => this.setSim(true),
-      standbySerialNote: (typeof navigator !== 'undefined' && 'serial' in navigator) ? 'WEB SERIAL READY — CHROME, EDGE OR OPERA' : 'NEEDS CHROME, EDGE OR OPERA FOR WEB SERIAL',
+      standbySerialNote: (typeof navigator !== 'undefined' && !!navigator.serial) ? 'WEB SERIAL READY — CHROME, EDGE OR OPERA' : 'NEEDS CHROME, EDGE OR OPERA FOR WEB SERIAL',
       sourceTag: (S && S.real) ? 'MK IV — LIVE · CONTROLS COMMAND DEVICE · BUTTONS NOT REPORTED' : this.emuSourceTag(),
       cbHdrBar: this.cb(st.hdrBar),
       oHdrBar: () => {
@@ -2210,7 +2210,7 @@ class Component extends DcLite {
     const S = this.session && this.session.S;
     const conn = !!(S && S.connected);
     const realSeen = typeof localStorage !== 'undefined' && localStorage.getItem('pcc.realDeviceSeen') === '1';
-    const serialOk = typeof navigator !== 'undefined' && 'serial' in navigator;
+    const serialOk = typeof navigator !== 'undefined' && !!navigator.serial;
     const ctxOk = typeof window !== 'undefined' && window.isSecureContext;
     const chrom = typeof window !== 'undefined' && !!window.chrome;
     return {

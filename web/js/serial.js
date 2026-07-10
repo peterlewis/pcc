@@ -23,7 +23,9 @@ export class Clock extends EventTarget {
     }
 
     static isSupported() {
-        return 'serial' in navigator;
+        // Truthiness, not `in`: some environments (and permission policies) define the
+        // property as undefined, which would pass an `in` check and crash at requestPort.
+        return !!navigator.serial;
     }
 
     get isConnected() {

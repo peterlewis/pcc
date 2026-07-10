@@ -12,7 +12,7 @@
 //
 // Chromium only (Web Serial). Gate the connect button on isSupported().
 
-import { Clock, BridgeClock } from './serial.js?v=14';
+import { Clock, BridgeClock } from './serial.js?v=15';
 import { parseGGA, parseRMC, parseGSA, GSVBuffer } from './nmea.js?v=2';
 import { parsePMTXTS, parsePMTXTC, centrePhase, foldPhase1ms } from './ppsts.js?v=15';
 // subSatellitePoint reconstructs a sat's ground point from observer-relative
@@ -394,6 +394,8 @@ export function createRealDevice(session) {
             // feeding chrony), so direct Web Serial would fail anyway — auto-prefer the bridge.
             // No daemon -> the classic Web Serial picker. Same Clock surface either way.
             const bridge = await BridgeClock.detect();
+            if (!bridge && !Clock.isSupported())
+                throw new Error('No transport: this browser lacks Web Serial and the pccd bridge is not running. Start pccd, or use Chrome/Edge.');
             clock = bridge ? new BridgeClock() : new Clock();
             clock.addEventListener('line', (e) => this.ingestLine(e.detail));
             clock.addEventListener('status', (e) => {
