@@ -2464,7 +2464,9 @@ class Component extends DcLite {
       gSub: sun ? sun.subLat.toFixed(1) + '° / ' + sun.subLon.toFixed(1) + '°' : '—',
       gVis: S ? 'G' + cnt('G') + ' · R' + cnt('R') + ' · E' + cnt('E') + ' · C' + cnt('C') : '—',
       gClock: new Date().toISOString().slice(11, 19) + ' UTC',
-      landNote: this.landTried && !this.land ? 'COASTLINE DATA UNAVAILABLE — GRATICULE ONLY' : 'CARTOGRAPHIC RENDER — PRODUCTION USES PHOTOGRAPHIC EARTH',
+      // (used to promise "production uses photographic earth" — a leftover from the macOS-app port
+      // plan. This IS production; the cartographic render is the design, so say only what's true.)
+      landNote: this.landTried && !this.land ? 'COASTLINE DATA UNAVAILABLE — GRATICULE ONLY' : 'CARTOGRAPHIC RENDER — VECTOR COASTLINES + GRATICULE',
     };
   }
 
