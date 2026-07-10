@@ -105,3 +105,24 @@ Ship **Option A**, config-gated (`seg_balance`, default off), verified in the em
 level + a JS brightness-preview model. Measure the temporal shimmer on real hardware at low brightness;
 if objectionable, add **Option B** (DAC∝ΣN) as a gated refinement. This keeps the PR principled and the
 stock display bit-identical when the feature is off.
+
+## 8. IMPLEMENTED (2026-07-10, clock4 rollup 4fa34ee) — Option A, config-gated
+`seg_balance = on | 0..100` (default off, stock-identical). Non-invasive expander: all 206 existing
+buffer writers keep targeting slots 0..4 (the live masters); `segbal_poll()` (main loop, ≤1 kHz)
+mirrors them into slots 5..79 with duty `s = 16 − strength·(16−2N)/100` per digit; the cycle mask
+`(k·s) mod 16 < s` always lights cycle 0 = the master slot. `display_scan_len` shadows the DMA
+count to steer 5↔80 across standby/chainloader.
+
+**Hardware model correction (caught by adversarial review, would have garbled the display):**
+`buffer_c[].high` is NOT a second segment byte — it is GPIOC's one-cold column select + enables
+(SysInit patterns `0b11001110/1101/1011/0111/1111`), with only bit 4 (`cSegDP`, the decimal point)
+being a real LED. The C digit's N = popcount(.low) + DP; the DP rides its digit's duty cycles; the
+addressing byte is carried VERBATIM in every mirror slot. The first WASM test encoded the same
+misconception and passed — the corrected test (`web/emu/phase1/segbal_check.mjs`) now asserts the
+addressing byte is byte-identical in all 16 cycles, so the misconception cannot return.
+
+Verified: WASM 20/20 (duty exact at 100/50, per-segment ratio uniform, live toggle clean); ARM
+Release 0 errors; independent line-by-line review SOUND. Staged image (CRC'd, NOT flashed):
+`backups/segbal-staging/fwt.bin`. Not visualised in the web emulator (renders masters only) — a JS
+brightness model remains the way to *see* it there (§6). Date board unaffected (own MCU + scan —
+same treatment possible as a follow-up). Option B (DAC∝ΣN, kills the temporal shimmer) still open.
