@@ -123,18 +123,23 @@ E.configLine('seg_balance = 999');       // parse clamp → 300
 drive(20);
 verify(300, 'strength 999→clamped 300 (gamma 3)');
 
-// ---- rail-tracking: strength interpolates dim-anchor <-> bright-anchor by dac_target ---------
-E.configLine('seg_balance = 200');
-E.configLine('seg_balance_bright = 60');
-E.setDac(4095);                          // dimmest rail → effective strength = dim anchor (200)
-drive(20);
-verify(200, 'rail dim end (dac 4095) → eff 200');
-E.setDac(0);                             // full rail → effective strength = bright anchor (60)
-drive(20);
-verify(60, 'rail bright end (dac 0) → eff 60');
-E.configLine('seg_balance_bright = -1'); // unset → constant strength again, rail ignored
-drive(20);
-verify(200, 'bright anchor unset → constant 200 at full rail');
+// ---- AUTO: seg_balance = on follows the baked calibration curve (piecewise linear in dac) ----
+// Hardware calibration points (2026-07-10): dac {0,614,2048,4095} → strength {50,35,30,100}.
+const AUTO_DAC = [0, 614, 2048, 4095], AUTO_K = [50, 35, 30, 100];
+const autoK = (d) => {
+  if (d <= AUTO_DAC[0]) return AUTO_K[0];
+  for (let i = 1; i < 4; i++) if (d <= AUTO_DAC[i]) {
+    // C integer division truncates toward zero — mirror it exactly
+    return AUTO_K[i-1] + Math.trunc(((AUTO_K[i] - AUTO_K[i-1]) * (d - AUTO_DAC[i-1])) / (AUTO_DAC[i] - AUTO_DAC[i-1]));
+  }
+  return AUTO_K[3];
+};
+E.configLine('seg_balance = on');
+for (const d of [0, 614, 1331, 2048, 3000, 4095]) {
+  E.setDac(d);
+  drive(20);
+  verify(autoK(d), `auto @ dac ${d} → eff ${autoK(d)}`);
+}
 
 // ---- live disable: firmware must fall back to the stock scan without corruption -------------
 E.configLine('seg_balance = off');
