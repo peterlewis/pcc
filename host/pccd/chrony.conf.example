@@ -1,0 +1,75 @@
+#
+# chrony.conf — stratum-1 from the Precision Clock Mk IV (via pccd)
+#
+# Layout: PCC steers; an internet pool is fallback + falseticker jury; the LAN
+# is served. Copy the parts you need into your existing chrony.conf — on macOS
+# (Homebrew) /opt/homebrew/etc/chrony.conf, on Linux /etc/chrony/chrony.conf.
+# Requires pccd running with -s /var/run/chrony.pcc.sock (see README.md).
+#
+
+# ---- time sources -----------------------------------------------------------
+
+# The clock. pccd feeds SOF-anchored, prefiltered samples over the SOCK
+# refclock (one per 8 s by default). poll 6 = one measurement per 64 s from a
+# median over ~8 samples; prefer = while PCC is healthy it steers ALONE, so the
+# pool below never dilutes its microsecond-level discipline.
+# Linux note: the arrival-timestamp path is ms-class — use precision 1e-2 there.
+refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4 poll 6 filter 128 prefer
+
+# Fallback + sanity jury. Normally outvoted by 'prefer', but these (a) take over
+# seamlessly if the clock is unplugged or pccd stops, (b) expose a malfunctioning
+# refclock as a falseticker instead of blindly following it, (c) give
+# `chronyc sources` a live cross-check of PCC against world time.
+# Replace with a pool near you (e.g. pool.ntp.org, or your ISP's servers).
+pool pool.ntp.org iburst maxsources 4
+
+# ---- steering behaviour -----------------------------------------------------
+
+# Gentle corrections: spread each correction over ~30x its size so per-sample
+# noise stays invisible in the realised clock. Raise for even flatter tracking.
+corrtimeratio 30
+
+# Step only at startup (first 3 updates, >100 ms); slew only thereafter.
+makestep 0.1 3
+
+# Discard clearly-broken measurements.
+maxupdateskew 100.0
+
+# Smear a leap second rather than stepping it into the LAN.
+leapsecmode slew
+
+# Learned frequency survives restarts (faster re-convergence after the poll-6
+# selection window, which is ~4 min).
+driftfile /var/db/chrony/chrony.drift
+
+# ---- serving the LAN --------------------------------------------------------
+
+# Keep answering (at stratum 10) while unsynchronised — e.g. during the
+# post-restart selection window — so clients never lose the server entirely.
+local stratum 10
+
+# Open the server to your local networks (trim to the ones you actually use).
+allow 10/8
+allow 192.168/16
+allow 172.16/12
+
+# Light abuse protection for the open LAN service.
+ratelimit interval 1 burst 16
+
+# ---- housekeeping -----------------------------------------------------------
+
+# cmdmon socket for chronyc.
+bindcmdaddress /var/run/chrony/chronyd.sock
+
+# 'refclocks' logs every PCC sample — the file to tune the prefilter against.
+log tracking measurements statistics refclocks
+logdir /var/log/chrony
+
+dumponexit
+dumpdir /var/db/chrony
+
+# Note in syslog any correction over 0.5 s (should never fire in steady state).
+logchange 0.5
+
+# Sync the RTC periodically (inert on macOS, harmless).
+rtcsync

@@ -144,13 +144,19 @@ Working notes for whoever picks this up:
 
 ## chrony setup
 
-In `/etc/chrony/chrony.conf` (Linux) or `/opt/homebrew/etc/chrony.conf`
-(macOS, Homebrew chrony):
+The minimal line, in `/etc/chrony/chrony.conf` (Linux) or
+`/opt/homebrew/etc/chrony.conf` (macOS, Homebrew chrony):
 
     refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4
 
 Use `precision 1e-2` on Linux (arrival-mode samples). Start chronyd first (it
 creates the socket), then pccd with `-s` pointing at the same path.
+
+For a production stratum-1 server, [`chrony.conf.example`](chrony.conf.example)
+in this directory is a complete, commented config: PCC steers alone (`prefer`),
+an internet pool provides seamless fallback and a falseticker jury, the LAN is
+served (with rate-limiting), and the v0.2 smoothing (`poll 6 filter 128`,
+`corrtimeratio 30`) is applied. Copy the parts you need.
 
 **Permissions requisite:** chronyd creates the socket root-owned with no write
 bit for others, so an unprivileged pccd gets `PERMISSION DENIED` (it prints
