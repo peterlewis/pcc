@@ -39,7 +39,12 @@ function drive(ms) {
 // and the addressing bits must be byte-identical in every one of the 16 cycles.
 const DP = 0x10;
 function verify(strength, label) {
-  const sFor = (n) => Math.max(0, 16 - Math.floor((strength * (16 - 2 * n)) / 100));
+  // mirrors segbal_duty(): linear blend to 100, power law (gamma = strength/100) above
+  const sFor = (n) => {
+    if (n === 0) return 0;
+    if (strength <= 100) return 16 - Math.floor((strength * (16 - 2 * n)) / 100);
+    return Math.max(1, Math.min(16, Math.floor(16 * Math.pow(n / 8, strength / 100) + 0.5)));
+  };
   let colsWithSegs = 0, allCat = true, allCsel = true, allDuty = true, allClean = true;
   const detail = [];
   for (let col = 0; col < 5; col++) {
@@ -100,6 +105,14 @@ const d100 = verify(100, 'strength 100');
 E.configLine('seg_balance = 50');
 drive(20);
 verify(50, 'strength 50');   // s = 8 + N exactly
+
+// ---- overdrive: power law past 100 (gamma = strength/100) ------------------------------------
+E.configLine('seg_balance = 200');
+drive(20);
+verify(200, 'strength 200 (gamma 2)');   // s = round(16*(N/8)^2), floor 1 for lit digits
+E.configLine('seg_balance = 999');       // parse clamp → 300
+drive(20);
+verify(300, 'strength 999→clamped 300 (gamma 3)');
 
 // ---- live disable: firmware must fall back to the stock scan without corruption -------------
 E.configLine('seg_balance = off');
