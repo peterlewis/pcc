@@ -217,13 +217,26 @@ export class Clock extends EventTarget {
 export class BridgeClock extends EventTarget {
     static PORT = 4192;
 
+    /// The daemon's authority (host:port). When the app is SERVED BY pccd itself (http on a local
+    /// host, e.g. `pccd -w`), the daemon IS our origin — use `location.host` so the /health fetch and
+    /// the WebSocket are SAME-ORIGIN. That dodges the mixed-content wall Safari (and strict Chromium)
+    /// raise when the deployed https:// site reaches http://127.0.0.1. Otherwise (the deployed site
+    /// probing a local daemon) fall back to the fixed loopback authority.
+    static authority() {
+        try {
+            if (location.protocol === 'http:' && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname))
+                return location.host;
+        } catch { /* no location (worker/test) */ }
+        return `127.0.0.1:${BridgeClock.PORT}`;
+    }
+
     /// Is the daemon running? Resolves { device } or null. Fast (350 ms cap) so the connect
     /// button can probe it inline without noticeable delay.
     static async detect() {
         try {
             const ctrl = new AbortController();
             const t = setTimeout(() => ctrl.abort(), 350);
-            const r = await fetch(`http://127.0.0.1:${BridgeClock.PORT}/health`, { signal: ctrl.signal });
+            const r = await fetch(`http://${BridgeClock.authority()}/health`, { signal: ctrl.signal });
             clearTimeout(t);
             if (!r.ok) return null;
             const j = await r.json();
@@ -235,18 +248,18 @@ export class BridgeClock extends EventTarget {
 
     constructor() { super(); this.ws = null; this.device = ''; this.nmeaConsumers = 0; this._closing = false; }
 
-    describe() { return 'PCC BRIDGE · ' + (this.device || `localhost:${BridgeClock.PORT}`); }
+    describe() { return 'PCC BRIDGE · ' + (this.device || BridgeClock.authority()); }
 
     async connect() {
         await new Promise((resolve, reject) => {
-            const ws = new WebSocket(`ws://127.0.0.1:${BridgeClock.PORT}`);
+            const ws = new WebSocket(`ws://${BridgeClock.authority()}`);
             // Resolve on the daemon's hello frame (immediate after upgrade) rather than onopen,
             // so describe() already knows the device path when the caller stamps the port label.
             // The timeout is a safety net for a daemon too old to send a hello.
             let settled = false;
             const settle = () => { if (!settled) { settled = true; this.ws = ws; resolve(); } };
             ws.onopen = () => setTimeout(settle, 400);
-            ws.onerror = () => { if (!settled) { settled = true; reject(new Error('pccd bridge not reachable on localhost:' + BridgeClock.PORT)); } };
+            ws.onerror = () => { if (!settled) { settled = true; reject(new Error('pccd bridge not reachable at ' + BridgeClock.authority())); } };
             ws.onmessage = (e) => {
                 const text = String(e.data);
                 if (text.startsWith('#PCCD')) {

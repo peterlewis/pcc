@@ -56,7 +56,8 @@ Auto-pick looks for `/dev/cu.usbmodem*` on macOS, and
 `/dev/serial/by-id/*STM32*` then `/dev/ttyACM*` on Linux.
 
 Flags: `-d <device>` serial device, `-s <path>` chrony SOCK socket path,
-`-p <port>` HTTP/WS port (default 4192), `-o <secs>` fixed offset trim,
+`-p <port>` HTTP/WS port (default 4192), `-w <dir>` serve the PCC app from dir
+(same-origin, fixes Safari — see below), `-o <secs>` fixed offset trim,
 `-n` dry-run, `-v` verbose, `-r` raw (bypass the sample prefilter),
 `-t` self-test, `-T` frame-clock probe (macOS).
 
@@ -199,8 +200,22 @@ a `#PCCD v1 device=<path>` hello so the app can show the real port name.
 Multiple tabs can connect at once; commands from any tab go to the clock,
 every line from the clock goes to every tab (and to chrony, independently).
 
-Note for Safari: pages served over https cannot open ws://localhost — run PCC
-from http://localhost (dev server) or use the packaged app.
+### Serving the app locally (`-w`) — the Safari fix
+
+The deployed `https://` site can't reach `http://127.0.0.1` in Safari (and strict
+Chromium): mixed content. Chromium exempts localhost so the bridge works there
+from the deployed site, but Safari blocks the `/health` fetch outright. The fix
+is to let pccd serve the app itself, so it loads over `http://localhost:<port>` —
+**same origin** as the bridge, which every browser allows:
+
+    ./pccd -w /path/to/pcc/docs      # docs/ is the built web app (node web/build.mjs)
+
+Then open **http://localhost:4192** (or `http://127.0.0.1:4192`). The app detects
+that it's served by pccd and points the bridge at its own origin, so the
+WebSocket and `/health` are same-origin — no mixed content, works in Safari,
+Firefox, everything. Web Serial is unaffected: in a Chromium browser the app
+still offers it as the fallback when no daemon is running. The LaunchDaemon plist
+ships with a `-w` line (adjust the path to your checkout).
 
 ## Protocol (WebSocket, text frames)
 

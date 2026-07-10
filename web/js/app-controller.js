@@ -90,7 +90,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=103'), import('./emu-driver.js?v=34'), import('./ppsts.js?v=15')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=104'), import('./emu-driver.js?v=34'), import('./ppsts.js?v=15')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -1821,8 +1821,10 @@ class Component extends DcLite {
       onCloseHdrClock: () => this.setState({ hdrClockOpen: false }),
       onOpenHdrClock: () => this.setState({ hdrClockOpen: true }),
       onEntryClick: () => this.beginFold(),
-      onEntryOver: () => { const h = this.els.hint; if (h && h.lastChild) { h.lastChild.style.color = 'var(--txt2)'; h.firstChild.style.background = 'var(--txt3)'; } },
-      onEntryOut: () => { const h = this.els.hint; if (h && h.lastChild) { h.lastChild.style.color = 'var(--txt3)'; h.firstChild.style.background = 'var(--line2)'; } },
+      // …ElementChild, not …Child: whitespace between the markup's children parses to text nodes,
+      // and a text node has no .style — the old .lastChild threw on every hover (Safari console).
+      onEntryOver: () => { const h = this.els.hint; if (h && h.firstElementChild && h.lastElementChild) { h.lastElementChild.style.color = 'var(--txt2)'; h.firstElementChild.style.background = 'var(--txt3)'; } },
+      onEntryOut: () => { const h = this.els.hint; if (h && h.firstElementChild && h.lastElementChild) { h.lastElementChild.style.color = 'var(--txt3)'; h.firstElementChild.style.background = 'var(--line2)'; } },
       onReplay: () => this.replayEntry(),
       connLed: ci.led, connGlow: ci.glow || 'transparent', connState: ci.state, connSub: ci.sub,
       // H2 — the status pill is now a disclosure: click to open a popover that holds the

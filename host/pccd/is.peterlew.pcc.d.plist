@@ -7,7 +7,12 @@
        sudo cp is.peterlew.pcc.d.plist /Library/LaunchDaemons/
        sudo launchctl load -w /Library/LaunchDaemons/is.peterlew.pcc.d.plist
      (Stop any user-run ./pccd first — the serial port is exclusive-open.)
-     Logs: /var/log/pccd.log -->
+     Logs: /var/log/pccd.log
+
+     The -w line below serves the PCC web app from the built docs/ dir, so opening
+     http://localhost:4192 gives a fully-local, same-origin app+bridge that works in EVERY
+     browser (Safari included) with no mixed-content block. Point it at your checkout's docs/;
+     drop the two -w lines to disable app-serving. -->
 <plist version="1.0">
 <dict>
   <key>Label</key><string>is.peterlew.pcc.d</string>
@@ -16,6 +21,8 @@
     <string>/usr/local/bin/pccd</string>
     <string>-s</string>
     <string>/var/run/chrony.pcc.sock</string>
+    <string>-w</string>
+    <string>/Users/peter/Developer/ML/Claude/pcc/docs</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

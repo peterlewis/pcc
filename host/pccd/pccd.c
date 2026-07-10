@@ -28,6 +28,8 @@
 //               /dev/serial/by-id/*STM32* then /dev/ttyACM* on Linux)
 //           -p  HTTP/WebSocket port on 127.0.0.1 (default 4192)
 //           -s  chrony SOCK path (default /var/run/chrony.pcc.sock; skipped if absent)
+//           -w  serve the PCC web app from this dir at http://localhost:<port> (same-origin bridge;
+//               fixes Safari/strict-browser mixed-content block against the deployed https:// site)
 //           -o  fixed offset trim in seconds, added to every sample (arrival-mode latency, e.g. 0.003)
 //           -n  dry run: print offsets, never write to chrony
 //           -v  verbose per-sample logging
@@ -46,6 +48,7 @@
 
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
@@ -53,6 +56,7 @@
 #include <termios.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #include <poll.h>
 #include <errno.h>
@@ -80,6 +84,7 @@ static double      opt_trim = 0.0;
 static int         opt_dry  = 0;
 static int         opt_verb = 0;
 static int         opt_raw  = 0;
+static const char *opt_webroot = NULL;   // -w: serve the PCC app from this dir (same-origin, no mixed content)
 
 // ---- monotonic time + wall mapping ---------------------------------------------------------------
 // One monotonic nanosecond clock for retry timers, arrival stamps and (on macOS) the IOKit frame
@@ -223,6 +228,9 @@ static char g_devpath[512];   // matches devbuf; /dev/serial/by-id/ paths can be
 static int serial_open(const char *path){
   int fd = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK);
   if (fd < 0) return -1;
+  // Exclusive: once we own the port, a second pccd's open() fails instead of both reading the same
+  // stream and splitting the bytes (which silently corrupts both). Advisory, but every pccd sets it.
+  if (ioctl(fd, TIOCEXCL) != 0) { /* not a tty (e.g. test path) — harmless */ }
   struct termios t; tcgetattr(fd,&t); cfmakeraw(&t);
   t.c_cc[VMIN]=0; t.c_cc[VTIME]=0;
   cfsetispeed(&t,B115200); cfsetospeed(&t,B115200);
@@ -516,8 +524,57 @@ static int listen_open(int port){
   if (bind(fd,(struct sockaddr*)&a,sizeof a)<0 || listen(fd,4)<0){ close(fd); return -1; }
   return fd;
 }
+// ---- optional static file server (-w) -------------------------------------------------------------
+// Serve the PCC web app from a local directory so it loads over http://localhost:<port> — SAME ORIGIN
+// as the bridge, which dodges the mixed-content wall Safari (and strict Chromium) throws up when the
+// deployed https:// site tries to reach http://127.0.0.1. Web Serial is unaffected: the app keeps both
+// transports; served locally it just prefers the (now same-origin) bridge.
+static const char *mime_of(const char *path){
+  const char *d = strrchr(path,'.'); if (!d) return "application/octet-stream";
+  if (!strcmp(d,".html")) return "text/html; charset=utf-8";
+  if (!strcmp(d,".js")||!strcmp(d,".mjs")) return "text/javascript";
+  if (!strcmp(d,".css"))  return "text/css";
+  if (!strcmp(d,".json")||!strcmp(d,".map")) return "application/json";
+  if (!strcmp(d,".wasm")) return "application/wasm";       // must be exact for streaming compile
+  if (!strcmp(d,".woff2"))return "font/woff2";
+  if (!strcmp(d,".woff")) return "font/woff";
+  if (!strcmp(d,".png"))  return "image/png";
+  if (!strcmp(d,".svg"))  return "image/svg+xml";
+  if (!strcmp(d,".ico"))  return "image/x-icon";
+  return "application/octet-stream";                       // .bin (tzmap/tzrules) etc.
+}
+static void http_simple(Client *c, const char *status, const char *type, const char *body){
+  char h[256]; int n=snprintf(h,sizeof h,
+    "HTTP/1.1 %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+    status,type,strlen(body),body);
+  write(c->fd,h,n); close(c->fd); c->fd=-1;
+}
+// GET <reqpath> from opt_webroot. reqpath is caller-validated (leading '/', no ".."). Streams so the
+// 12 MB tzmap doesn't need buffering. Blocking writes are fine on loopback.
+static void serve_file(Client *c, const char *reqpath){
+  char full[1600];
+  snprintf(full,sizeof full,"%s%s",opt_webroot, reqpath[1]?reqpath:"/index.html");
+  int fd = open(full,O_RDONLY);
+  if (fd<0){ http_simple(c,"404 Not Found","text/plain","not found\n"); return; }
+  struct stat st;
+  if (fstat(fd,&st)!=0 || !S_ISREG(st.st_mode)){ close(fd); http_simple(c,"404 Not Found","text/plain","not found\n"); return; }
+  char hdr[512];
+  int hn=snprintf(hdr,sizeof hdr,
+    "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %lld\r\n%sConnection: close\r\n\r\n",
+    mime_of(full),(long long)st.st_size,
+    strstr(full,".html")?"Cache-Control: no-cache\r\n":"");   // index stays fresh; assets are ?v-versioned
+  if (write(c->fd,hdr,hn)>0){
+    char buf[65536]; ssize_t r;
+    while ((r=read(fd,buf,sizeof buf))>0){
+      for (ssize_t off=0; off<r; ){ ssize_t w=write(c->fd,buf+off,r-off); if (w<=0){ r=-1; break; } off+=w; }
+      if (r<0) break;
+    }
+  }
+  close(fd); close(c->fd); c->fd=-1;
+}
+
 // One HTTP request per plain connection: /health JSON (CORS-open so the deployed app can probe us),
-// or a WebSocket upgrade. Anything else: a short status page.
+// a WebSocket upgrade, an optional served file (-w), or a short status page.
 static void http_or_upgrade(Client *c){
   c->buf[c->len]=0;
   if (!strstr(c->buf,"\r\n\r\n")) return;               // wait for full headers
@@ -541,19 +598,30 @@ static void http_or_upgrade(Client *c){
     fprintf(stderr,"[pccd] websocket client connected\n");
     return;
   }
-  const char *body, *type;
-  char json[700];
-  if (strstr(c->buf,"GET /health")){
+  // Parse the request path: "GET <path> HTTP/1.1".
+  char path[1024]; path[0]=0;
+  if (!strncmp(c->buf,"GET ",4)){
+    const char *p=c->buf+4, *sp=strchr(p,' ');
+    int len = sp ? (int)(sp-p) : 0;
+    if (len>0 && len<(int)sizeof path){ memcpy(path,p,len); path[len]=0; }
+  }
+  char *q=strchr(path,'?'); if (q) *q=0;                    // drop the query string
+
+  if (!strncmp(path,"/health",7)){
+    char json[700];
     snprintf(json,sizeof json,"{\"pccd\":1,\"version\":\"" PCCD_VERSION "\",\"device\":\"%s\",\"chrony\":%s}",
              g_devpath, (g_chrony>=0)?"true":"false");
-    body=json; type="application/json";
-  } else { body="pccd: Precision Clock bridge. WebSocket here; GET /health for status.\n"; type="text/plain"; }
-  char resp[768];
-  int n=snprintf(resp,sizeof resp,
-    "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nAccess-Control-Allow-Origin: *\r\n"
-    "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",type,strlen(body),body);
-  write(c->fd,resp,n);
-  close(c->fd); c->fd=-1;
+    char resp[768];
+    int n=snprintf(resp,sizeof resp,
+      "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\n"
+      "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",strlen(json),json);
+    write(c->fd,resp,n); close(c->fd); c->fd=-1; return;
+  }
+  if (opt_webroot && path[0]=='/' && !strstr(path,"..")){   // serve the app (same-origin)
+    serve_file(c,path); return;
+  }
+  http_simple(c,"200 OK","text/plain",
+    "pccd: Precision Clock bridge. WebSocket here; GET /health for status.\n");
 }
 // Unmask + deliver client->server text frames: each is a command line for the clock's serial port.
 static void ws_read(Client *c, int serial_fd){
@@ -608,9 +676,10 @@ int main(int argc, char **argv){
     else if (!strcmp(argv[i],"-n")) opt_dry=1;
     else if (!strcmp(argv[i],"-v")) opt_verb=1;
     else if (!strcmp(argv[i],"-r")) opt_raw=1;
+    else if (!strcmp(argv[i],"-w") && i+1<argc) opt_webroot=argv[++i];
     else if (!strcmp(argv[i],"-t")) return self_test();
     else if (!strcmp(argv[i],"-T")) return frame_probe();
-    else { fprintf(stderr,"usage: pccd [-d dev] [-p port] [-s chrony.sock] [-o trim_s] [-n dry] [-v] [-r raw] [-t selftest] [-T frameprobe]\n"); return 2; }
+    else { fprintf(stderr,"usage: pccd [-d dev] [-p port] [-s chrony.sock] [-w webroot] [-o trim_s] [-n dry] [-v] [-r raw] [-t selftest] [-T frameprobe]\n"); return 2; }
   }
   pf_sink = pf_emit_chrony;
   init_mono();
@@ -620,6 +689,7 @@ int main(int argc, char **argv){
   g_listen = listen_open(opt_port);
   if (g_listen<0){ fprintf(stderr,"[pccd] cannot listen on 127.0.0.1:%d\n",opt_port); return 1; }
   fprintf(stderr,"[pccd] v" PCCD_VERSION " — http/ws on http://127.0.0.1:%d  (health: /health)%s\n",opt_port,opt_dry?"  [DRY RUN]":"");
+  if (opt_webroot) fprintf(stderr,"[pccd] serving PCC app from %s  —  open http://localhost:%d\n",opt_webroot,opt_port);
 
   int sfd=-1; double next_retry=0;
   char line[512]; int li=0;
