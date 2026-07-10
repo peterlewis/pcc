@@ -160,6 +160,67 @@ E.configLine('seg_balance = 100');
 drive(20);
 verify(100, 're-enable');
 
+// ---- gradual significance fade: digit_bright scales the sub-second columns' duty --------------
+// The mirror must run for the fade EVEN with seg_balance off (identity duty), each C column's
+// duty must track its digit's live fade level (c1/c2/c3 = ds/cs/ms), and the seconds column's
+// DP (c0.high bit 4) must follow digit_bright[3]. Uses forceHoldover to sweep U(τ).
+{
+  const digitFade = w('emu_digit_fade', 'number', ['number']);
+  const forceHold = w('emu_force_holdover', 'void', ['number']);
+  E.configLine('seg_balance = off');
+  E.configLine('significance_fade = on');
+  drive(20);
+  // find a holdover age where the fade is PARTIAL (some digit strictly between 0 and 16) —
+  // the fade bands are narrow in age terms, so sweep densely (log steps)
+  let partial = null;
+  for (let age = 5; age < 500000 && !partial; age = Math.ceil(age * 1.08)) {
+    forceHold(age); drive(3);
+    const f = [0, 1, 2, 3].map(k => Math.round(digitFade(k) * 16 / 255));
+    if (f.some(v => v > 0 && v < 16)) partial = { age, f };
+  }
+  check('fade: found a partial-fade holdover age', !!partial, partial ? `age=${partial.age} f=${partial.f}` : 'none');
+  if (partial) {
+    drive(20);
+    const f = [0, 1, 2, 3].map(k => Math.round(digitFade(k) * 16 / 255));
+    let ok = true, detail = [];
+    for (let col = 1; col <= 3; col++) {
+      const ml = E.bufcLo(col) & 0xFF;
+      if (!ml) { detail.push(`c${col}:blank(f=${f[col-1]})`); if (f[col-1] > 0) ok = false; continue; }
+      const nc = pop(ml) + ((E.bufcHi(col) >> 4) & 1);
+      const base = 16;                                   // seg_balance off -> identity duty
+      let exp = Math.floor((Math.floor((base * 16 + 8) / 16) * f[col-1] + 8) / 16);
+      if (f[col-1] && ml && !exp) exp = 1;
+      let lit = 0;
+      for (let k = 0; k < 16; k++) if ((E.bufcLo(col + 5 * k) & 0xFF) === ml) lit++;
+      detail.push(`c${col}: f=${f[col-1]} exp=${exp} lit=${lit}`);
+      if (lit !== exp) ok = false;
+    }
+    // DP on the seconds column follows digit_bright[3]
+    const mh0 = E.bufcHi(0) & 0xFF;
+    if (mh0 & DP) {
+      let expDp = Math.floor((16 * f[3] + 8) / 16); if (f[3] && !expDp) expDp = 1; if (!f[3]) expDp = 0;
+      let litDp = 0;
+      for (let k = 0; k < 16; k++) if (E.bufcHi(5 * k) & DP) litDp++;
+      detail.push(`dp: f=${f[3]} exp=${expDp} lit=${litDp}`);
+      if (litDp !== expDp) ok = false;
+    }
+    check('fade: sub-second duty tracks digit_bright (mirror active with seg_balance OFF)', ok, detail.join(' '));
+  }
+  // deep holdover: fully-faded digits go BLACK in the masters (blank, not dash glyph 0x40).
+  // setPrecision applies the blanking at the next second boundary — drive a full second.
+  forceHold(2000000); drive(1200);
+  const deepF = [0, 1, 2].map(k => Math.round(digitFade(k) * 16 / 255));
+  if (deepF.every(v => v === 0)) {
+    const blank = [1, 2, 3].every(c => (E.bufcLo(c) & 0xFF) === 0);
+    check('fade: zero-significance digits are BLANK (fade to black, not dash)', blank,
+      `masters=${[1,2,3].map(c => (E.bufcLo(c) & 0xFF).toString(16)).join(',')}`);
+  } else check('fade: deep holdover reached zero significance', false, `f=${deepF}`);
+  // composition: fade + seg_balance auto together still verifies duty coherently
+  E.configLine('seg_balance = on');
+  forceHold(0); drive(1200);   // a full second: PendSV re-latches the sub-second digits
+  verify(autoK(4095), 'fade off (relock) + auto balance resumes');
+}
+
 let all = true;
 for (const r of results) { if (!r.pass) all = false; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.x ? '  [' + r.x + ']' : ''}`); }
 console.log(all ? '\nALL PASS' : '\nSOME FAILED');
