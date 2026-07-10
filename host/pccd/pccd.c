@@ -14,10 +14,11 @@
 //            GetBusFrameNumberWithTime places the same frame on the host clock in hardware, so
 //            the PPS instant lands on the host clock immune to USB delivery jitter
 //            (~100-175 us vs ~6 ms naive).             chrony precision 1e-4.
-//   Linux  — no userspace API names a SOF frame, so the fallback stamps the $PMTXTS arrival
-//            instead: the sentence is emitted within ~2 ms of the edge, so accuracy is limited
-//            by USB CDC delivery (a few ms, slightly late-biased; trim with -o).
-//                                                       chrony precision 1e-2.
+//   Linux  — no userspace API names a SOF frame, so pccd reconstructs the anchor by SOF-clock
+//            REGRESSION: the device SOF counter is locked to the host 1 ms frame clock, so
+//            regressing arrival-time vs frame-number (both in $PMTXTS) recovers host-time-of-frame
+//            and the delivery jitter averages out. Logs [reg] warm, [arr] cold. A constant
+//            delivery bias remains (trim with -o).      chrony precision 1e-2 (improving).
 //   The same fallback also covers macOS when the USB frame clock can't be opened.
 //   offset(chrony) = (PPS true time = the $PMTXTS epoch second) - (host wall time of the edge).
 //
@@ -41,7 +42,7 @@
 #define _GNU_SOURCE                       /* strcasestr on glibc — must precede all includes */
 #endif
 
-#define PCCD_VERSION "0.2"
+#define PCCD_VERSION "0.3-dev"
 
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -298,6 +299,56 @@ static void chrony_send(double wall_of_pps, double offset){
     fprintf(stderr,"[pccd] chrony SOCK send failed (%s) — feed lost, reconnecting (did chronyd restart?)\n",strerror(errno));
     close(g_chrony); g_chrony=-1;
   }
+}
+
+// ---- SOF-clock regression (Linux [sof]-class path; validated against IOKit on macOS) --------------
+// The firmware names, for each PPS, the USB SOF frame nearest the edge and the DWT cycle offset from
+// that SOF to the edge. macOS learns that frame's host time from IOKit; Linux has no such API — but
+// the device's SOF counter is driven by the host's 1 ms SOF packets, so it is locked to the host
+// clock. Regressing sentence-arrival-time against the (unwrapped) frame number over a sliding window
+// recovers the host frame period (slope) and phase (intercept), giving host-time-of-frame for any
+// frame; the random USB delivery jitter averages out in the fit, leaving only a constant delivery
+// bias (folded into -o, exactly as raw arrival is). Then, using the firmware's cycle counts,
+//   PPS host time = fit(sof_frame) + (dwt_pps - dwt_sof) / f_dwt.
+// This is the macOS SOF correlation reproduced in pure userspace — no root, no usbmon, no kernel
+// module — from fields already on the wire. On macOS we run it beside the IOKit anchor purely to
+// measure it against hardware truth (reg_dsum/dsq below); production there still uses IOKit.
+#define REG_WIN 300          // ~5 min of 1 Hz samples in the fit window
+#define REG_MIN 40           // fit is trusted only past this many samples (else caller uses arrival)
+static double reg_frame[REG_WIN], reg_tarr[REG_WIN];
+static int    reg_n=0, reg_idx=0;
+static double reg_mono_frame=0;                 // running unwrapped 11-bit frame count
+static int    reg_have_prev=0; static unsigned reg_prev_raw=0; static double reg_prev_epoch=0;
+static double reg_rate=1000.0;                  // frames/sec estimate, for wrap disambiguation
+static double reg_dsum=0, reg_dsq=0; static long reg_dn=0;   // macOS validation: reg-vs-IOKit delta
+static void reg_reset(void){ reg_n=0; reg_idx=0; reg_have_prev=0; reg_mono_frame=0; reg_rate=1000.0; }
+// Feed one PPS sample; return the reconstructed PPS host-mono-ns, or NAN until REG_MIN history.
+static double reg_pps_mono(unsigned sof_raw, uint32_t dwt_pps, uint32_t dwt_sof,
+                           double epoch, double t_arr_mono, double f_dwt){
+  if (!reg_have_prev){ reg_mono_frame = sof_raw; reg_have_prev = 1; }
+  else {
+    long dr = (long)((sof_raw - reg_prev_raw) & 0x7FF);       // 0..2047 low-side delta
+    double egap = epoch - reg_prev_epoch;
+    if (egap > 0.5 && egap < 3600){                           // place multi-second holes via epoch
+      double k = (egap*reg_rate - (double)dr)/2048.0;         // wraps the &0x7FF mask hid
+      dr += 2048L * (long)(k + (k>=0?0.5:-0.5));
+      if (dr < 0) dr = (long)((sof_raw - reg_prev_raw) & 0x7FF);
+    }
+    reg_mono_frame += (double)dr;
+  }
+  reg_prev_raw = sof_raw; reg_prev_epoch = epoch;
+  reg_frame[reg_idx]=reg_mono_frame; reg_tarr[reg_idx]=t_arr_mono;
+  reg_idx=(reg_idx+1)%REG_WIN; if (reg_n<REG_WIN) reg_n++;
+  if (reg_n < REG_MIN) return NAN;
+  double Sx=0,Sy=0,Sxx=0,Sxy=0;
+  for (int i=0;i<reg_n;i++){ double f=reg_frame[i],t=reg_tarr[i]; Sx+=f; Sy+=t; Sxx+=f*f; Sxy+=f*t; }
+  double den = (double)reg_n*Sxx - Sx*Sx;
+  if (den <= 0) return NAN;
+  double b = ((double)reg_n*Sxy - Sx*Sy)/den;                 // ns per frame (~1e6)
+  double a = (Sy - b*Sx)/reg_n;
+  if (b > 0.5e6 && b < 2.0e6) reg_rate = 1e9/b;               // refine frames/sec from the slope
+  double sof_mono = a + b*reg_mono_frame;                     // host mono-ns of this SOF (+const bias)
+  return sof_mono + (double)(int32_t)(dwt_pps-dwt_sof)/f_dwt*1e9;
 }
 
 // ---- sample prefilter -----------------------------------------------------------------------------
@@ -588,7 +639,7 @@ int main(int argc, char **argv){
 #else
         fprintf(stderr,"[pccd] serial open: %s  (arrival timestamps — Linux has no USB frame clock; ~ms accuracy)\n",dev);
 #endif
-        havePrev=0; haveRate=0; li=0; pf_reset();
+        havePrev=0; haveRate=0; li=0; pf_reset(); reg_reset();
       } else next_retry = now_mono_ns()+2e9;
     }
     chrony_try_connect();
@@ -640,15 +691,25 @@ int main(int argc, char **argv){
               if (x.ext){ prevDwt=x.dwt_pps; havePrev=1; }
               if (x.flags==7){
                 double pps_wall; const char *how;
+                // Portable SOF-regression anchor (runs on every platform when the SOF fields + a
+                // DWT-rate estimate are present). NAN until it has REG_MIN history.
+                double reg_mono = (x.ext && haveRate)
+                  ? reg_pps_mono(x.sof_frame, x.dwt_pps, x.dwt_sof, (double)x.epoch, rx_mono, f_dwt)
+                  : NAN;
                 if (x.ext && gotF && haveRate){
-                  // SOF path: place the named frame on the host clock, then step DWT ticks to the edge.
+                  // IOKit hardware anchor — macOS production, and the ground truth we grade the
+                  // regression against: place the named frame on the host clock, step DWT to the edge.
                   long dframe=(long)((x.sof_frame-(unsigned)(hf&0x7FF))&0x7FF);
                   if (dframe>1024) dframe-=2048;
                   double sof_mono = hmono + (double)dframe*1.0e6;             // 1 frame = 1 ms
                   double pps_mono = sof_mono + (double)(int32_t)(x.dwt_pps-x.dwt_sof)/f_dwt*1e9;
                   pps_wall = wall_of_mono_ns(pps_mono); how="sof";
+                  if (!isnan(reg_mono)){ double d=pps_mono-reg_mono; reg_dsum+=d; reg_dsq+=d*d; reg_dn++; }
+                } else if (!isnan(reg_mono)){
+                  // No hardware frame clock (Linux) but the regression is warm — reconstruct the edge.
+                  pps_wall = wall_of_mono_ns(reg_mono); how="reg";
                 } else {
-                  // Arrival path: the sentence lands a few ms after the edge it names.
+                  // Cold start / no SOF fields: the sentence lands a few ms after the edge it names.
                   pps_wall = wall_of_mono_ns(rx_mono); how="arr";
                 }
                 double offset = (double)x.epoch - pps_wall + opt_trim;        // true - system
@@ -670,6 +731,8 @@ int main(int argc, char **argv){
     }
   }
   fprintf(stderr,"[pccd] exiting — %ld PPS samples processed, %ld usable, %ld sent as avg%d groups, %ld outliers rejected\n",nseen,nsent,pf_groups,PF_AGG,pf_rejects);
+  if (reg_dn>0){ double m=reg_dsum/reg_dn, v=reg_dsq/reg_dn-m*m; if(v<0)v=0;
+    fprintf(stderr,"[pccd] SOF-regression vs IOKit anchor: n=%ld  bias=%+.1fus  jitter(RMS about mean)=%.1fus\n",reg_dn,m*1e-3,sqrt(v)*1e-3); }
   if (sfd>=0) close(sfd);
   usb_close();
   if (g_chrony>=0) close(g_chrony);

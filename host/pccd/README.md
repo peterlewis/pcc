@@ -76,10 +76,17 @@ its DWT cycle counter at the true PPS edge *and* at a named USB SOF frame.
   agrees with the driver-supplied `GetBusFrameNumberWithTime` anchor to
   −2…−8 µs on bench hardware (`pccd -T` prints the comparison live).
   Samples log as `[sof]`.
-- **Linux**: no userspace API names a SOF frame, so pccd stamps the $PMTXTS
-  *arrival* instead. The sentence is emitted within ~2 ms of the edge; accuracy
-  is a few ms, slightly late-biased (trim with `-o`, e.g. `-o 0.003`). Samples
-  log as `[arr]`. Still far better than internet NTP for a LAN.
+- **Linux**: no userspace API names a SOF frame, so pccd reconstructs the
+  anchor by **SOF-clock regression** (v0.3) — the device's SOF counter is
+  locked to the host's 1 ms frame clock, so regressing sentence-arrival-time
+  against the frame number (both already in `$PMTXTS`) over a sliding window
+  recovers host-time-of-frame; the random USB delivery jitter averages out in
+  the fit. `PPS = fit(sof_frame) + (dwt_pps−dwt_sof)/f_dwt`. This is the macOS
+  correlation in pure userspace — no root, no usbmon, no kernel module. Samples
+  log as `[reg]` once the fit is warm (~40 s), `[arr]` (plain arrival stamp)
+  before that. A constant delivery-latency bias remains — trim with `-o`. The
+  macOS build runs the regression beside the IOKit anchor and prints its error
+  vs that hardware truth at exit (`SOF-regression vs IOKit anchor: … jitter …`).
 
 ### Sample prefilter (v0.2, both platforms)
 
@@ -118,11 +125,11 @@ ladder of ways to approximate it:
 
 | Tier | Mechanism | Expected accuracy | Needs |
 |---|---|---|---|
-| 0 | **Min-filter** — delivery latency is one-sided (floor + positive noise), so track the leading edge of the offset distribution instead of averaging. chrony's own refclock `filter` is a median and [handles one-sided distributions poorly](https://chrony-users.chrony.tuxfamily.narkive.com/R927UEDz/chrony-configuration-with-gps-direct-phc), so this belongs in pccd, upstream of the SOCK feed. | 0.1–1 ms, host-dependent | nothing |
-| 1 | **usbmon arrival stamping** — the [usbmon binary API](https://docs.kernel.org/usb/usbmon.html) timestamps the bulk completion carrying `$PMTXTS` in the USB core, before cdc_acm/tty/scheduler; residual jitter ≈ xHCI interrupt moderation (≤40 µs default; no stock knob on x86 PCI hosts) plus a load tail. | ~40–100 µs | root, `CONFIG_USB_MON` |
-| 2 | **SOF-clock regression** — the host controller generates SOFs every 1.000 ms from its own crystal and the firmware timestamps them, so frame-number→host-time can be fitted over many min-filtered samples and per-sample delivery jitter averages out (the uvcvideo driver uses this exact cross-domain pattern). Prior art suggests the numbers are real: [±5 µs long-term stability from an STM32 CDC device](https://blog.dan.drown.org/pps-over-usb/), [~2 µs on a good USB3 host](https://digitalnigel.com/wordpress/?p=3449). | ~10–50 µs | builds on 1 |
-| 3 | **debugfs MFINDEX anchor** (optional) — edge-detect the 125 µs microframe counter via [xHCI debugfs](https://github.com/torvalds/linux/blob/master/drivers/usb/host/xhci-debugfs.c) to calibrate tier 2's static offset; unstable ABI, feature-detect only. | validates tier 2 | root + debugfs |
-| 4 | **Out-of-tree kernel module** returning an atomic (frame, timestamp) pair — the exact macOS semantic. Only worth it if tier 2 measurably falls short. | µs-class | DKMS |
+| 0 | **Min-filter / prefilter** — ✅ **shipped (v0.2)**. Delivery latency is one-sided, and chrony's own refclock `filter` is a median that [handles one-sided distributions poorly](https://chrony-users.chrony.tuxfamily.narkive.com/R927UEDz/chrony-configuration-with-gps-direct-phc), so pccd rejects outliers and trims-means upstream of the SOCK feed. | 0.1–1 ms, host-dependent | nothing |
+| 2 | **SOF-clock regression** — ✅ **shipped (v0.3)**. Regress arrival-time against the firmware's `sof_frame` (locked to the host's 1 ms frame clock), evaluate at the PPS frame, add the DWT cycle offset. The macOS correlation in pure userspace — no privileges. Turned out to *not* need tier 1 underneath. Accuracy validated against the macOS IOKit anchor (see the timing section). | ~tens of µs (measured on macOS) | nothing |
+| 1 | **usbmon arrival stamping** — the [usbmon binary API](https://docs.kernel.org/usb/usbmon.html) timestamps the bulk completion carrying `$PMTXTS` in the USB core, before cdc_acm/tty/scheduler. Now an *optional refinement*: it cleans the regression's input (less jitter to average out), not a prerequisite. | tightens tier 2 | root, `CONFIG_USB_MON` |
+| 3 | **debugfs MFINDEX anchor** (optional) — edge-detect the 125 µs microframe counter via [xHCI debugfs](https://github.com/torvalds/linux/blob/master/drivers/usb/host/xhci-debugfs.c) to pin tier 2's static bias directly; unstable ABI, feature-detect only. | removes tier 2's bias | root + debugfs |
+| 4 | **Out-of-tree kernel module** returning an atomic (frame, timestamp) pair — the exact macOS semantic. Only worth it if tiers 2–3 measurably fall short. | µs-class | DKMS |
 
 Working notes for whoever picks this up:
 
