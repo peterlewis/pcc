@@ -76,6 +76,50 @@ its DWT cycle counter at the true PPS edge *and* at a named USB SOF frame.
   is a few ms, slightly late-biased (trim with `-o`, e.g. `-o 0.003`). Samples
   log as `[arr]`. Still far better than internet NTP for a LAN.
 
+## Linux accuracy — considerations (macOS-first, for now)
+
+Development has focused on macOS, where IOKit's `GetBusFrameNumberWithTime`
+pairs a SOF frame number with a hardware host timestamp in one call — that is
+the whole trick behind the ~±70 µs result. Linux never plumbed its equivalent
+kernel primitive (`usb_get_current_frame_number()`) through to userspace: a
+[`USBDEVFS_GETFRAMENUM` patch was proposed in 2007](https://www.spinics.net/lists/linux-usb-devel/msg04458.html)
+and died unmerged, current
+[uapi headers](https://github.com/torvalds/linux/blob/master/include/uapi/linux/usbdevice_fs.h)
+carry no frame ioctl, and the URB `start_frame` field is populated for
+isochronous transfers only — which CDC ACM doesn't have. Hence today's
+arrival-timestamp fallback.
+
+Parity looks reachable regardless. The firmware already emits everything the
+host needs (`$PMTXTS` names a SOF frame and gives DWT cycle offsets from it to
+the PPS edge); what's missing is host-side frame↔time pairing, and there is a
+ladder of ways to approximate it:
+
+| Tier | Mechanism | Expected accuracy | Needs |
+|---|---|---|---|
+| 0 | **Min-filter** — delivery latency is one-sided (floor + positive noise), so track the leading edge of the offset distribution instead of averaging. chrony's own refclock `filter` is a median and [handles one-sided distributions poorly](https://chrony-users.chrony.tuxfamily.narkive.com/R927UEDz/chrony-configuration-with-gps-direct-phc), so this belongs in pccd, upstream of the SOCK feed. | 0.1–1 ms, host-dependent | nothing |
+| 1 | **usbmon arrival stamping** — the [usbmon binary API](https://docs.kernel.org/usb/usbmon.html) timestamps the bulk completion carrying `$PMTXTS` in the USB core, before cdc_acm/tty/scheduler; residual jitter ≈ xHCI interrupt moderation (≤40 µs default; no stock knob on x86 PCI hosts) plus a load tail. | ~40–100 µs | root, `CONFIG_USB_MON` |
+| 2 | **SOF-clock regression** — the host controller generates SOFs every 1.000 ms from its own crystal and the firmware timestamps them, so frame-number→host-time can be fitted over many min-filtered samples and per-sample delivery jitter averages out (the uvcvideo driver uses this exact cross-domain pattern). Prior art suggests the numbers are real: [±5 µs long-term stability from an STM32 CDC device](https://blog.dan.drown.org/pps-over-usb/), [~2 µs on a good USB3 host](https://digitalnigel.com/wordpress/?p=3449). | ~10–50 µs | builds on 1 |
+| 3 | **debugfs MFINDEX anchor** (optional) — edge-detect the 125 µs microframe counter via [xHCI debugfs](https://github.com/torvalds/linux/blob/master/drivers/usb/host/xhci-debugfs.c) to calibrate tier 2's static offset; unstable ABI, feature-detect only. | validates tier 2 | root + debugfs |
+| 4 | **Out-of-tree kernel module** returning an atomic (frame, timestamp) pair — the exact macOS semantic. Only worth it if tier 2 measurably falls short. | µs-class | DKMS |
+
+Working notes for whoever picks this up:
+
+- Naive arrival stamping is wildly host-controller dependent — measured
+  [anywhere from ~2 µs to 350 µs to milliseconds](https://digitalnigel.com/wordpress/?p=3449)
+  across machines — so measure a given host before assuming the worst; `-o`
+  trims the constant part.
+- usbmon records use `CLOCK_REALTIME` at µs resolution (the very clock chrony
+  is steering — handle steps), and its device nodes are deliberately
+  root-only.
+- The frame number the device sees in SOF packets and the host's MFINDEX>>3
+  may differ by a small fixed offset depending on controller/hub topology —
+  calibrate once empirically rather than assuming equality.
+- Don't bother adding an ISO endpoint to the firmware just to harvest URB
+  `start_frame`, and there is no FTDI-style latency timer to tune on native
+  CDC ACM.
+- Validate every tier against the macOS SOF result with the same clock before
+  claiming a number.
+
 ## chrony setup
 
 In `/etc/chrony/chrony.conf` (Linux) or `/opt/homebrew/etc/chrony.conf`
