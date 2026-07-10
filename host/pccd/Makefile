@@ -3,6 +3,8 @@ CFLAGS ?= -O2 -Wall -Wextra
 UNAME  := $(shell uname -s)
 ifeq ($(UNAME),Darwin)
 LDLIBS = -framework IOKit -framework CoreFoundation
+else
+LDLIBS = -lm
 endif
 
 pccd: pccd.c

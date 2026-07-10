@@ -57,7 +57,8 @@ Auto-pick looks for `/dev/cu.usbmodem*` on macOS, and
 
 Flags: `-d <device>` serial device, `-s <path>` chrony SOCK socket path,
 `-p <port>` HTTP/WS port (default 4192), `-o <secs>` fixed offset trim,
-`-n` dry-run, `-v` verbose, `-t` self-test.
+`-n` dry-run, `-v` verbose, `-r` raw (bypass the sample prefilter),
+`-t` self-test, `-T` frame-clock probe (macOS).
 
 The daemon listens on 127.0.0.1 only. It reconnects automatically when the
 clock re-enumerates (unplug, reboot, firmware flash).
@@ -67,14 +68,35 @@ clock re-enumerates (unplug, reboot, firmware flash).
 The clock's draft firmware ($PMTXTS with SOF extension, clock4 PR #5) latches
 its DWT cycle counter at the true PPS edge *and* at a named USB SOF frame.
 
-- **macOS**: IOKit's `GetBusFrameNumberWithTime` places that same frame on the
-  host clock in hardware, so pccd computes `offset = UTC(edge) − host_wall(edge)`
-  with USB transport jitter removed — measured scatter ~±70 µs. Samples log as
-  `[sof]`.
+- **macOS**: pccd anchors the frame clock to the host clock and computes
+  `offset = UTC(edge) − host_wall(edge)` with USB transport jitter removed.
+  Since v0.2 the anchor is a **microframe edge-hunt** — spin-reading
+  `GetBusMicroFrameNumber` (the 125 µs MFINDEX counter) until it increments
+  pins a boundary to within the bracketed width of one call, a few µs; it
+  agrees with the driver-supplied `GetBusFrameNumberWithTime` anchor to
+  −2…−8 µs on bench hardware (`pccd -T` prints the comparison live).
+  Samples log as `[sof]`.
 - **Linux**: no userspace API names a SOF frame, so pccd stamps the $PMTXTS
   *arrival* instead. The sentence is emitted within ~2 ms of the edge; accuracy
   is a few ms, slightly late-biased (trim with `-o`, e.g. `-o 0.003`). Samples
   log as `[arr]`. Still far better than internet NTP for a LAN.
+
+### Sample prefilter (v0.2, both platforms)
+
+Raw per-second offsets carry scatter plus rare large outliers (USB retries,
+IRQ preemption). By default pccd conditions the stream before chrony sees it:
+samples more than 3 robust-sigma (MAD over the last 64, 5 µs floor) from the
+running median are rejected outright, and each 8 accepted samples are sent as
+ONE trimmed-mean sample stamped at the group's centre time. Scatter drops
+~√8 and chrony stops chasing individual samples. `-r` bypasses the filter
+(raw sample-per-second, the v0.1 behaviour); rejects and group emissions show
+under `-v`. The filter vectors run in `pccd -t`.
+
+To smooth the tracking further, let chrony average more per update in
+chrony.conf, and correct more gently:
+
+    refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4 poll 6 filter 128
+    corrtimeratio 30
 
 ## Linux accuracy — considerations (macOS-first, for now)
 

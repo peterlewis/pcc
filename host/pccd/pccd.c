@@ -30,7 +30,9 @@
 //           -o  fixed offset trim in seconds, added to every sample (arrival-mode latency, e.g. 0.003)
 //           -n  dry run: print offsets, never write to chrony
 //           -v  verbose per-sample logging
-//           -t  self-test (SHA-1 / handshake vectors) and exit
+//           -r  raw: bypass the sample prefilter (outlier gate + trimmed-mean aggregation)
+//           -t  self-test (SHA-1 / handshake / prefilter vectors) and exit
+//           -T  frame probe: burst-read the USB frame clock and report bracket widths (macOS)
 //
 // chrony.conf:   refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4
 // (run chronyd first so it creates the socket; pccd connects when it appears.)
@@ -39,7 +41,7 @@
 #define _GNU_SOURCE                       /* strcasestr on glibc — must precede all includes */
 #endif
 
-#define PCCD_VERSION "0.1"
+#define PCCD_VERSION "0.2"
 
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -58,6 +60,7 @@
 #include <string.h>
 #include <signal.h>
 #include <stdint.h>
+#include <math.h>
 #include <time.h>
 
 #ifdef __APPLE__
@@ -75,6 +78,7 @@ static const char *opt_sock = "/var/run/chrony.pcc.sock";
 static double      opt_trim = 0.0;
 static int         opt_dry  = 0;
 static int         opt_verb = 0;
+static int         opt_raw  = 0;
 
 // ---- monotonic time + wall mapping ---------------------------------------------------------------
 // One monotonic nanosecond clock for retry timers, arrival stamps and (on macOS) the IOKit frame
@@ -126,16 +130,91 @@ static int usb_open(long wantV, long wantP){
   IOObjectRelease(it); return -1;
 }
 static void usb_close(void){ if (g_usb){ (*g_usb)->Release(g_usb); g_usb=NULL; } }
+// Read the bus frame clock as (frame number, host mono-ns of that frame's start).
+//
+// Preferred path — microframe EDGE-HUNT: IOUSBDeviceInterface500 exposes GetBusMicroFrameNumber
+// (the xHCI MFINDEX 125 us counter paired with a time-of-read, NOT a hardware anchor). Spin-read
+// until the counter increments: the transition pins a microframe boundary to the host clock to
+// within the bracketed width of ONE call (a few us), an 8x finer and self-validating anchor than
+// GetBusFrameNumberWithTime's driver-supplied SOF pairing. Reads bracketed with mach timestamps;
+// a wide bracket means preemption mid-call, so hunt again and keep the tightest edge.
+// Fallback — GetBusFrameNumberWithTime (the proven +/-70 us harness path) when microframes are
+// unavailable or the hunt keeps getting preempted.
+static int g_no_micro = 0;
 static int usb_frame(uint64_t *frame, double *host_mono_ns){
+  if (!g_usb) return -1;
+  if (!g_no_micro){
+    double best_w=1e18, best_t=0; uint64_t best_m=0; int have=0;
+    for (int hunt=0; hunt<3 && !have; hunt++){
+      UInt64 m0; AbsoluteTime a;
+      if ((*g_usb)->GetBusMicroFrameNumber(g_usb,&m0,&a)!=kIOReturnSuccess){
+        g_no_micro=1; fprintf(stderr,"[pccd] no microframe clock — using 1 ms frame API\n"); break;
+      }
+      // spin across one 125 us boundary (<=200 us worst case per hunt)
+      for (int i=0;i<400;i++){
+        UInt64 m; double t0=now_mono_ns();
+        if ((*g_usb)->GetBusMicroFrameNumber(g_usb,&m,&a)!=kIOReturnSuccess){ g_no_micro=1; break; }
+        double t1=now_mono_ns();
+        if (m!=m0){                                        // the boundary fell inside THIS call
+          double w=t1-t0;
+          if (w<best_w){ best_w=w; best_m=(uint64_t)m; best_t=0.5*(t0+t1); }
+          if (w<20e3) have=1;                              // <20 us bracket: clean edge, done
+          break;
+        }
+      }
+      if (best_w<1e18) have = have || hunt==2;             // after 3 hunts take the tightest seen
+    }
+    if (!g_no_micro && best_w<1e18){
+      // best_m just STARTED at best_t (+/- best_w/2). Anchor at the containing frame's start so
+      // the dframe math downstream is unchanged.
+      *frame = best_m>>3;
+      *host_mono_ns = best_t - (double)(best_m&7)*125e3;
+      return 0;
+    }
+    if (!g_no_micro) return -1;
+  }
   AbsoluteTime a; UInt64 f;
-  if (!g_usb || (*g_usb)->GetBusFrameNumberWithTime(g_usb,&f,&a)!=kIOReturnSuccess) return -1;
+  if ((*g_usb)->GetBusFrameNumberWithTime(g_usb,&f,&a)!=kIOReturnSuccess) return -1;
   *frame = (uint64_t)f;
-  *host_mono_ns = (double)abstime_u64(a)*g_ns; return 0;
+  *host_mono_ns = (double)abstime_u64(a)*g_ns;
+  return 0;
+}
+// -T: open the clock's USB device and print a burst of frame-clock reads with bracket widths —
+// a hardware sanity check for the microframe path without touching the serial port (safe to run
+// while the daemon owns the tty).
+static int frame_probe(void){
+  init_mono();
+  if (usb_open(0x0483,-1)!=0){ fprintf(stderr,"[pccd] frame probe: no STM32 USB device found\n"); return 1; }
+  fprintf(stderr,"[pccd] frame probe — microframe edge-hunt vs GetBusFrameNumberWithTime:\n");
+  fprintf(stderr,"  (delta = edge-hunt anchor minus WithTime anchor for the same frame timeline;\n"
+                 "   a stable delta means both clocks agree, its scatter shows which is cleaner)\n");
+  for (int i=0;i<8;i++){
+    uint64_t fm; double tm;
+    int mok = usb_frame(&fm,&tm)==0 && !g_no_micro;
+    UInt64 fw; AbsoluteTime a;
+    int wok = (*g_usb)->GetBusFrameNumberWithTime(g_usb,&fw,&a)==kIOReturnSuccess;
+    if (!mok || !wok){
+      fprintf(stderr,"  micro=%s withtime=%s\n", mok?"ok":"FAIL", wok?"ok":"FAIL");
+      if (!wok){ usb_close(); return 1; }
+    } else {
+      double tw=(double)abstime_u64(a)*g_ns;
+      // both anchors name a frame start on the same mono clock: project WithTime's anchor onto
+      // the edge-hunted frame and difference them.
+      double delta_us = (tm - (tw + (double)((int64_t)(fm-(uint64_t)fw))*1e6))*1e-3;
+      fprintf(stderr,"  frame=%8llu  edge-hunt=%.6fs  withtime(frame %llu)=%.6fs  delta=%+8.1fus\n",
+              (unsigned long long)fm, tm*1e-9, (unsigned long long)fw, tw*1e-9, delta_us);
+    }
+    struct timespec ts={0,250*1000*1000}; nanosleep(&ts,NULL);   // 250 ms between reads
+  }
+  usb_close();
+  fprintf(stderr,"[pccd] frame probe done (%s)\n", g_no_micro?"frame API — microframes unavailable":"microframe edge-hunt active");
+  return 0;
 }
 #else
 static int  usb_open(long wantV, long wantP){ (void)wantV; (void)wantP; return -1; }
 static void usb_close(void){}
 static int  usb_frame(uint64_t *frame, double *host_mono_ns){ (void)frame; (void)host_mono_ns; return -1; }
+static int  frame_probe(void){ fprintf(stderr,"[pccd] frame probe: no USB frame clock on this platform (macOS only)\n"); return 1; }
 #endif
 
 // ---- serial (read-write: PCC commands flow back through us) --------------------------------------
@@ -221,6 +300,66 @@ static void chrony_send(double wall_of_pps, double offset){
   }
 }
 
+// ---- sample prefilter -----------------------------------------------------------------------------
+// Raw per-second offsets carry ~tens-of-us scatter (SOF path) or worse (arrival path), plus rare
+// large outliers from USB retries / IRQ preemption. chrony's refclock median filter handles neither
+// one-sided tails nor slew-chasing well, so condition the stream here first:
+//   gate      — reject any sample more than 3 robust-sigma (MAD-estimated over the last PF_WIN raw
+//               offsets, 5 us floor) from the running median; outliers never reach chrony.
+//   aggregate — accumulate PF_AGG accepted samples, send ONE sample per group: trimmed mean of the
+//               offsets (drop top/bottom quarter) stamped at the group's centre time, so local
+//               clock drift across the group cancels to first order.
+// Scatter drops ~sqrt(PF_AGG) and chrony's updates stop chasing individual samples. -r bypasses.
+#define PF_WIN 64
+#define PF_AGG 8
+static double pf_ring[PF_WIN]; static int pf_cnt=0, pf_idx=0;
+static double pf_at[PF_AGG], pf_ao[PF_AGG]; static int pf_an=0;
+static long   pf_rejects=0, pf_groups=0;
+static void (*pf_sink)(double wall, double off) = NULL;   // production: chrony; self-test: recorder
+static int dbl_cmp(const void *a, const void *b){
+  double x=*(const double*)a, y=*(const double*)b; return x<y?-1:(x>y?1:0);
+}
+static double median_inplace(double *v, int n){
+  qsort(v,n,sizeof(double),dbl_cmp);
+  return (n&1) ? v[n/2] : 0.5*(v[n/2-1]+v[n/2]);
+}
+static void pf_reset(void){ pf_cnt=0; pf_idx=0; pf_an=0; }
+static void pf_push(double wall, double off){
+  int rejected = 0;
+  if (pf_cnt >= 16){
+    double tmp[PF_WIN], dev[PF_WIN];
+    memcpy(tmp,pf_ring,pf_cnt*sizeof(double));
+    double med = median_inplace(tmp,pf_cnt);
+    for (int i=0;i<pf_cnt;i++) dev[i]=fabs(pf_ring[i]-med);
+    double sig = 1.4826*median_inplace(dev,pf_cnt);       // MAD -> sigma for a normal core
+    if (sig < 5e-6) sig = 5e-6;                           // floor: never gate tighter than 5 us
+    if (fabs(off-med) > 3.0*sig){
+      rejected = 1; pf_rejects++;
+      if (opt_verb) fprintf(stderr,"[pccd] prefilter REJECT offset=%+11.6fs (median %+11.6fs, gate %.0fus)\n",off,med,3.0*sig*1e6);
+    }
+  }
+  pf_ring[pf_idx]=off; pf_idx=(pf_idx+1)%PF_WIN; if (pf_cnt<PF_WIN) pf_cnt++;
+  if (rejected) return;
+  pf_at[pf_an]=wall; pf_ao[pf_an]=off; pf_an++;
+  if (pf_an < PF_AGG) return;
+  double o[PF_AGG]; memcpy(o,pf_ao,sizeof o);
+  qsort(o,PF_AGG,sizeof(double),dbl_cmp);
+  double so=0; for (int i=PF_AGG/4;i<PF_AGG-PF_AGG/4;i++) so+=o[i];
+  so /= PF_AGG-2*(PF_AGG/4);
+  double st=0; for (int i=0;i<PF_AGG;i++) st+=pf_at[i];
+  st /= PF_AGG;
+  pf_an=0; pf_groups++;
+  if (pf_sink) pf_sink(st,so);
+}
+static double pt_off[16], pt_wall[16]; static int pt_n=0;
+static void pf_test_sink(double wall, double off){ if (pt_n<16){ pt_wall[pt_n]=wall; pt_off[pt_n]=off; pt_n++; } }
+static void pf_emit_chrony(double wall, double off){
+  if (!opt_dry) chrony_send(wall,off);
+  if (opt_verb || opt_dry)
+    fprintf(stderr,"[pccd] avg%d offset=%+11.6fs (trimmed mean %s chrony)%s\n",
+            PF_AGG, off, (g_chrony>=0&&!opt_dry)?"->":"-x", opt_dry?"  [dry]":"");
+}
+
 // ---- SHA-1 (for the RFC 6455 handshake only — NOT a general-purpose crypto hash) ------------------
 // Self-contained so Linux needs no OpenSSL and macOS no CommonCrypto: one code path, both platforms.
 // Verified against the RFC 3174 vectors and the RFC 6455 handshake vector by `pccd -t`.
@@ -287,6 +426,22 @@ static int self_test(void){
   unsigned char d[20]; char acc[64];
   sha1((const unsigned char*)cat,strlen(cat),d); b64(d,20,acc);
   if (strcmp(acc,"s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")){ fprintf(stderr,"WS-accept FAIL: %s\n",acc); fail=1; }
+  // Prefilter vectors: 50 one-second samples around +100 us with +/-2 us deterministic noise and
+  // two 5 ms outliers injected after warm-up. Expect: both outliers gated, 48 accepted samples ->
+  // 6 groups of 8, every trimmed mean within 3 us of truth, centre times mid-group.
+  pf_sink = pf_test_sink; pf_reset(); pf_rejects=0; pf_groups=0;
+  pt_n=0;
+  for (int i=0;i<50;i++){
+    double off = 100e-6 + (double)(i%5 - 2)*1e-6;
+    if (i==25) off = +5e-3;
+    if (i==35) off = -5e-3;
+    pf_push((double)i, off);
+  }
+  if (pf_rejects!=2){ fprintf(stderr,"prefilter FAIL: %ld outliers rejected (want 2)\n",pf_rejects); fail=1; }
+  if (pt_n!=6){ fprintf(stderr,"prefilter FAIL: %d groups emitted (want 6)\n",pt_n); fail=1; }
+  for (int i=0;i<pt_n;i++)
+    if (fabs(pt_off[i]-100e-6) > 3e-6){ fprintf(stderr,"prefilter FAIL: group %d mean %+.6fs (want ~+0.000100s)\n",i,pt_off[i]); fail=1; }
+  pf_sink = NULL; pf_reset(); pf_rejects=0; pf_groups=0;
   fprintf(stderr,"[pccd] self-test %s\n",fail?"FAILED":"OK");
   return fail;
 }
@@ -401,9 +556,12 @@ int main(int argc, char **argv){
     else if (!strcmp(argv[i],"-o") && i+1<argc) opt_trim=atof(argv[++i]);
     else if (!strcmp(argv[i],"-n")) opt_dry=1;
     else if (!strcmp(argv[i],"-v")) opt_verb=1;
+    else if (!strcmp(argv[i],"-r")) opt_raw=1;
     else if (!strcmp(argv[i],"-t")) return self_test();
-    else { fprintf(stderr,"usage: pccd [-d dev] [-p port] [-s chrony.sock] [-o trim_s] [-n dry] [-v] [-t selftest]\n"); return 2; }
+    else if (!strcmp(argv[i],"-T")) return frame_probe();
+    else { fprintf(stderr,"usage: pccd [-d dev] [-p port] [-s chrony.sock] [-o trim_s] [-n dry] [-v] [-r raw] [-t selftest] [-T frameprobe]\n"); return 2; }
   }
+  pf_sink = pf_emit_chrony;
   init_mono();
   signal(SIGINT,on_sig); signal(SIGTERM,on_sig); signal(SIGPIPE,SIG_IGN);
   for (int i=0;i<MAXCLI;i++) g_cli[i].fd=-1;
@@ -430,7 +588,7 @@ int main(int argc, char **argv){
 #else
         fprintf(stderr,"[pccd] serial open: %s  (arrival timestamps — Linux has no USB frame clock; ~ms accuracy)\n",dev);
 #endif
-        havePrev=0; haveRate=0; li=0;
+        havePrev=0; haveRate=0; li=0; pf_reset();
       } else next_retry = now_mono_ns()+2e9;
     }
     chrony_try_connect();
@@ -495,7 +653,8 @@ int main(int argc, char **argv){
                 }
                 double offset = (double)x.epoch - pps_wall + opt_trim;        // true - system
                 if (offset>-0.5 && offset<0.5){
-                  if (!opt_dry) chrony_send(pps_wall,offset);
+                  if (opt_raw){ if (!opt_dry) chrony_send(pps_wall,offset); }
+                  else pf_push(pps_wall,offset);
                   nsent++;
                   if (opt_verb || opt_dry)
                     fprintf(stderr,"[pccd] pps seq=%lu offset=%+11.6fs [%s] (host %s chrony)%s\n",
@@ -510,7 +669,7 @@ int main(int argc, char **argv){
       }
     }
   }
-  fprintf(stderr,"[pccd] exiting — %ld PPS samples processed, %ld usable\n",nseen,nsent);
+  fprintf(stderr,"[pccd] exiting — %ld PPS samples processed, %ld usable, %ld sent as avg%d groups, %ld outliers rejected\n",nseen,nsent,pf_groups,PF_AGG,pf_rejects);
   if (sfd>=0) close(sfd);
   usb_close();
   if (g_chrony>=0) close(g_chrony);
