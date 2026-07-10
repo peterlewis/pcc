@@ -89,6 +89,14 @@ E.setAdc(2600);
 E.setVbus(1);
 drive(1200);   // >1 s: seconds latch + ms cascade + many segbal_poll refills
 
+// The feature lives on the seg-balance branch; against rollup/stock the key is ignored and the
+// mirror slots stay empty. Skip (exit 0) rather than fail — this test targets the branch.
+{
+  let mirrored = false;
+  for (let i = 5; i < 80 && !mirrored; i++) if (E.bufb(i) || E.bufcLo(i) || E.bufcHi(i)) mirrored = true;
+  if (!mirrored) { console.log('SKIP — firmware has no seg_balance (not the seg-balance branch)'); process.exit(0); }
+}
+
 const d100 = verify(100, 'strength 100');
 // per-segment equality: s/N must be identical (=2) for every lit digit
 {

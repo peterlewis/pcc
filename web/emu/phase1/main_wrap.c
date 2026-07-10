@@ -149,7 +149,9 @@ void emu_poll(void){
 #if EMU_HAS_CUCKOO
   cuckoo_poll();             /* scheduler + the 10 ms animation tick (main-loop work) */
 #endif
+#if EMU_HAS_SEGBAL
   segbal_poll();           /* per-segment brightness balance — same main-loop hook as hardware */
+#endif
   monitor_vbus();          /* process any VBUS (fold/power) connect/disconnect this pass */
 }
 

@@ -64,6 +64,10 @@ fi
 if grep -q "significance_fade" "$FW/Core/Src/main.c"; then
   CFLAGS+=(-DEMU_HAS_TEMPCOMP=1)
 fi
+# Per-segment brightness balance lives on the seg-balance branch; rollup/stock lack it.
+if grep -q "segbal_poll" "$FW/Core/Src/main.c"; then
+  CFLAGS+=(-DEMU_HAS_SEGBAL=1)
+fi
 
 echo "[1/3] compile firmware + shim objects from source"
 # astro.c only exists on the astro-pack/rollup branches; building against a leaner branch
