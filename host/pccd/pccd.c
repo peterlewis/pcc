@@ -218,7 +218,7 @@ static int  frame_probe(void){ fprintf(stderr,"[pccd] frame probe: no USB frame 
 #endif
 
 // ---- serial (read-write: PCC commands flow back through us) --------------------------------------
-static char g_devpath[256];
+static char g_devpath[512];   // matches devbuf; /dev/serial/by-id/ paths can be long
 static int serial_open(const char *path){
   int fd = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK);
   if (fd < 0) return -1;
@@ -485,13 +485,13 @@ static void http_or_upgrade(Client *c){
       "Sec-WebSocket-Accept: %s\r\n\r\n",acc);
     if (write(c->fd,resp,n)<0){ close(c->fd); c->fd=-1; return; }
     c->ws=1; c->len=0;
-    char hello[300]; snprintf(hello,sizeof hello,"#PCCD v1 device=%s",g_devpath);
+    char hello[600]; snprintf(hello,sizeof hello,"#PCCD v1 device=%s",g_devpath);
     ws_send_text(c,hello,(int)strlen(hello));
     fprintf(stderr,"[pccd] websocket client connected\n");
     return;
   }
   const char *body, *type;
-  char json[384];
+  char json[700];
   if (strstr(c->buf,"GET /health")){
     snprintf(json,sizeof json,"{\"pccd\":1,\"version\":\"" PCCD_VERSION "\",\"device\":\"%s\",\"chrony\":%s}",
              g_devpath, (g_chrony>=0)?"true":"false");
@@ -548,7 +548,7 @@ static volatile sig_atomic_t g_stop=0;
 static void on_sig(int s){ (void)s; g_stop=1; }
 
 int main(int argc, char **argv){
-  char devbuf[256]={0};
+  char devbuf[512]={0};   // roomy: /dev/serial/by-id/ symlinks can be long
   for (int i=1;i<argc;i++){
     if (!strcmp(argv[i],"-d") && i+1<argc) opt_dev=argv[++i];
     else if (!strcmp(argv[i],"-p") && i+1<argc) opt_port=atoi(argv[++i]);
