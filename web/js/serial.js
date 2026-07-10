@@ -204,3 +204,100 @@ export class Clock extends EventTarget {
         }
     }
 }
+
+/// BridgeClock — the same Clock surface over the pccd local bridge daemon (host/pccd).
+///
+/// pccd owns the physical serial port ONCE and fans it out: chrony gets the SOF-corrected PPS
+/// (stratum-1 for the machine), and any number of PCC tabs get the raw NMEA line stream over a
+/// localhost WebSocket, with commands flowing back. No port contention, no picker, works in
+/// browsers without Web Serial. Protocol: text frames of raw lines both ways; the first frame
+/// is "#PCCD v1 device=<path>".
+export class BridgeClock extends EventTarget {
+    static PORT = 4192;
+
+    /// Is the daemon running? Resolves { device } or null. Fast (350 ms cap) so the connect
+    /// button can probe it inline without noticeable delay.
+    static async detect() {
+        try {
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), 350);
+            const r = await fetch(`http://127.0.0.1:${BridgeClock.PORT}/health`, { signal: ctrl.signal });
+            clearTimeout(t);
+            if (!r.ok) return null;
+            const j = await r.json();
+            return j && j.pccd ? j : null;
+        } catch { return null; }
+    }
+
+    static isSupported() { return typeof WebSocket !== 'undefined'; }
+
+    constructor() { super(); this.ws = null; this.device = ''; this.nmeaConsumers = 0; this._closing = false; }
+
+    describe() { return 'PCC BRIDGE · ' + (this.device || `localhost:${BridgeClock.PORT}`); }
+
+    async connect() {
+        await new Promise((resolve, reject) => {
+            const ws = new WebSocket(`ws://127.0.0.1:${BridgeClock.PORT}`);
+            // Resolve on the daemon's hello frame (immediate after upgrade) rather than onopen,
+            // so describe() already knows the device path when the caller stamps the port label.
+            // The timeout is a safety net for a daemon too old to send a hello.
+            let settled = false;
+            const settle = () => { if (!settled) { settled = true; this.ws = ws; resolve(); } };
+            ws.onopen = () => setTimeout(settle, 400);
+            ws.onerror = () => { if (!settled) { settled = true; reject(new Error('pccd bridge not reachable on localhost:' + BridgeClock.PORT)); } };
+            ws.onmessage = (e) => {
+                const text = String(e.data);
+                if (text.startsWith('#PCCD')) {
+                    const m = text.match(/device=(\S+)/);
+                    if (m) this.device = m[1];
+                    settle();
+                }
+                // serial lines carry their trailing newline (Clock._readLoop slices inclusive) — match it
+                this.dispatchEvent(new CustomEvent('line', { detail: text + '\n' }));
+            };
+            ws.onclose = () => {
+                const wasOpen = this.ws === ws;
+                this.ws = null;
+                if (wasOpen && !this._closing)
+                    this.dispatchEvent(new CustomEvent('status', { detail: { connected: false, message: 'bridge connection lost' } }));
+            };
+        });
+        this.dispatchEvent(new CustomEvent('status', { detail: { connected: true, message: 'Connected via bridge' } }));
+        // Behaviour parity with the direct transport: quiet the firehose until requestNMEA().
+        this.send('nmea = off');
+    }
+
+    async disconnect() {
+        this._closing = true;
+        try {
+            // Same courteous teardown as the direct transport.
+            this.send('mode_text = 0');
+            this.send('mode_countdown = 0');
+            this.send('nmea = all');
+        } catch { /* disconnecting anyway */ }
+        try { if (this.ws) this.ws.close(); } catch { /* ignore */ }
+        this.ws = null;
+        this.nmeaConsumers = 0;
+        this.dispatchEvent(new CustomEvent('status', { detail: { connected: false, message: 'Disconnected' } }));
+    }
+
+    send(command) {
+        if (!this.ws || this.ws.readyState !== 1) return;
+        const sanitised = [...command].filter(ch => {
+            const c = ch.charCodeAt(0);
+            return c === 0x20 || (c >= 0x21 && c < 0x7F);
+        }).join('');
+        try { this.ws.send(sanitised); } catch (err) {
+            this.dispatchEvent(new CustomEvent('error', { detail: err }));
+        }
+    }
+
+    requestNMEA() {
+        this.nmeaConsumers += 1;
+        if (this.nmeaConsumers === 1) this.send('NMEA = all');
+    }
+    releaseNMEA() {
+        this.nmeaConsumers = Math.max(0, this.nmeaConsumers - 1);
+        if (this.nmeaConsumers === 0) this.send('NMEA = off');
+    }
+}
