@@ -90,7 +90,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=98'), import('./emu-driver.js?v=32'), import('./ppsts.js?v=15')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=98'), import('./emu-driver.js?v=33'), import('./ppsts.js?v=15')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -597,7 +597,10 @@ class Component extends DcLite {
     }
     const mode = this.appMode();
     if (mode === 'standby' || !this.emu) {   // STANDBY: honest host time, no GPS, no virtual anything
-      if (this._emuLive && this.emu) { this.emu.setLive(false); this._emuLive = false; }
+      // Self-healing, not edge-triggered: assert live=false EVERY frame we're not CONNECTED. A
+      // stuck live flag (any _emuLive mirror desync — remounts, mid-transition edges) silently
+      // froze the virtual GPS mid-acquisition: clock ticking, sats aged to 0, fix never arriving.
+      if (this.emu) { this.emu.setLive(false); this._emuLive = false; }
       this.paintStandby();
       return;
     }
@@ -647,7 +650,8 @@ class Component extends DcLite {
         S.obs.lat = S.fix.lat; S.obs.lon = S.fix.lon;   // astronomy reference frame tracks the fix
         this.syncEmuLocInputs();
       }
-    } else if (this._emuLive) {                 // leaving CONNECTED for SIMULATION: back to the virtual GPS
+    } else {   // NOT connected → the virtual GPS owns the firmware. Unconditional (same self-healing
+      // rationale as the standby branch): setLive(false) is a boolean store, free at frame rate.
       this.emu.setLive(false); this._emuLive = false;
     }
     const t = performance.now();
