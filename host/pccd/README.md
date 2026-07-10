@@ -85,6 +85,17 @@ In `/etc/chrony/chrony.conf` (Linux) or `/opt/homebrew/etc/chrony.conf`
 
 Use `precision 1e-2` on Linux (arrival-mode samples). Start chronyd first (it
 creates the socket), then pccd with `-s` pointing at the same path.
+
+**Permissions requisite:** chronyd creates the socket root-owned with no write
+bit for others, so an unprivileged pccd gets `PERMISSION DENIED` (it prints
+this once and keeps retrying). Either
+
+    sudo chmod 666 /var/run/chrony.pcc.sock     # after every chronyd (re)start
+
+or run pccd itself as root. Without this, chrony silently falls back to any
+`local stratum N` directive and *looks* synced (refid `7F7F0101`) while
+free-running — check `chronyc tracking` shows refid `PCC`, not `7F7F0101`.
+
 `chronyc sources -v` should show `#* PCC` once samples flow.
 
 On macOS, also disable the system's own time sync so it doesn't fight chrony:

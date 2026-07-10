@@ -194,7 +194,18 @@ static void chrony_try_connect(void){
   struct sockaddr_un a; memset(&a,0,sizeof a); a.sun_family=AF_UNIX;
   snprintf(a.sun_path,sizeof a.sun_path,"%s",opt_sock);
   if (connect(fd,(struct sockaddr*)&a,sizeof a)==0){ g_chrony=fd; fprintf(stderr,"[pccd] chrony SOCK connected: %s\n",opt_sock); }
-  else close(fd);
+  else {
+    // chronyd creates the socket root-owned without the group/other write bit, so an unprivileged
+    // pccd gets EACCES — a silent retry loop here cost a debugging session. Say it ONCE, with the fix.
+    static int warned = 0;
+    if (errno==EACCES && !warned){
+      warned = 1;
+      fprintf(stderr,"[pccd] chrony socket %s exists but PERMISSION DENIED — run\n"
+                     "[pccd]   sudo chmod 666 %s\n"
+                     "[pccd] (after every chronyd restart), or run pccd itself as root.\n",opt_sock,opt_sock);
+    }
+    close(fd);
+  }
 }
 static void chrony_send(double wall_of_pps, double offset){
   if (g_chrony < 0) return;
