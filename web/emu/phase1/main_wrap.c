@@ -199,6 +199,9 @@ void emu_menu_tick(uint32_t ms){ uwTick += ms; decisec = 0; menu_poll(); }
 int  emu_menu_layer(void){ return (int)menu_layer; }
 int  emu_menu_idx(void){ return (int)menu_idx; }
 int  emu_menu_section(void){ return (int)menu_section; }   // v2 section ring cursor (SEC_*)
+int  emu_tc_learn(void){ return (int)tc_learn; }            // TEMPCOMP toggle arms both learn...
+int  emu_tc_apply(void){ return (int)tc_apply; }            // ...and apply
+void emu_set_tc(int learn, int apply){ tc_learn = learn?1:0; tc_apply = apply?1:0; }  // scribble the live flags (test-only)
 int  emu_menu_modecount(void){ int n=0; for (int i=0;i<NUM_DISPLAY_MODES;i++) if (i!=MODE_STANDBY && config.modes_enabled[i]) n++; return n; }
 
 /* Menu persistence test harness (emu flash shim is the RAM-backed ee_emu[] in main.c). */
@@ -210,7 +213,7 @@ void   emu_ee_apply(void){ menu_apply_overrides(); }
 void   emu_ovr_clear(void){ memset((void*)&ovr,0,sizeof ovr); }              /* simulate RAM loss */
 int    emu_ovr_valid(void){ return ovr.valid; }
 void   emu_set_mtime(int fd,int ft){ config.fdate=(unsigned short)fd; config.ftime=(unsigned short)ft; }
-void   emu_cfg_defined(unsigned s, unsigned m){ cfg_simple_defined=(uint8_t)s; cfg_modes_defined=m; }
+void   emu_cfg_defined(unsigned s, unsigned m){ cfg_simple_defined=(uint16_t)s; cfg_modes_defined=m; }  // u16: KIDs 8/9 (MATRIX/TEMPCOMP) live above bit 7
 double emu_brightness(void){ return (double)config.brightness_override; }
 void   emu_set_brightness(double v){ config.brightness_override=(float)v; }
 int    emu_ee_peek(unsigned off){ return off<sizeof(ee_emu)?ee_emu[off]:-1; }
