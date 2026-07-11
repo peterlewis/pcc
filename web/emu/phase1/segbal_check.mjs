@@ -123,19 +123,22 @@ E.configLine('seg_balance = 999');       // parse clamp → 300
 drive(20);
 verify(300, 'strength 999→clamped 300 (gamma 3)');
 
-// ---- AUTO: seg_balance = on follows the baked calibration curve (piecewise linear in dac) ----
-// Hardware calibration points (2026-07-10): dac {0,614,2048,4095} → strength {50,35,30,100}.
-const AUTO_DAC = [0, 614, 2048, 4095], AUTO_K = [50, 35, 30, 100];
+// ---- AUTO: seg_balance = on follows the baked exponential curve (piecewise linear in dac) ----
+// Recalibrated 2026-07-11: a full eyeballed rail sweep landed the even point on K = 10*9^(dac/4096)
+// (the LED knee), sampled to a 9-point LUT on power-of-two dac breakpoints. Must mirror the firmware
+// SEGBAL_AUTO_DAC/K byte-for-byte, including C integer-division truncation in the interpolation.
+const AUTO_DAC = [0, 512, 1024, 1536, 2048, 2560, 3072, 3584, 4096];
+const AUTO_K   = [10,  13,   17,   23,   30,   39,   52,   68,   90];
 const autoK = (d) => {
   if (d <= AUTO_DAC[0]) return AUTO_K[0];
-  for (let i = 1; i < 4; i++) if (d <= AUTO_DAC[i]) {
+  for (let i = 1; i < 9; i++) if (d <= AUTO_DAC[i]) {
     // C integer division truncates toward zero — mirror it exactly
     return AUTO_K[i-1] + Math.trunc(((AUTO_K[i] - AUTO_K[i-1]) * (d - AUTO_DAC[i-1])) / (AUTO_DAC[i] - AUTO_DAC[i-1]));
   }
-  return AUTO_K[3];
+  return AUTO_K[8];
 };
 E.configLine('seg_balance = on');
-for (const d of [0, 614, 1331, 2048, 3000, 4095]) {
+for (const d of [0, 512, 1000, 1536, 2048, 2560, 3072, 3584, 4095]) {
   E.setDac(d);
   drive(20);
   verify(autoK(d), `auto @ dac ${d} → eff ${autoK(d)}`);
