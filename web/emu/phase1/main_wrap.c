@@ -28,6 +28,9 @@
 #ifndef EMU_HAS_ADEV
 #  define EMU_HAS_ADEV 0
 #endif
+#ifndef EMU_HAS_STAR
+#  define EMU_HAS_STAR 0
+#endif
 #include "shim_redirect.h"
 
 #ifdef EMU_NATIVE64
@@ -174,6 +177,9 @@ void emu_poll(void){
 #if EMU_HAS_SEGBAL
   segbal_poll();           /* per-segment brightness balance — same main-loop hook as hardware */
 #endif
+#if EMU_HAS_STAR
+  if (displayMode == MODE_STAR) star_update();   /* refresh the transit list, like astro_update */
+#endif
   monitor_vbus();          /* process any VBUS (fold/power) connect/disconnect this pass */
 }
 
@@ -194,6 +200,19 @@ int  emu_MODE_SOLAR(void){ return -1; }
 int  emu_MODE_ADEV(void){ return MODE_ADEV; }
 #else
 int  emu_MODE_ADEV(void){ return -1; }    /* lean branch: no Allan-deviation engine/mode */
+#endif
+#if EMU_HAS_STAR
+int    emu_MODE_STAR(void){ return MODE_STAR; }
+double emu_lst(double unix_s, double lon){ return local_sidereal_time(unix_s, lon); }  /* oracle hook */
+int    emu_star_count(void){ return (int)STAR_N; }                                     /* catalogue read-out */
+float  emu_star_ra(int i){ return (i >= 0 && i < (int)STAR_N) ? star_cat[i].ra  : -1.0f; }
+float  emu_star_dec(int i){ return (i >= 0 && i < (int)STAR_N) ? star_cat[i].dec : -999.0f; }
+#else
+int    emu_MODE_STAR(void){ return -1; }  /* lean branch: no star-transit engine/mode */
+double emu_lst(double unix_s, double lon){ (void)unix_s; (void)lon; return -1.0; }
+int    emu_star_count(void){ return 0; }
+float  emu_star_ra(int i){ (void)i; return -1.0f; }
+float  emu_star_dec(int i){ (void)i; return -999.0f; }
 #endif
 
 /* --- brightness inject: firmware reads ADC1 (phototransistor); make it settable --- */
@@ -394,6 +413,18 @@ const char* emu_adev_line(void){
   hUsbDeviceFS.dev_state = USBD_STATE_CONFIGURED;  /* satisfy adev_dump_step's host-present gate */
   adev_dump_pending = 1;
   adev_dump_step();                                /* builds + "sends" -> CDC shim -> emu_pmtxts_buf */
+#else
+  emu_pmtxts_buf[0] = 0;
+#endif
+  return emu_pmtxts_buf;
+}
+/* Drive one $PMSTAR emit from the current fix + time (star_dump_step recomputes the transit list). */
+const char* emu_star_line(void){
+#if EMU_HAS_STAR
+  emu_pmtxts_buf[0] = 0;
+  hUsbDeviceFS.dev_state = USBD_STATE_CONFIGURED;
+  star_dump_pending = 1;
+  star_dump_step();
 #else
   emu_pmtxts_buf[0] = 0;
 #endif
