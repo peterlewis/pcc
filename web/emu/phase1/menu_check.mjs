@@ -62,12 +62,14 @@ check(`ENTER -> L2 item ring, banner "${row()}"`, layer() === L2 && row() === 'D
 ev(EVT.BTN1);
 check(`first tap dismisses banner -> "${row()}"`, row().startsWith('BRIGHT') && midx() === 0);
 
-// (6) item scroll stays WITHIN the section (BRIGHT -> COLON -> ALTCOLON, then back).
+// (6) item scroll stays WITHIN the section (BRIGHT -> BALANCE -> COLON -> ALTCOLON, then back).
+ev(EVT.BTN1);
+check(`item fwd -> "${row()}"`, row().startsWith('BALANCE'));
 ev(EVT.BTN1);
 check(`item fwd -> "${row()}"`, row().startsWith('COLON') && !row().startsWith('COLONA'));
 ev(EVT.BTN1);
 check(`item fwd -> "${row()}"`, row().startsWith('ALTCOLON'));
-ev(EVT.BTN2); ev(EVT.BTN2);
+ev(EVT.BTN2); ev(EVT.BTN2); ev(EVT.BTN2);
 check(`item back -> "${row()}"`, row().startsWith('BRIGHT') && midx() === 0);
 
 // (7) EDIT BRIGHT -> L3, live-preview a step.
