@@ -93,10 +93,11 @@ if (mm) {
   }
   check(`match: every firmware transit == oracle (dt<=2s, alt<=1deg)`, matchOk);
 
-  // (render) the soonest star renders as "<name> <h:mm>" on the date row, <=10 chars
+  // (render) §6: the soonest star renders on the date row as bare values, "<name> MM SS" when the
+  // transit is under an hour away or "<name> HhMM" when an hour or more out; <=10 chars either way.
   renderM(MODE_STAR);
   const r = row();
-  check(`display: soonest transit renders "${r}"`, /^[A-Za-z]{2,3}\s+\d{1,2}:\d{2}$/.test(r) && r.length <= 10);
+  check(`display: soonest transit renders "${r}"`, /^[A-Za-z]{2,3}\s+\d{1,2}[h ]\d{2}$/.test(r) && r.length <= 10);
 }
 
 // no-fix fallback: invalid position -> empty list + "STAr ----"
