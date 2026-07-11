@@ -65,6 +65,20 @@ check(`idle-out returns to the clock (was editing)`, layer() !== L3);
 gotoPageMs(); ev(EVT.S1); ev(EVT.REL);                        // re-open the PAGE MS editor
 check(`idle abandoned the edit -> value reverted to 5500 (scrubbed was ${scrubbed})`, layer() === L3 && val() === 5500);
 
+// (6) MATRIX renders in clean kHz (K/Z have no 7-seg glyph, so no "KHZ" unit): item reads
+// "MATRIX 20" (full label fits), editor reads "20" and steps by 1 kHz. Value stays Hz underneath.
+for (let i = 0; i < 4 && layer() !== 0; i++) { ev(EVT.S2); ev(EVT.REL); }   // back out to the clock
+const SEC_SYS = 4;
+ev(EVT.S1); ev(EVT.REL);
+for (let g = 0; secOf() !== SEC_SYS && g < 8; g++) ev(EVT.BTN1);
+ev(EVT.S1); ev(EVT.REL);                                     // ENTER SYS
+for (let h = 0; !row().startsWith('MATRIX') && h < 12; h++) ev(EVT.BTN1);
+check(`MATRIX item is clean kHz, no bad glyphs ("${row()}")`, row() === 'MATRIX 20');
+ev(EVT.S1); ev(EVT.REL);                                     // EDIT
+check(`MATRIX editor shows kHz ("${row()}")`, layer() === L3 && val() === 20);
+ev(EVT.BTN1);                                                // +1 step
+check(`MATRIX +1 step -> 21 kHz ("${row()}")`, val() === 21);
+
 let fail = 0;
 for (const r of results) { if (!r.pass) fail++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}`); }
 console.log(fail ? `\n${fail} FAIL` : `\nALL PASS`);
