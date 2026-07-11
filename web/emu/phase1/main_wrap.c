@@ -216,6 +216,12 @@ int    emu_ee_peek(unsigned off){ return off<sizeof(ee_emu)?ee_emu[off]:-1; }
 void   emu_ee_poke(unsigned off,int v){ if(off<sizeof(ee_emu)) ee_emu[off]=(uint8_t)v; }
 int    emu_menu_dirty(void){ return menu_dirty; }
 void   emu_menu_reset(void){ menu_reset_pending = 1; menu_reset_step(); }   /* factory-reset the menu store */
+/* Menu-commit-gate regression harness (the PPS-latch bug). The gate in menu_poll only fires when the
+ * display UART is idle (huart2.gState READY — zero-init RESET here, so it must be armed) AND no real
+ * $PMTXTS emit is pending. pps_record_pending latches high on any PPS-locked clock, so the gate must
+ * key off pps_emit_pending() (pps_ts_enabled && pps_record_pending), not the raw flag. */
+void   emu_set_uart_ready(int ready){ huart2.gState = ready ? HAL_UART_STATE_READY : HAL_UART_STATE_RESET; }
+void   emu_set_pps(int enabled, int pending){ pps_ts_enabled = enabled?1:0; pps_record_pending = pending?1:0; }
 
 /* Tempcomp retained-model persistence harness — the ee2 store is a separate RAM-backed page pair
  * (ee2_emu[]) from the menu store. Exercises: commit a learned model -> "power cycle" -> the boot
