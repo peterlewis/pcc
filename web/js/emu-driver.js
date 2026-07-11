@@ -34,6 +34,8 @@ export const DEFAULT_CONFIG = [
   'MODE_LATLON = enabled',
   'MODE_LST = enabled',
   'MODE_SOLAR = enabled',
+  'MODE_STAR = enabled',
+  'MODE_ADEV = enabled',
 ].join('\n');
 
 export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = DEFAULT_CONFIG } = {}) {

@@ -66,8 +66,12 @@ MODE_MOON     = disabled
 MODE_GRID     = disabled
 MODE_LATLON   = disabled
 
-# Dwell per sub-screen for the paged read-outs (astro + temp comp), in ms (default 5500,
-# min 250). Older firmware called this astro_page_ms.
+# Bright-star meridian-transit predictor — paged countdowns to the soonest bright stars
+# crossing your local meridian, e.g. "SIR  0:45". Needs a position (GPS or fake_longitude).
+MODE_STAR = disabled
+
+# Dwell per sub-screen for the paged read-outs (astro + temp comp + ADEV/STAR), in ms
+# (default 5500, min 250). Older firmware called this astro_page_ms.
 page_ms = 5500
 
 # Fixed position for astro when there's no GPS fix (decimal degrees, N+/E+)
@@ -111,6 +115,15 @@ BS5 = 3849,4095
 #brightness = 0.5
 
 
+## display balance
+# Equalise per-segment brightness by duty so a "1" isn't brighter than an "8". "on" = the
+# calibrated auto curve (recommended); a number 2..300 pins a fixed manual strength.
+seg_balance = on
+# Dim the colons in step with the main brightness (they are on their own PWM rail). "on" = auto
+# curve; a number 2..256 pins a fixed scale. Leave off until the digit levels are dialled in.
+#colon_balance = on
+
+
 ## temperature compensation (opt-in; all off = stock behaviour)
 # GPS-locked, the clock can LEARN how each oscillator drifts with die temp
 # (tc_learn), then during a GPS outage steer the timebase (tc_apply) and/or
@@ -123,6 +136,10 @@ MODE_TEMPCOMP = disabled
 #tc_t0 = 40
 #tc_engage_s = 2
 #tc_max_ppm = 100
+
+# Live Allan deviation of the FREE-RUNNING crystal — pages sigma_y(tau) across octave averaging
+# times on the date row ("1s 3.2e-11" ... "1024s 3e-11"). The honest, undisciplined crystal signal.
+MODE_ADEV = disabled
 
 
 ## serial output
@@ -172,7 +189,9 @@ export const MODE_FIELDS = [
   { cfg: 'mode_moon', key: 'moon', group: 'astro' },
   { cfg: 'mode_grid', key: 'grid', group: 'astro' },
   { cfg: 'mode_latlon', key: 'latlon', group: 'astro' },
+  { cfg: 'mode_star', key: 'star', group: 'astro' },
   { cfg: 'mode_tempcomp', key: 'tempcomp', group: 'diag' },
+  { cfg: 'mode_adev', key: 'adev', group: 'diag' },
 ];
 
 // Derive the config-DRIVEN slice of app state from a config.txt (defaults to the golden config).

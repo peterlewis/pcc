@@ -7,7 +7,7 @@ import * as ASTRO from './astro-fw.js?v=90';
 import * as DS from './datasources.js?v=90';
 import { TelemetryLog } from './telemetrylog.js?v=4';
 import { prepReview, drawReview, sampleAt, tAtX } from './review.js?v=1';
-import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=3';
+import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=4';
 
 // config.txt is the single source of truth: the clock-behaviour defaults (enabled modes, colon,
 // astro dwell, …) are DERIVED from the canonical golden config, not hand-written here. See
@@ -90,7 +90,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=104'), import('./emu-driver.js?v=34'), import('./ppsts.js?v=15')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=104'), import('./emu-driver.js?v=35'), import('./ppsts.js?v=15')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -1624,8 +1624,12 @@ class Component extends DcLite {
       { key: 'moon', mode: 'MODE_MOON', label: 'MOON PHASE', group: 'ASTRO' },
       { key: 'grid', mode: 'MODE_GRID', label: 'MAIDENHEAD', group: 'ASTRO' },
       { key: 'latlon', mode: 'MODE_LATLON', label: 'LAT·LON', group: 'ASTRO' },
+      // Bright-star meridian-transit predictor — paged countdowns to culminating stars.
+      { key: 'star', mode: 'MODE_STAR', label: 'STAR TRANSIT', group: 'ASTRO' },
       // Tempcomp diagnostic pages (die temp / HSE / LSE / samples+state) — real firmware read-out.
       { key: 'tempcomp', mode: 'MODE_TEMPCOMP', label: 'TEMP COMP', group: 'DIAGNOSTIC' },
+      // Live Allan deviation of the free-running crystal — paged sigma_y(tau) octaves.
+      { key: 'adev', mode: 'MODE_ADEV', label: 'ALLAN DEV', group: 'DIAGNOSTIC' },
     ];
   }
   modeDef(key) { return this.MODE_DEFS.find((d) => d.key === key); }
