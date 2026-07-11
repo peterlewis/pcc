@@ -196,6 +196,23 @@ void emu_menu_tick(uint32_t ms){ uwTick += ms; decisec = 0; menu_poll(); }
 int  emu_menu_layer(void){ return (int)menu_layer; }
 int  emu_menu_idx(void){ return (int)menu_idx; }
 int  emu_menu_modecount(void){ int n=0; for (int i=0;i<NUM_DISPLAY_MODES;i++) if (i!=MODE_STANDBY && config.modes_enabled[i]) n++; return n; }
+
+/* Menu persistence test harness (emu flash shim is the RAM-backed ee_emu[] in main.c). */
+#ifdef __EMSCRIPTEN__
+void   emu_ee_reset(void){ memset(ee_emu,0xFF,sizeof ee_emu); ee_load(); }   /* fresh flash */
+void   emu_ee_load(void){ ee_load(); }                                       /* re-scan (reboot) */
+int    emu_ee_commit(void){ int r=(int)ee_commit(); if(r) menu_dirty=0; return r; }
+void   emu_ee_apply(void){ menu_apply_overrides(); }
+void   emu_ovr_clear(void){ memset((void*)&ovr,0,sizeof ovr); }              /* simulate RAM loss */
+int    emu_ovr_valid(void){ return ovr.valid; }
+void   emu_set_mtime(int fd,int ft){ config.fdate=(unsigned short)fd; config.ftime=(unsigned short)ft; }
+void   emu_cfg_defined(unsigned s, unsigned m){ cfg_simple_defined=(uint8_t)s; cfg_modes_defined=m; }
+double emu_brightness(void){ return (double)config.brightness_override; }
+void   emu_set_brightness(double v){ config.brightness_override=(float)v; }
+int    emu_ee_peek(unsigned off){ return off<sizeof(ee_emu)?ee_emu[off]:-1; }
+void   emu_ee_poke(unsigned off,int v){ if(off<sizeof(ee_emu)) ee_emu[off]=(uint8_t)v; }
+int    emu_menu_dirty(void){ return menu_dirty; }
+#endif
 void emu_enable_mode(int m){ if (m>=0 && m<NUM_DISPLAY_MODES) config.modes_enabled[m] = 1; }
 void emu_set_pos(float lat, float lon){ latitude = lat; longitude = lon; }
 int  emu_mode(void){ return displayMode; }
