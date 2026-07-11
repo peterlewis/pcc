@@ -186,6 +186,16 @@ void emu_poll(void){
 /* --- interaction --- */
 void emu_button1(void){ button1pressed(); }   /* nextMode forward */
 void emu_button2(void){ button2pressed(); }   /* nextMode back */
+
+/* On-device menu test harness: inject a date-board button byte (0x91..0x96) exactly as the USART2
+ * ISR would, then run the main-loop FSM. decisec is forced out of the SysTick sendDate window so the
+ * render is deterministic. emu_menu_tick advances uwTick to exercise the 15 s idle auto-exit. */
+extern volatile uint32_t uwTick;
+void emu_menu_event(uint8_t e){ menu_isr_event(e); decisec = 0; menu_poll(); }
+void emu_menu_tick(uint32_t ms){ uwTick += ms; decisec = 0; menu_poll(); }
+int  emu_menu_layer(void){ return (int)menu_layer; }
+int  emu_menu_idx(void){ return (int)menu_idx; }
+int  emu_menu_modecount(void){ int n=0; for (int i=0;i<NUM_DISPLAY_MODES;i++) if (i!=MODE_STANDBY && config.modes_enabled[i]) n++; return n; }
 void emu_enable_mode(int m){ if (m>=0 && m<NUM_DISPLAY_MODES) config.modes_enabled[m] = 1; }
 void emu_set_pos(float lat, float lon){ latitude = lat; longitude = lon; }
 int  emu_mode(void){ return displayMode; }

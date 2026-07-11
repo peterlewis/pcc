@@ -42,7 +42,7 @@ EXPORTS='["_emu_boot","_emu_boot_cold","_emu_tick","_emu_poll","_emu_now","_emu_
 "_emu_MODE_MOON","_emu_MODE_GRID","_emu_MODE_LATLON","_emu_MODE_SUN",
 "_emu_MODE_JULIAN_DATE","_emu_MODE_MODIFIED_JD","_emu_pmtxts_line",
 "_emu_register_file","_emu_load_zone","_emu_offset_at","_emu_set_systick","_emu_zone_from_pos",
-"_emu_flags","_emu_data_valid","_emu_had_pps","_emu_since_pps","_emu_satcount","_emu_digit_fade","_emu_holdover_u_us","_emu_tc_probe","_emu_config_done","_emu_tc_fill","_emu_tc_refit","_emu_cuckoo_active","_emu_cuckoo_level","_emu_cuckoo_set","_emu_MODE_CUCKOO_SHOWCASE","_emu_adev_reset","_emu_adev_push","_emu_adev_reduce","_emu_adev_sigma","_emu_adev_noctave","_emu_MODE_ADEV","_emu_adev_line","_emu_render_mode","_emu_MODE_STAR","_emu_star_line","_emu_lst","_emu_set_pos","_emu_star_count","_emu_star_ra","_emu_star_dec","_malloc","_free"]'
+"_emu_flags","_emu_data_valid","_emu_had_pps","_emu_since_pps","_emu_satcount","_emu_digit_fade","_emu_holdover_u_us","_emu_tc_probe","_emu_config_done","_emu_tc_fill","_emu_tc_refit","_emu_cuckoo_active","_emu_cuckoo_level","_emu_cuckoo_set","_emu_MODE_CUCKOO_SHOWCASE","_emu_adev_reset","_emu_adev_push","_emu_adev_reduce","_emu_adev_sigma","_emu_adev_noctave","_emu_MODE_ADEV","_emu_adev_line","_emu_render_mode","_emu_MODE_STAR","_emu_star_line","_emu_lst","_emu_set_pos","_emu_star_count","_emu_star_ra","_emu_star_dec","_emu_menu_event","_emu_menu_tick","_emu_menu_layer","_emu_menu_idx","_emu_menu_modecount","_malloc","_free"]'
 
 CFLAGS=("${INCS[@]}" "${DEFS[@]}" -O2 -Wno-implicit-function-declaration)
 
