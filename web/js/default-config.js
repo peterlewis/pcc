@@ -122,6 +122,9 @@ seg_balance = on
 # Dim the colons in step with the main brightness (they are on their own PWM rail). "on" = auto
 # curve; a number 2..256 pins a fixed scale. Leave off until the digit levels are dialled in.
 #colon_balance = on
+# Factory-reset the on-device menu: send "menu_reset = on" over USB serial (ignored in this file)
+# to erase menu-changed settings and return to exactly this config.txt. (The on-device RESET chord
+# only reboots — it keeps your menu settings.)
 
 
 ## temperature compensation (opt-in; all off = stock behaviour)

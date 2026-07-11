@@ -212,6 +212,7 @@ void   emu_set_brightness(double v){ config.brightness_override=(float)v; }
 int    emu_ee_peek(unsigned off){ return off<sizeof(ee_emu)?ee_emu[off]:-1; }
 void   emu_ee_poke(unsigned off,int v){ if(off<sizeof(ee_emu)) ee_emu[off]=(uint8_t)v; }
 int    emu_menu_dirty(void){ return menu_dirty; }
+void   emu_menu_reset(void){ menu_reset_pending = 1; menu_reset_step(); }   /* factory-reset the menu store */
 #endif
 void emu_enable_mode(int m){ if (m>=0 && m<NUM_DISPLAY_MODES) config.modes_enabled[m] = 1; }
 void emu_set_pos(float lat, float lon){ latitude = lat; longitude = lon; }

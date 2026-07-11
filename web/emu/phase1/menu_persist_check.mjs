@@ -24,6 +24,7 @@ const setBright = w('emu_set_brightness', 'void', ['number']);
 const eePeek  = w('emu_ee_peek', 'number', ['number']);
 const eePoke  = w('emu_ee_poke', 'void', ['number','number']);
 const dirty   = w('emu_menu_dirty', 'number');
+const factoryReset = w('emu_menu_reset', 'void');
 
 const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95 };
 const KID_BRIGHTNESS = 1;
@@ -92,6 +93,17 @@ eePoke(64 + 62, eePeek(64 + 62) ^ 0xFF);
 ovrClear(); eeLoad();
 setBright(-9); cfgDef(0, 0); setMtime(0x9999, 0x9999); eeApply();
 check(`torn gen2 rejected -> falls back to gen1 (${bright()})`, bright() === 256);
+
+// (7) factory reset ("menu_reset = on"): a committed override is wiped from flash + the RAM store,
+//     and a subsequent reboot re-scan finds nothing (back to config.txt-only).
+eeReset();
+setMtime(0x5AA5, 0x1234);
+setBrightViaMenu(); eeCommit();
+check(`pre-reset: an override is stored`, ovrValid() === 1);
+factoryReset();                              // menu_reset = on
+check(`factory reset clears the RAM store`, ovrValid() === 0);
+ovrClear(); eeLoad();                        // "reboot": re-scan flash
+check(`factory reset erased flash (reboot finds nothing)`, ovrValid() === 0);
 
 let fail = 0;
 for (const r of results) { if (!r.pass) fail++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}`); }
