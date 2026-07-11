@@ -25,8 +25,10 @@ const eePeek  = w('emu_ee_peek', 'number', ['number']);
 const eePoke  = w('emu_ee_poke', 'void', ['number','number']);
 const dirty   = w('emu_menu_dirty', 'number');
 const factoryReset = w('emu_menu_reset', 'void');
+const secOf   = w('emu_menu_section', 'number');
 
 const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95 };
+const SEC_DISP = 2;   // BRIGHT lives in the DISP section (v2 sectioned nav)
 const KID_BRIGHTNESS = 1;
 const results = [];
 const check = (n, pass) => results.push({ n, pass: !!pass });
@@ -34,12 +36,15 @@ const check = (n, pass) => results.push({ n, pass: !!pass });
 // Drive the menu to set BRIGHT (row 0) to +256 and SAVE, then exit to L0. Stamps ovr with the
 // current config.txt mtime. (BRIGHT boots at 0; one +256 step -> 256.)
 function setBrightViaMenu() {
-  setBright(0);              // deterministic start so one +256 step always lands on 256
-  ev(EVT.S1); ev(EVT.REL);   // -> L1 ring at BRIGHT
-  ev(EVT.S1); ev(EVT.REL);   // -> L2 editor
-  ev(EVT.BTN1);              // step 0 -> 256 (live)
-  ev(EVT.S1); ev(EVT.REL);   // SAVE (records override, menu_dirty=1)
-  ev(EVT.S2); ev(EVT.REL);   // BACK -> L0
+  setBright(0);                          // deterministic start so one +256 step always lands on 256
+  ev(EVT.S1); ev(EVT.REL);               // L0 -> L1 SECTION ring
+  for (let g = 0; secOf() !== SEC_DISP && g < 8; g++) ev(EVT.BTN1);   // scroll to DISP (section preserved across calls)
+  ev(EVT.S1); ev(EVT.REL);               // ENTER DISP -> L2 (cursor at first DISP item = BRIGHT)
+  ev(EVT.S1); ev(EVT.REL);               // EDIT -> L3 editor
+  ev(EVT.BTN1);                          // step 0 -> 256 (live)
+  ev(EVT.S1); ev(EVT.REL);               // SAVE (records override, menu_dirty=1) -> L2
+  ev(EVT.S2); ev(EVT.REL);               // BACK -> L1 SECTION
+  ev(EVT.S2); ev(EVT.REL);               // EXIT -> L0
 }
 
 bootCold(1783627200);
@@ -85,8 +90,10 @@ check(`zero mtime never matches -> config wins (${bright()})`, bright() === -9);
 eeReset();
 setMtime(0x5AA5, 0x1234);
 setBrightViaMenu(); eeCommit();      // gen1: brightness 256 (slot 0)
-// second edit -> 512, commit as gen2 (slot 1)
-ev(EVT.S1); ev(EVT.REL); ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL); ev(EVT.S2); ev(EVT.REL);
+// second edit -> 512, commit as gen2 (slot 1). Sectioned nav: enter DISP, edit BRIGHT (+256), save, exit.
+ev(EVT.S1); ev(EVT.REL);
+for (let g = 0; secOf() !== SEC_DISP && g < 8; g++) ev(EVT.BTN1);
+ev(EVT.S1); ev(EVT.REL); ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL); ev(EVT.S2); ev(EVT.REL); ev(EVT.S2); ev(EVT.REL);
 eeCommit();
 // corrupt slot-1's CRC16 (record 64 B; crc at byte offset 62) -> flip a bit
 eePoke(64 + 62, eePeek(64 + 62) ^ 0xFF);

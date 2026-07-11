@@ -22,8 +22,10 @@ const dirty     = w('emu_menu_dirty', 'number');
 const setUart   = w('emu_set_uart_ready', 'void', ['number']);
 const setPps    = w('emu_set_pps', 'void', ['number', 'number']);
 const menuTick  = w('emu_menu_tick', 'void', ['number']);   // re-runs menu_poll (the gate) with no button side effect
+const secOf     = w('emu_menu_section', 'number');
 
 const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95 };
+const SEC_DISP = 2;   // BRIGHT lives in the DISP section (v2 sectioned nav)
 const results = [];
 const check = (n, pass) => results.push({ n, pass: !!pass });
 
@@ -31,11 +33,14 @@ const check = (n, pass) => results.push({ n, pass: !!pass });
 // (No emu_ee_commit here: the whole point is to exercise the gate, not bypass it.)
 function editSaveReturnToClock() {
   setBright(0);
-  ev(EVT.S1); ev(EVT.REL);   // -> L1 ring at BRIGHT
-  ev(EVT.S1); ev(EVT.REL);   // -> L2 editor
-  ev(EVT.BTN1);              // step (live)
-  ev(EVT.S1); ev(EVT.REL);   // SAVE  -> L1, menu_dirty=1
-  ev(EVT.S2); ev(EVT.REL);   // BACK  -> L0 : menu_poll runs the gate on this event
+  ev(EVT.S1); ev(EVT.REL);               // L0 -> L1 SECTION
+  for (let g = 0; secOf() !== SEC_DISP && g < 8; g++) ev(EVT.BTN1);   // -> DISP
+  ev(EVT.S1); ev(EVT.REL);               // ENTER -> L2 (cursor at BRIGHT)
+  ev(EVT.S1); ev(EVT.REL);               // EDIT -> L3
+  ev(EVT.BTN1);                          // step (live), menu_dirty set on SAVE
+  ev(EVT.S1); ev(EVT.REL);               // SAVE  -> L2
+  ev(EVT.S2); ev(EVT.REL);               // BACK  -> L1
+  ev(EVT.S2); ev(EVT.REL);               // EXIT  -> L0 : menu_poll runs the commit gate on this event
 }
 
 bootCold(1783627200);

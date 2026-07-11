@@ -198,6 +198,7 @@ void emu_menu_event(uint8_t e){ menu_isr_event(e); decisec = 0; menu_poll(); }
 void emu_menu_tick(uint32_t ms){ uwTick += ms; decisec = 0; menu_poll(); }
 int  emu_menu_layer(void){ return (int)menu_layer; }
 int  emu_menu_idx(void){ return (int)menu_idx; }
+int  emu_menu_section(void){ return (int)menu_section; }   // v2 section ring cursor (SEC_*)
 int  emu_menu_modecount(void){ int n=0; for (int i=0;i<NUM_DISPLAY_MODES;i++) if (i!=MODE_STANDBY && config.modes_enabled[i]) n++; return n; }
 
 /* Menu persistence test harness (emu flash shim is the RAM-backed ee_emu[] in main.c). */
