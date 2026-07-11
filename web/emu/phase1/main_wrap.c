@@ -22,6 +22,9 @@
 #ifndef EMU_HAS_TEMPCOMP
 #  define EMU_HAS_TEMPCOMP 0
 #endif
+#ifndef EMU_HAS_TC_PERSIST
+#  define EMU_HAS_TC_PERSIST 0
+#endif
 #ifndef EMU_HAS_ALT
 #  define EMU_HAS_ALT 1
 #endif
@@ -216,8 +219,10 @@ void   emu_menu_reset(void){ menu_reset_pending = 1; menu_reset_step(); }   /* f
 
 /* Tempcomp retained-model persistence harness — the ee2 store is a separate RAM-backed page pair
  * (ee2_emu[]) from the menu store. Exercises: commit a learned model -> "power cycle" -> the boot
- * seed sequence restores it; config.txt precedence; corrupt/implausible-model rejection; tc_forget. */
-#if EMU_HAS_TEMPCOMP
+ * seed sequence restores it; config.txt precedence; corrupt/implausible-model rejection; tc_forget.
+ * Guarded by EMU_HAS_TC_PERSIST (not EMU_HAS_TEMPCOMP): a branch can have tempcomp WITHOUT the ee2
+ * persistence layer (e.g. the menu PR branch or PR #9's tempcomp), and these hooks reference tc2/ee2. */
+#if EMU_HAS_TC_PERSIST
 void   emu_ee2_reset(void){ memset(ee2_emu,0xFF,sizeof ee2_emu); ee2_load(); }   /* fresh flash + init base */
 void   emu_ee2_load(void){ ee2_load(); }                                         /* re-scan (reboot) */
 int    emu_ee2_commit(void){ return (int)ee2_commit(); }
@@ -255,6 +260,23 @@ double emu_tc2_probe(int field){
     default: return 0;
   }
 }
+#else   /* branch without the ee2 persistence layer: keep the exported symbols resolvable as no-ops */
+void   emu_ee2_reset(void){}
+void   emu_ee2_load(void){}
+int    emu_ee2_commit(void){ return 0; }
+int    emu_ee2_peek(unsigned off){ (void)off; return -1; }
+void   emu_ee2_poke(unsigned off,int v){ (void)off; (void)v; }
+void   emu_tc_persist_set(int on){ (void)on; }
+void   emu_tc_seed_flag(int on){ (void)on; }
+void   emu_cfg_tc_defined(unsigned mask){ (void)mask; }
+void   emu_tc_forget(void){}
+int    emu_tc_model_dirty(void){ return 0; }
+void   emu_tc_model_check(void){}
+int    emu_tc_model_supported(void){ return 0; }
+void   emu_tc_set_model(double b,double c,int lo,int hi,int n,double r){ (void)b;(void)c;(void)lo;(void)hi;(void)n;(void)r; }
+void   emu_tc_clear_model(void){}
+void   emu_tc_seed_boot(void){}
+double emu_tc2_probe(int field){ (void)field; return 0; }
 #endif
 #endif
 void emu_enable_mode(int m){ if (m>=0 && m<NUM_DISPLAY_MODES) config.modes_enabled[m] = 1; }

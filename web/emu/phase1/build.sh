@@ -77,6 +77,12 @@ if grep -q "star_update" "$FW/Core/Src/main.c"; then
   CFLAGS+=(-DEMU_HAS_STAR=1)
 fi
 
+# Auto-persist the learned tempcomp model to flash (the ee2 store). Lives above the menu on rollup;
+# a branch with tempcomp but no persistence (menu PR, PR #9) lacks tc2/ee2 — compile the hooks out.
+if grep -q "ee2_init_base" "$FW/Core/Src/main.c"; then
+  CFLAGS+=(-DEMU_HAS_TC_PERSIST=1)
+fi
+
 echo "[1/3] compile firmware + shim objects from source"
 # astro.c only exists on the astro-pack/rollup branches; building against a leaner branch
 # (e.g. the tempcomp PR branch) just skips it — main.c there makes no astro calls.
