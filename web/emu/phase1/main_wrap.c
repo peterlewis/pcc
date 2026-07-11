@@ -213,6 +213,49 @@ int    emu_ee_peek(unsigned off){ return off<sizeof(ee_emu)?ee_emu[off]:-1; }
 void   emu_ee_poke(unsigned off,int v){ if(off<sizeof(ee_emu)) ee_emu[off]=(uint8_t)v; }
 int    emu_menu_dirty(void){ return menu_dirty; }
 void   emu_menu_reset(void){ menu_reset_pending = 1; menu_reset_step(); }   /* factory-reset the menu store */
+
+/* Tempcomp retained-model persistence harness — the ee2 store is a separate RAM-backed page pair
+ * (ee2_emu[]) from the menu store. Exercises: commit a learned model -> "power cycle" -> the boot
+ * seed sequence restores it; config.txt precedence; corrupt/implausible-model rejection; tc_forget. */
+#if EMU_HAS_TEMPCOMP
+void   emu_ee2_reset(void){ memset(ee2_emu,0xFF,sizeof ee2_emu); ee2_load(); }   /* fresh flash + init base */
+void   emu_ee2_load(void){ ee2_load(); }                                         /* re-scan (reboot) */
+int    emu_ee2_commit(void){ return (int)ee2_commit(); }
+int    emu_ee2_peek(unsigned off){ return off<sizeof(ee2_emu)?ee2_emu[off]:-1; }
+void   emu_ee2_poke(unsigned off,int v){ if(off<sizeof(ee2_emu)) ee2_emu[off]=(uint8_t)v; }
+void   emu_tc_persist_set(int on){ tc_persist = on?1:0; }
+void   emu_tc_seed_flag(int on){ tc_seed = on?1:0; }
+void   emu_cfg_tc_defined(unsigned mask){ cfg_tc_defined = (uint8_t)mask; }
+void   emu_tc_forget(void){ tc_forget_pending = 1; tc_forget_step(); }
+int    emu_tc_model_dirty(void){ return tc_model_dirty; }
+void   emu_tc_model_check(void){ tc_model_check(); }
+int    emu_tc_model_supported(void){ return (int)tc_model_supported(); }
+/* Inject a synthetic well-supported learned HSE model (ppm-domain coefficients), as if hours of
+ * learning + tc_fit had produced it, so persistence can be exercised in a single call. */
+void   emu_tc_set_model(double hse_b, double hse_c, int lo, int hi, int n_hse, double resid_ppm){
+  float tpp = (float)tc_tpp(); if (tpp<=0.0f) tpp = 80.0f;
+  tc_hse_m[0]=0.0f; tc_hse_m[1]=(float)hse_b*tpp; tc_hse_m[2]=(float)hse_c*tpp;
+  tc_hse_tmin=(int16_t)lo; tc_hse_tmax=(int16_t)hi; tc_hse_valid=1; tc_hse_prior=3;
+  tc_n_hse=(uint32_t)n_hse; tc_hse_resid=(float)resid_ppm*tpp;
+}
+void   emu_tc_clear_model(void){    /* simulate the power-on .bss clear, but keep ee2_emu[] (flash) */
+  tc_hse_valid=tc_lse_valid=0; tc_hse_m[0]=tc_hse_m[1]=tc_hse_m[2]=0.0f;
+  tc_hse_prior=tc_lse_prior=0; tc_n_hse=tc_n_lse=0; tc_hse_resid=tc_lse_resid=0.0f;
+  tc_seed=0; tc_seed_done=0; tc_persist_seeded=0; tc_model_dirty=0;
+  tc_cfg_hse[0]=tc_cfg_hse[1]=tc_cfg_hse[2]=NAN; tc_cfg_lse[0]=tc_cfg_lse[1]=tc_cfg_lse[2]=NAN;
+}
+/* Run the exact boot seed sequence readConfigFile now performs (flash seed -> apply -> after-seed). */
+void   emu_tc_seed_boot(void){ tc_seed_from_flash(); tc_seed_apply(); tc_persist_after_seed(); }
+/* Probe the loaded flash shadow (tc2) after a scan, to check what a re-scan restored. */
+double emu_tc2_probe(int field){
+  switch(field){
+    case 0: return tc2.valid;     case 1: return tc2.hse_valid; case 2: return tc2.lse_valid;
+    case 3: return tc2.hse_b;     case 4: return tc2.hse_c;     case 5: return tc2.lo;
+    case 6: return tc2.hi;        case 7: return (double)tc2.n_hse; case 8: return tc2.t0;
+    default: return 0;
+  }
+}
+#endif
 #endif
 void emu_enable_mode(int m){ if (m>=0 && m<NUM_DISPLAY_MODES) config.modes_enabled[m] = 1; }
 void emu_set_pos(float lat, float lon){ latitude = lat; longitude = lon; }
