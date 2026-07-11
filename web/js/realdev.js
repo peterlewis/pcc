@@ -12,7 +12,7 @@
 //
 // Chromium only (Web Serial). Gate the connect button on isSupported().
 
-import { Clock, BridgeClock } from './serial.js?v=15';
+import { Clock, BridgeClock } from './serial.js?v=16';
 import { parseGGA, parseRMC, parseGSA, GSVBuffer } from './nmea.js?v=2';
 import { parsePMTXTS, parsePMTXTC, centrePhase, foldPhase1ms } from './ppsts.js?v=15';
 // subSatellitePoint reconstructs a sat's ground point from observer-relative
