@@ -1,4 +1,4 @@
-// menu_colon_preview_check.mjs — §3.5 colon context-preview. Editing the ALTCOLON item selects the
+// menu_colon_preview_check.mjs — §3.5 colon context-preview. Editing the COLONALT item selects the
 // colon animation used by the sidereal/solar faces — but you're editing it from a civil face, so
 // without a preview the choice is invisible (applyColonForMode renders the civil colon). §3.5 forces
 // the value under the cursor onto the real colons while the editor is live, tracks it as you step, and
@@ -38,9 +38,9 @@ bootCold(1783627200);
 const civilMode = colMode();
 check(`boot: no colon preview active`, colPrev() === NOPREV);
 
-// --- ALTCOLON: the value being edited must appear on the real colons even from a civil face ---
-gotoItem('ALTCOLON');
-check(`landed on ALTCOLON ("${row()}")`, row().startsWith('ALTCOLON'));
+// --- COLONALT: the value being edited must appear on the real colons even from a civil face ---
+gotoItem('COLONALT');
+check(`landed on COLONALT ("${row()}")`, row().startsWith('COLONALT'));
 ev(EVT.S1); ev(EVT.REL);                                       // EDIT -> L3
 check(`edit opens L3`, layer() === L3);
 check(`preview armed on entry (prev=${colPrev()})`, colPrev() !== NOPREV);
@@ -55,7 +55,7 @@ check(`CANCEL returns to L2`, layer() === L2);
 backToL0();
 
 // --- COLON (civil): editing previews the civil choice; COMMIT keeps the new value ---
-gotoItem('COLON ');                                            // trailing space excludes "COLONALT"/"ALTCOLON"
+gotoItem('COLON ');                                            // trailing space excludes "COLONALT"
 check(`landed on COLON ("${row()}")`, row().startsWith('COLON') && !row().startsWith('COLONA') && !row().startsWith('ALT'));
 ev(EVT.S1); ev(EVT.REL);                                       // EDIT
 check(`preview armed for COLON`, colPrev() !== NOPREV);
@@ -68,7 +68,7 @@ check(`COMMIT keeps the picked colon as the civil context colon`, colMode() === 
 backToL0();
 
 // --- idle-exit mid-edit must not leave a preview stuck ---
-gotoItem('ALTCOLON');
+gotoItem('COLONALT');
 ev(EVT.S1); ev(EVT.REL);                                       // EDIT (preview armed)
 check(`preview armed before idle`, colPrev() !== NOPREV);
 tick(60000);                                                  // exceed MENU_IDLE_MS -> menu_to_L0

@@ -84,7 +84,7 @@ page_ms = 5500
 colon_mode = heartbeat
 # Colon for the alternate timebases (LST/SOLAR) — kept automatically distinct
 # from the civil colon; leave commented for that guarantee.
-#alt_colon_mode = alt_sawtooth
+#colon_alt_mode = alt_sawtooth
 
 
 ## text & countdown

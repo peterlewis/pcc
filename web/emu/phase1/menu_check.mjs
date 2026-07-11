@@ -62,13 +62,13 @@ check(`ENTER -> L2 item ring, banner "${row()}"`, layer() === L2 && row() === 'D
 ev(EVT.BTN1);
 check(`first tap dismisses banner -> "${row()}"`, row().startsWith('BRIGHT') && midx() === 0);
 
-// (6) item scroll stays WITHIN the section (BRIGHT -> BALANCE -> COLON -> ALTCOLON, then back).
+// (6) item scroll stays WITHIN the section (BRIGHT -> BALANCE -> COLON -> COLONALT, then back).
 ev(EVT.BTN1);
 check(`item fwd -> "${row()}"`, row().startsWith('BALANCE'));
 ev(EVT.BTN1);
 check(`item fwd -> "${row()}"`, row().startsWith('COLON') && !row().startsWith('COLONA'));
 ev(EVT.BTN1);
-check(`item fwd -> "${row()}"`, row().startsWith('ALTCOLON'));
+check(`item fwd -> "${row()}"`, row().startsWith('COLONALT'));
 ev(EVT.BTN2); ev(EVT.BTN2); ev(EVT.BTN2);
 check(`item back -> "${row()}"`, row().startsWith('BRIGHT') && midx() === 0);
 
