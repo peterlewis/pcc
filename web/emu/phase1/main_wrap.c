@@ -206,6 +206,7 @@ int  emu_seg_balance(void){ return (int)seg_balance; }      // BALANCE toggle dr
 int  emu_colon_balance(void){ return (int)colon_balance; }  // ...seg and colon
 void emu_set_balance(int seg, int col){ seg_balance = (uint16_t)seg; colon_balance = (uint16_t)col; }  // scribble (test-only)
 int  emu_colon_scale(int dac){ return (int)colon_scale_for((int32_t)dac); }  // exercise the 2-anchor colon curve
+int  emu_colon_preview(void){ return (int)colon_preview; }   // §3.5: 0xFF = no preview, else the previewed value (emu_colon_mode already exists below)
 void emu_set_colon_anchors(int full_at, int floor){ colon_full_at = full_at; colon_floor = floor; }
 int  emu_menu_modecount(void){ int n=0; for (int i=0;i<NUM_DISPLAY_MODES;i++) if (i!=MODE_STANDBY && config.modes_enabled[i]) n++; return n; }
 
