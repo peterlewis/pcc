@@ -58,6 +58,14 @@ check(`accelerated value snaps to the step grid`, vend % STEP === 0);
 tick(400); ev(EVT.BTN1);
 check(`after a pause, next tap is fine (+${val() - vend})`, val() - vend === STEP);
 
+// (5) review fix: idle-timeout mid-edit ABANDONS the scrub like CANCEL — the pre-edit value (5500) is
+// restored, not silently kept. (menu_to_L0 alone used to leave the scrubbed value live until reboot.)
+const scrubbed = val();
+tick(60000); ev(EVT.BTN1);                                   // exceed MENU_IDLE_MS -> menu_to_L0 via the idle check
+check(`idle-out returns to the clock (was editing)`, layer() !== L3);
+gotoPageMs(); ev(EVT.S1); ev(EVT.REL);                        // re-open the PAGE MS editor
+check(`idle abandoned the edit -> value reverted to 5500 (scrubbed was ${scrubbed})`, layer() === L3 && val() === 5500);
+
 let fail = 0;
 for (const r of results) { if (!r.pass) fail++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}`); }
 console.log(fail ? `\n${fail} FAIL` : `\nALL PASS`);

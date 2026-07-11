@@ -96,6 +96,26 @@ cfgDef(1 << KID_BALANCE, 0); setMtime(0x1111, 0x2222);
 eeApply();
 check(`defined-in-config + mtime mismatch -> override skipped`, segBal() === 0 && colBal() === 0);
 
+// (review fix #3) a stored BALANCE=on override must NOT collapse a config-provided MANUAL strength to
+// AUTO(1) on boot. config parse sets the manual values first; menu_apply_overrides sees them already
+// nonzero and leaves them. (Old code did seg_balance=colon_balance=1, silently wiping the calibration.)
+eeReset(); setMtime(0x5AA5, 0x1234);
+gotoBalance(); ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL);  // EDIT, ON, SAVE
+check(`stored a BALANCE=on override`, eeCommit() === 1);
+backToL0();
+setBal(150, 128);                                             // config.txt manual strengths (seg 150 / colon 128)
+cfgDef(1 << KID_BALANCE, 0); setMtime(0x5AA5, 0x1234);        // defined + stamp MATCH -> the override applies...
+eeApply();
+check(`BALANCE=on preserves the config manual strengths (seg=${segBal()} col=${colBal()})`, segBal() === 150 && colBal() === 128);
+// ...and a stored BALANCE=off still forces both off regardless of a manual config value.
+eeReset(); setMtime(0x5AA5, 0x1234);
+setBal(1, 1);                                                // deterministic ON so one toggle lands OFF
+gotoBalance(); ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL);  // EDIT, toggle -> OFF, SAVE (ovr.bal=0)
+eeCommit(); backToL0();
+setBal(150, 128); cfgDef(1 << KID_BALANCE, 0); setMtime(0x5AA5, 0x1234);
+eeApply();
+check(`BALANCE=off forces both off (seg=${segBal()} col=${colBal()})`, segBal() === 0 && colBal() === 0);
+
 let fail = 0;
 for (const r of results) { if (!r.pass) fail++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}`); }
 console.log(fail ? `\n${fail} FAIL` : `\nALL PASS`);
