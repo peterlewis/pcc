@@ -50,6 +50,9 @@ static void (*g_pps)(void) = 0;
 /* ================= emulator API (full in-TU access to main.c internals) ================= */
 /* --- display readout (the firmware's actual latched output) --- */
 unsigned char* emu_daterow(void){ return &uart2_tx_buffer[0]; }   /* [1..10] ASCII date row */
+/* Render an arbitrary display mode's date row through the REAL sendDate(), for tests. Clears the
+ * latch guard so the paint always happens; the row bytes land in uart2_tx_buffer[1..i]. */
+void emu_render_mode(int m){ waitingForLatch = 0; displayMode = (uint8_t)m; sendDate(1); }
 unsigned char  emu_seg_c(void){ return next7seg.c; }
 unsigned short emu_seg_b(int i){ return next7seg.b[i]; }
 unsigned short emu_bufb(int i){ return buffer_b[i]; }
@@ -186,6 +189,11 @@ int  emu_MODE_SOLAR(void){ return MODE_SOLAR; }
 #else
 int  emu_MODE_LST(void){ return -1; }     /* lean branch: sidereal modes absent */
 int  emu_MODE_SOLAR(void){ return -1; }
+#endif
+#if EMU_HAS_ADEV
+int  emu_MODE_ADEV(void){ return MODE_ADEV; }
+#else
+int  emu_MODE_ADEV(void){ return -1; }    /* lean branch: no Allan-deviation engine/mode */
 #endif
 
 /* --- brightness inject: firmware reads ADC1 (phototransistor); make it settable --- */
@@ -373,6 +381,19 @@ const char* emu_pmtxts_line(void){
   pps_ts_enabled = 1;
   hUsbDeviceFS.dev_state = USBD_STATE_CONFIGURED;  /* satisfy emitPPSTimestamp's host-present gate */
   if (pps_record_pending) emitPPSTimestamp();
+#else
+  emu_pmtxts_buf[0] = 0;
+#endif
+  return emu_pmtxts_buf;
+}
+/* Drive one $PMADEV emit from the current phase ring (whatever emu_adev_push has fed) and return the
+ * sentence — the firmware's OWN adev_dump_step() formatting + NMEA checksum, byte-faithful. */
+const char* emu_adev_line(void){
+#if EMU_HAS_ADEV
+  emu_pmtxts_buf[0] = 0;
+  hUsbDeviceFS.dev_state = USBD_STATE_CONFIGURED;  /* satisfy adev_dump_step's host-present gate */
+  adev_dump_pending = 1;
+  adev_dump_step();                                /* builds + "sends" -> CDC shim -> emu_pmtxts_buf */
 #else
   emu_pmtxts_buf[0] = 0;
 #endif
