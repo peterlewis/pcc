@@ -25,6 +25,9 @@
 #ifndef EMU_HAS_ALT
 #  define EMU_HAS_ALT 1
 #endif
+#ifndef EMU_HAS_ADEV
+#  define EMU_HAS_ADEV 0
+#endif
 #include "shim_redirect.h"
 
 #ifdef EMU_NATIVE64
@@ -67,6 +70,22 @@ unsigned char  emu_digit_fade(int i){ (void)i; return 255; }   /* lean branch: n
 double emu_holdover_u_us(void){ return (double)holdover_u_us; }
 #else
 double emu_holdover_u_us(void){ return 0; }
+#endif
+/* Live Allan-deviation engine (MODE_ADEV) — inject a phase series directly and read back the
+ * overlapping ADEV, so a JS golden test can feed white/random-walk FM noise and assert the slopes
+ * (tau^-1/2, tau^+1/2) AND cross-check every tau against a double-precision reference. */
+#if EMU_HAS_ADEV
+void   emu_adev_reset(void){ adev_reset(); }
+void   emu_adev_push(double x_ticks){ adev_push_x((int32_t)lround(x_ticks)); }  /* bypass the DWT delta */
+void   emu_adev_reduce(void){ adev_reduce(); }
+double emu_adev_sigma(int m){ return (m > 0) ? (double)adev_sigma_for_m((uint32_t)m) : 0.0; }
+int    emu_adev_noctave(void){ return (int)adev_noct; }
+#else
+void   emu_adev_reset(void){}
+void   emu_adev_push(double x){ (void)x; }
+void   emu_adev_reduce(void){}
+double emu_adev_sigma(int m){ (void)m; return 0.0; }
+int    emu_adev_noctave(void){ return 0; }
 #endif
 /* Tempcomp model read-back — for the companion app's temp-comp panel and warm-start verification.
  * field: 0 hse_valid · 1 lse_valid · 2 hse_b (ppm/°C) · 3 hse_c (ppm/°C²) · 4 lse_a (ppm)
