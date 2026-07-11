@@ -38,8 +38,7 @@ function backToL0() { for (let i = 0; i < 6 && layer() !== 0; i++) { ev(EVT.S2);
 function gotoBalance() {
   ev(EVT.S1); ev(EVT.REL);
   for (let g = 0; secOf() !== SEC_DISP && g < 8; g++) ev(EVT.BTN1);
-  ev(EVT.S1); ev(EVT.REL);                                     // ENTER DISP -> L2 banner
-  ev(EVT.BTN1);                                                // dismiss banner
+  ev(EVT.S1); ev(EVT.REL);                                     // ENTER DISP -> L2, lands on the first item
   for (let h = 0; !row().startsWith('BALANCE') && h < 12; h++) ev(EVT.BTN1);
 }
 

@@ -4,8 +4,8 @@
 // Four layers: L0 clock -> L1 SECTION ring -> L2 ITEM ring (within a section) -> L3 value EDITor.
 // Grammar: tap scrolls the current ring / steps a value; chord stage crossings (0x94/95/96) render a
 // self-label (SETUP/ENTER/EXIT/EDIT/BACK/SAVE/CANCEL); release (0x93) fires the shown stage. Also:
-// the section-name breadcrumb, first-tap dismiss, live-preview, CANCEL restore, section resume across
-// exit, 15 s idle, the LASt empty-ring guard, and stock-board dormancy.
+// ENTER lands directly on the section's first item (no banner), live-preview, CANCEL restore, section
+// resume across exit, 15 s idle, the LASt empty-ring guard, and stock-board dormancy.
 // Run: node menu_check.mjs   (from phase1/, after build.sh)
 import factory from '../clock-fw.mjs';
 
@@ -56,11 +56,9 @@ check(`L1 stage 2 shows "${row()}"`, row() === 'EXIT');
 ev(EVT.S1);
 check(`L1 stage 1 shows "${row()}"`, row() === 'ENTER');
 
-// (5) ENTER DISP -> L2 item ring; the breadcrumb banner shows the section, first tap reveals the item.
+// (5) ENTER DISP -> L2 item ring, landing directly on the first item (no section banner).
 ev(EVT.REL);
-check(`ENTER -> L2 item ring, banner "${row()}"`, layer() === L2 && row() === 'DISP');
-ev(EVT.BTN1);
-check(`first tap dismisses banner -> "${row()}"`, row().startsWith('BRIGHT') && midx() === 0);
+check(`ENTER -> L2 on the first item "${row()}"`, layer() === L2 && row().startsWith('BRIGHT') && midx() === 0);
 
 // (6) item scroll stays WITHIN the section (BRIGHT -> BALANCE -> COLON -> COLONALT, then back).
 ev(EVT.BTN1);
@@ -118,9 +116,8 @@ let lastSeen = false, guarded = true, safety = 0;
 for (let s = 0; s < 5 && !lastSeen; s++) {
   toSectionRing();
   let g = 0; while (section() !== s && g++ < 8) ev(EVT.BTN1);  // scroll to section s
-  ev(EVT.S1); ev(EVT.REL);                                     // ENTER -> L2 (banner)
+  ev(EVT.S1); ev(EVT.REL);                                     // ENTER -> L2, lands on the first item (no banner)
   if (layer() !== L2) continue;
-  ev(EVT.BTN1);                                                // dismiss banner
   for (let pass = 0; pass < 15 && safety < 500 && !lastSeen; pass++) {
     safety++;
     ev(EVT.S1); ev(EVT.REL);                                   // EDIT

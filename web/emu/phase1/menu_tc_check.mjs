@@ -39,8 +39,7 @@ function backToL0() { for (let i = 0; i < 6 && layer() !== 0; i++) { ev(EVT.S2);
 function gotoTempcomp() {
   ev(EVT.S1); ev(EVT.REL);                                     // L0 -> L1 section ring
   for (let g = 0; secOf() !== SEC_DIAG && g < 8; g++) ev(EVT.BTN1);
-  ev(EVT.S1); ev(EVT.REL);                                     // ENTER DIAG -> L2 (banner)
-  ev(EVT.BTN1);                                                // dismiss banner -> first DIAG item
+  ev(EVT.S1); ev(EVT.REL);                                     // ENTER DIAG -> L2, lands on the first DIAG item
   for (let h = 0; !row().startsWith('TEMPCOMP') && h < 12; h++) ev(EVT.BTN1);
 }
 

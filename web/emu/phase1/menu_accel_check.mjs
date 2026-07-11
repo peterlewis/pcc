@@ -27,8 +27,7 @@ bootCold(1783627200);
 function gotoPageMs() {
   ev(EVT.S1); ev(EVT.REL);                                   // L0 -> L1 section ring
   for (let g = 0; secOf() !== SEC_DISP && g < 8; g++) ev(EVT.BTN1);
-  ev(EVT.S1); ev(EVT.REL);                                   // ENTER DISP -> L2 (banner)
-  ev(EVT.BTN1);                                              // dismiss banner -> first item
+  ev(EVT.S1); ev(EVT.REL);                                   // ENTER DISP -> L2, lands on the first item (no banner)
   for (let h = 0; !row().startsWith('PAGE') && h < 12; h++) ev(EVT.BTN1);
 }
 gotoPageMs();
