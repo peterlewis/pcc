@@ -96,7 +96,7 @@ for (const dir of ['fonts', 'globe', 'data']) {
 //     back to browser Intl. (The old standalone emu/clock-emu.html demo page is gone — the app's
 //     clock faces ARE the emulator.)
 mkdirSync(resolve(docs, 'emu'), { recursive: true });
-for (const bin of ['tzrules.bin', 'tzmap.bin']) {
+for (const bin of ['tzrules.bin', 'tzmap.bin', 'stars.bin']) {
   const src = resolve(web, 'emu', bin);
   if (existsSync(src)) { cpSync(src, resolve(docs, 'emu', bin)); console.log(`copied docs/emu/${bin} (${kb(statSync(src).size)} KB)`); }
   else console.warn(`WARN: web/emu/${bin} missing — the deployed tz engine will fall back to browser Intl`);

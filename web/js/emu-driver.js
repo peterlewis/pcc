@@ -58,6 +58,7 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     loadZone: w('emu_load_zone','number',['string']),               // firmware DST engine (real /TZRULES.BIN)
     zoneFromPos: w('emu_zone_from_pos','string',['number','number']),// ZoneDetect: (lat,lon)->IANA zone (/TZMAP.BIN)
     _registerFile: w('emu_register_file','void',['string','number','number']),
+    _loadStars: w('emu_load_stars','void',[]),
     feedNmea: w('emu_feed_nmea','void',['string']),
     now: w('emu_now','number'), mode: w('emu_mode','number'),
     hadPps: w('emu_had_pps','number'), sincePps: w('emu_since_pps','number'),
@@ -111,6 +112,13 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
       const resp = await fetch(emuAsset('tzrules.bin'));
       if (resp.ok) { tzBytes = new Uint8Array(await resp.arrayBuffer()); registerFile('/TZRULES.BIN', tzBytes); }
     } catch (e) { /* offline / missing -> offset-shim fallback */ }
+    // Star catalogue: MODE_STAR requires /STARS.BIN (the firmware has NO baked fallback by design) —
+    // ship the same 93-star catalogue the physical CLOCK drive carries and load it through the
+    // firmware's own loadStars(). Offline/missing -> the mode honestly shows "STAr ----".
+    try {
+      const resp = await fetch(emuAsset('stars.bin'));
+      if (resp.ok) { registerFile('/STARS.BIN', new Uint8Array(await resp.arrayBuffer())); E._loadStars(); }
+    } catch (e) { /* mode stays honestly empty */ }
   }
   // Lazily fetch + register the 12 MB /TZMAP.BIN (ZoneDetect) — only when a manually-observed
   // position needs its own zone, so the common case (observer ≈ browser) never pays the download.

@@ -68,7 +68,7 @@ MODE_LATLON   = disabled
 
 # Bright-star meridian-transit predictor — paged countdowns to the soonest bright stars
 # crossing your local meridian, e.g. "SIRI  1 35". Needs a position (GPS or fake_longitude).
-# The catalogue is loaded from STARS.BIN on the card (~90 naked-eye stars, generate-stars.py);
+# The catalogue is loaded from STARS.BIN on the CLOCK drive (93 naked-eye stars, generate-stars.py);
 # without a card it falls back to a baked ~30-star set.
 MODE_STAR = disabled
 # Trim the transit catalogue to stars brighter than this magnitude (smaller = fewer, more famous;
