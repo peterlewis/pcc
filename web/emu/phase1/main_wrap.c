@@ -210,10 +210,13 @@ int  emu_colon_preview(void){ return (int)colon_preview; }   // §3.5: 0xFF = no
 void emu_set_colon_anchors(int full_at, int floor){ colon_full_at = full_at; colon_floor = floor; }
 int  emu_menu_modecount(void){ int n=0; for (int i=0;i<NUM_DISPLAY_MODES;i++) if (i!=MODE_STANDBY && config.modes_enabled[i]) n++; return n; }
 
-/* Menu persistence test harness (emu flash shim is the RAM-backed ee_emu[] in main.c). */
+/* Menu persistence test harness. The emu store is the NOR-true SETTINGS.BIN model in main.c
+ * (ee_sfile[16K]: program ANDs bits, erase refills a 4 KB sector with 0xFF) — the same medium the
+ * RC-silicon hardware uses, so persistence tests can no longer pass against physics the chip
+ * doesn't have. emu_ee_reset re-provisions the file as flash.sh does (0xFF-filled). */
 #ifdef __EMSCRIPTEN__
-void   emu_ee_reset(void){ memset(ee_emu,0xFF,sizeof ee_emu); ee_load(); }   /* fresh flash */
-void   emu_ee_load(void){ ee_load(); }                                       /* re-scan (reboot) */
+void   emu_ee_reset(void){ memset(ee_sfile,0xFF,sizeof ee_sfile); ee_load(); ee2_load(); }  /* fresh 0xFF file */
+void   emu_ee_load(void){ ee_load(); ee2_load(); }                            /* re-scan (reboot) */
 int    emu_ee_commit(void){ int r=(int)ee_commit(); if(r) menu_dirty=0; return r; }
 void   emu_ee_apply(void){ menu_apply_overrides(); }
 void   emu_ovr_clear(void){ memset((void*)&ovr,0,sizeof ovr); }              /* simulate RAM loss */
@@ -222,8 +225,25 @@ void   emu_set_mtime(int fd,int ft){ config.fdate=(unsigned short)fd; config.fti
 void   emu_cfg_defined(unsigned s, unsigned m){ cfg_simple_defined=(uint16_t)s; cfg_modes_defined=m; }  // u16: KIDs 8/9 (MATRIX/TEMPCOMP) live above bit 7
 double emu_brightness(void){ return (double)config.brightness_override; }
 void   emu_set_brightness(double v){ config.brightness_override=(float)v; }
-int    emu_ee_peek(unsigned off){ return off<sizeof(ee_emu)?ee_emu[off]:-1; }
-void   emu_ee_poke(unsigned off,int v){ if(off<sizeof(ee_emu)) ee_emu[off]=(uint8_t)v; }
+int    emu_ee_peek(unsigned off){ return off<sizeof(ee_sfile)?ee_sfile[off]:-1; }
+void   emu_ee_poke(unsigned off,int v){ if(off<sizeof(ee_sfile)) ee_sfile[off]=(uint8_t)v; }
+/* SETTINGS.BIN scenario controls (drive ee_init_base's resolver on the NEXT emu_ee_load):
+ *   attach(1,0,0xFF) = provisioned card (default) | attach(0,..) = no file -> RAM-only |
+ *   attach(1,1,..)   = fragmented file -> resolver rejects -> RAM-only |
+ *   attach(1,0,0x00) = naive 0x00-filled provisioning -> first-use erase must recover it. */
+void   emu_settings_attach(int attached, int fragmented, int fill){
+  ee_sfile_attached=(uint8_t)attached; ee_sfile_frag=(uint8_t)fragmented;
+  memset(ee_sfile,(uint8_t)fill,sizeof ee_sfile);
+}
+/* Simulate a host MSC write: scribble the region AND bump the mapping generation (as
+ * STORAGE_Write_FS does) so the next commit is forced through settings_mapping_ok(). */
+void   emu_settings_host_write(unsigned off, unsigned len, int val){
+  for (unsigned i=0; i<len && off+i<sizeof ee_sfile; i++) ee_sfile[off+i]=(uint8_t)val;
+  settings_map_gen++;
+}
+int    emu_ee_backing(void){ return (int)ee_backing; }        /* 0 NONE / 1 INTERNAL / 2 QSPI */
+int    emu_ee_sfile_state(void){ return (int)ee_sfile_state; }/* 0 no file / 1 ok / 2 fragmented */
+int    emu_ee_next(void){ return (int)ee_next; }              /* append cursor (skip-to-blank checks) */
 int    emu_menu_dirty(void){ return menu_dirty; }
 void   emu_menu_reset(void){ menu_reset_pending = 1; menu_reset_step(); }   /* factory-reset the menu store */
 int    emu_menu_reset_pending(void){ return menu_reset_pending; }           /* SYS>RESET confirm sets this */
@@ -235,17 +255,27 @@ void   emu_menu_reset_step(void){ menu_reset_step(); }                      /* s
 void   emu_set_uart_ready(int ready){ huart2.gState = ready ? HAL_UART_STATE_READY : HAL_UART_STATE_RESET; }
 void   emu_set_pps(int enabled, int pending){ pps_ts_enabled = enabled?1:0; pps_record_pending = pending?1:0; }
 
-/* Tempcomp retained-model persistence harness — the ee2 store is a separate RAM-backed page pair
- * (ee2_emu[]) from the menu store. Exercises: commit a learned model -> "power cycle" -> the boot
- * seed sequence restores it; config.txt precedence; corrupt/implausible-model rejection; tc_forget.
+/* Tempcomp retained-model persistence harness — the ee2 store is the UPPER HALF of the shared
+ * SETTINGS.BIN model (ee_sfile[0x2000..0x3FFF]; the menu pair owns the lower half). Exercises:
+ * commit a learned model -> "power cycle" -> the boot seed sequence restores it; config.txt
+ * precedence; corrupt/implausible-model rejection; tc_forget. Peek/poke offsets stay RELATIVE to
+ * the ee2 region so existing tests keep addressing record bytes the same way.
  * Guarded by EMU_HAS_TC_PERSIST (not EMU_HAS_TEMPCOMP): a branch can have tempcomp WITHOUT the ee2
  * persistence layer (e.g. the menu PR branch or PR #9's tempcomp), and these hooks reference tc2/ee2. */
 #if EMU_HAS_TC_PERSIST
-void   emu_ee2_reset(void){ memset(ee2_emu,0xFF,sizeof ee2_emu); ee2_load(); }   /* fresh flash + init base */
-void   emu_ee2_load(void){ ee2_load(); }                                         /* re-scan (reboot) */
+#define EE2_EMU_OFF 0x2000u
+void   emu_ee2_reset(void){
+  if (ee_backing == EE_BK_NONE) ee_init_base();          /* resolver first: ee2 bases derive from it */
+  memset(&ee_sfile[EE2_EMU_OFF], 0xFF, sizeof(ee_sfile) - EE2_EMU_OFF);
+  ee2_load();
+}
+void   emu_ee2_load(void){
+  if (ee_backing == EE_BK_NONE) ee_init_base();
+  ee2_load();                                            /* re-scan (reboot) */
+}
 int    emu_ee2_commit(void){ return (int)ee2_commit(); }
-int    emu_ee2_peek(unsigned off){ return off<sizeof(ee2_emu)?ee2_emu[off]:-1; }
-void   emu_ee2_poke(unsigned off,int v){ if(off<sizeof(ee2_emu)) ee2_emu[off]=(uint8_t)v; }
+int    emu_ee2_peek(unsigned off){ off += EE2_EMU_OFF; return off<sizeof(ee_sfile)?ee_sfile[off]:-1; }
+void   emu_ee2_poke(unsigned off,int v){ off += EE2_EMU_OFF; if(off<sizeof(ee_sfile)) ee_sfile[off]=(uint8_t)v; }
 void   emu_tc_persist_set(int on){ tc_persist = on?1:0; }
 void   emu_tc_seed_flag(int on){ tc_seed = on?1:0; }
 void   emu_cfg_tc_defined(unsigned mask){ cfg_tc_defined = (uint8_t)mask; }
@@ -261,7 +291,7 @@ void   emu_tc_set_model(double hse_b, double hse_c, int lo, int hi, int n_hse, d
   tc_hse_tmin=(int16_t)lo; tc_hse_tmax=(int16_t)hi; tc_hse_valid=1; tc_hse_prior=3;
   tc_n_hse=(uint32_t)n_hse; tc_hse_resid=(float)resid_ppm*tpp;
 }
-void   emu_tc_clear_model(void){    /* simulate the power-on .bss clear, but keep ee2_emu[] (flash) */
+void   emu_tc_clear_model(void){    /* simulate the power-on .bss clear, but keep the settings file (flash) */
   tc_hse_valid=tc_lse_valid=0; tc_hse_m[0]=tc_hse_m[1]=tc_hse_m[2]=0.0f;
   tc_hse_prior=tc_lse_prior=0; tc_n_hse=tc_n_lse=0; tc_hse_resid=tc_lse_resid=0.0f;
   tc_seed=0; tc_seed_done=0; tc_persist_seeded=0; tc_model_dirty=0;
