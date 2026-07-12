@@ -122,6 +122,23 @@ const d100 = verify(100, 'strength 100');
     `ratios=${[...new Set(ratios)].join(',')}`);
 }
 
+// ---- ISR freshness: mirrors must track the masters through a main-loop stall ------------------
+// The hardware once-per-second freeze: a long main-loop pass (PendSV display prep, housekeeping)
+// starves the mirror refill while SysTick keeps painting the masters. segbal_isr_refresh() must
+// carry the live masters into the mirrors with NO poll at all.
+{
+  for (let i = 0; i < 50; i++) E.tick();               // 50 ms of ticks, main loop stalled
+  let fresh = true;
+  for (const col of [1, 2, 3]) {                       // ds/cs/ms columns
+    const ml = E.bufcLo(col) & 0xFF;
+    for (let k = 1; k < 16; k++) {
+      const l = E.bufcLo(col + 5 * k) & 0xFF;
+      if (l !== 0 && l !== ml) fresh = false;          // every lit mirror shows the CURRENT master
+    }
+  }
+  check('stall: lit mirrors track ISR-fresh masters with no poll for 50 ms', fresh);
+}
+
 // ---- live strength change over serial (the config path PCC uses) ----------------------------
 E.configLine('seg_balance = 50');
 drive(20);
