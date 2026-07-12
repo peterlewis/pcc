@@ -18,12 +18,12 @@ const colMode = w('emu_colon_mode', 'number');
 const colPrev = w('emu_colon_preview', 'number');
 const row = () => { const p = rowPtr(); let s = ''; for (let i = 1; i <= 10; i++) { const c = M.HEAPU8[p + i]; if (c < 32 || c > 126) break; s += String.fromCharCode(c); } return s.trimEnd(); };
 
-const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95 };
+const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95, S3: 0x96 };
 const L2 = 2, L3 = 3, SEC_DISP = 2, NOPREV = 0xFF;
 const results = [];
 const check = (n, pass) => results.push({ n, pass: !!pass });
 
-function backToL0() { for (let i = 0; i < 6 && layer() !== 0; i++) { ev(EVT.S2); ev(EVT.REL); } }
+function backToL0() { for (let i = 0; i < 6 && layer() !== 0; i++) { ev(layer() === 3 ? EVT.S3 : EVT.S2); ev(EVT.REL); } }
 function gotoItem(prefix) {
   ev(EVT.S1); ev(EVT.REL);
   for (let g = 0; secOf() !== SEC_DISP && g < 8; g++) ev(EVT.BTN1);
@@ -38,8 +38,8 @@ const civilMode = colMode();
 check(`boot: no colon preview active`, colPrev() === NOPREV);
 
 // --- COLONALT: the value being edited must appear on the real colons even from a civil face ---
-gotoItem('COLONALT');
-check(`landed on COLONALT ("${row()}")`, row().startsWith('COLONALT'));
+gotoItem('ACOLON');
+check(`landed on ACOLON ("${row()}")`, row().startsWith('ACOLON'));
 ev(EVT.S1); ev(EVT.REL);                                       // EDIT -> L3
 check(`edit opens L3`, layer() === L3);
 check(`preview armed on entry (prev=${colPrev()})`, colPrev() !== NOPREV);
@@ -47,7 +47,7 @@ check(`the ALT colon is previewed, not the civil one`, colMode() === colPrev() &
 const alt0 = colMode();
 ev(EVT.BTN1);                                                  // step the enum
 check(`stepping tracks the preview live`, colMode() === colPrev() && colMode() !== alt0);
-ev(EVT.S2); ev(EVT.REL);                                       // CANCEL
+ev(EVT.S3); ev(EVT.REL);                                       // CANCEL (deep stage)
 check(`CANCEL clears the preview`, colPrev() === NOPREV);
 check(`CANCEL restores the civil context colon`, colMode() === civilMode);
 check(`CANCEL returns to L2`, layer() === L2);
@@ -67,7 +67,7 @@ check(`COMMIT keeps the picked colon as the civil context colon`, colMode() === 
 backToL0();
 
 // --- idle-exit mid-edit must not leave a preview stuck ---
-gotoItem('COLONALT');
+gotoItem('ACOLON');
 ev(EVT.S1); ev(EVT.REL);                                       // EDIT (preview armed)
 check(`preview armed before idle`, colPrev() !== NOPREV);
 tick(60000);                                                  // exceed MENU_IDLE_MS -> menu_to_L0

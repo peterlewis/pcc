@@ -62,11 +62,14 @@ function run(kind, scale, expSlope) {
 run('wfm', 1000, -0.5);   // white FM  -> tau^-1/2
 run('rwfm', 30, +0.5);    // random-walk FM -> tau^+1/2
 
-// buffer-not-full behaviour: with 5 samples, only tau=1,2 are computable (need 2m+1). Use a
-// non-linear series so the second differences are non-zero (a linear ramp is constant frequency ->
-// ADEV 0 by construction, which the firmware also gets right — see the drift check in adev_ref).
+// buffer-not-full behaviour + the maturity gate: with 5 samples tau=2 is mathematically COMPUTABLE
+// (needs 2m+1 = 5; sigma(2) > 0 via the direct call) but NOT published (adev_reduce requires
+// valid >= 4m = 8 — a bare-minimum octave is a single second-difference with ~100% error bars, and
+// the display must not show it at full authority). Non-linear series so second differences != 0.
 A.reset(); for (const v of [0, 10, 15, 12, 20]) A.push(v); A.reduce();
-check(`short buffer: tau=1,2 computable, tau=4 not (noct=${A.noct()})`, A.noct() === 2 && A.sigma(1) > 0 && A.sigma(4) === 0);
+check(`maturity gate: tau=2 computable but unpublished (noct=${A.noct()})`, A.noct() === 1 && A.sigma(1) > 0 && A.sigma(2) > 0 && A.sigma(4) === 0);
+for (const v of [25, 21, 30]) A.push(v); A.reduce();       // valid=8 -> tau=2 crosses 4m
+check(`tau=2 publishes at valid=8 (noct=${A.noct()})`, A.noct() === 2);
 
 // ---- Display + serial: exercise the firmware's OWN sendDate()/adev_dump_step() formatting --------
 const rowPtr  = w('emu_daterow',    'number');
@@ -88,7 +91,7 @@ check(`display: empty ring shows "${rf}"`, rf.startsWith('Adev') && rf.includes(
   A.reset(); for (let i = 0; i < 300; i++) A.push(Math.round(raw[i] * 1000)); A.reduce();
   renderM(MODE_ADEV);
   const r = row();
-  const wellFormed = /^\d{1,4}s ?\d(\.\d)?e[+-]?\d+$/.test(r) && r.length <= 10;
+  const wellFormed = /^\d{1,4} \d(\.\d)?e[+-]?\d+$/.test(r) && r.length <= 10;   // no unit-s ('s' == the '5' glyph), always a separator
   check(`display: octave page renders "${r}" (<=10 ch, scientific)`, wellFormed);
 }
 
@@ -114,6 +117,38 @@ check(`display: empty ring shows "${rf}"`, rf.startsWith('Adev') && rf.includes(
     ok = cksOk && countOk && sigOk;
   }
   check(`serial: $PMADEV framing+checksum+${mm ? mm[1].split(',').length - 3 : '?'} octaves match cache — "${line}"`, ok);
+}
+
+// ---- the REAL capture path (adev_push_dwt): wrap exactness, missed-second tolerance, gap honesty ----
+{
+  const pushDwt = w('emu_adev_push_dwt', 'void', ['number', 'number']);
+  const valid   = w('emu_adev_valid', 'number');
+  const FCPU = 80000000;
+  // (6) DWT wrap: a constant +80-tick/s frequency offset stepping ACROSS the 2^32 counter wrap is a
+  // linear phase ramp -> every second difference is exactly 0 -> ADEV 0. Any wrap mishandling shows
+  // up as a huge spike.
+  A.reset();
+  let dwt = 0xFFFF0000; // wraps within the first second
+  for (let e = 0; e < 12; e++) { pushDwt(dwt >>> 0, 1000 + e); dwt = (dwt + FCPU + 80) % 4294967296; }
+  A.reduce();
+  check(`DWT 2^32 wrap: linear ramp stays exactly ADEV 0 across the wrap (sigma1=${A.sigma(1)})`, valid() === 12 && A.sigma(1) === 0   /* 1 restart + 11 contiguous */);
+
+  // (7) ONE missed PPS second is tolerated (midpoint interpolation), not a record wipe.
+  A.reset();
+  dwt = 1000;
+  for (let e = 0; e < 6; e++) { pushDwt(dwt >>> 0, 2000 + e); dwt = (dwt + FCPU + 80) % 4294967296; }
+  const vBefore = valid();
+  dwt = (dwt + FCPU + 80) % 4294967296;                       // the missed second elapses...
+  pushDwt(dwt >>> 0, 2000 + 7);                               // ...next edge arrives at epoch delta 2
+  check(`single missed PPS: record continues (+2 samples: ${vBefore} -> ${valid()})`, valid() === vBefore + 2);
+  A.reduce();
+  check(`interpolated midpoint keeps the ramp clean (sigma1=${A.sigma(1)})`, A.sigma(1) === 0);
+
+  // (8) a real gap (>2 s) restarts AND zeroes noct IMMEDIATELY — the display must not keep painting
+  // the stale pre-gap curve until the next page flip.
+  check(`pre-gap noct > 0`, A.noct() > 0);
+  pushDwt(dwt >>> 0, 2000 + 60);                              // 53 s hole
+  check(`gap zeroes noct in the ISR path (noct=${A.noct()}, valid=${valid()})`, A.noct() === 0 && valid() === 1);
 }
 
 let fail = 0;

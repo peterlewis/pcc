@@ -22,7 +22,7 @@ const resetPending = w('emu_menu_reset_pending', 'number');
 const resetStep    = w('emu_menu_reset_step', 'void');
 const row = () => { const p = rowPtr(); let s = ''; for (let i = 1; i <= 10; i++) { const c = M.HEAPU8[p + i]; if (c < 32 || c > 126) break; s += String.fromCharCode(c); } return s.trimEnd(); };
 
-const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95 };
+const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95, S3: 0x96 };
 const L2 = 2, L3 = 3, SEC_DISP = 2, SEC_SYS = 4;
 const results = [];
 const check = (n, pass) => results.push({ n, pass: !!pass });
@@ -48,15 +48,15 @@ backToL0();
 gotoSection(SEC_SYS, 'RESET');
 check(`SYS has a RESET item ("${row()}")`, row() === 'RESET' && secOf() === SEC_SYS);
 ev(EVT.S1); ev(EVT.REL);                                        // EDIT -> confirm
-check(`EDIT opens the confirm at L3 ("${row()}")`, layer() === L3 && row() === 'SURE?');
+check(`EDIT opens the confirm at L3 ("${row()}")`, layer() === L3 && row() === 'DELETE ALL');
 
-// (2) CANCEL is safe: no reset armed, back to the item.
-ev(EVT.S2); ev(EVT.REL);
+// (2) CANCEL is safe: no reset armed, back to the item. (CANCEL = deep stage 3.)
+ev(EVT.S3); ev(EVT.REL);
 check(`CANCEL aborts (nothing armed, back at L2)`, layer() === L2 && resetPending() === 0 && ovrValid() === 1);
 
 // (3) SAVE from the confirm arms the factory reset; servicing it wipes the stored overrides.
 ev(EVT.S1); ev(EVT.REL);                                        // EDIT -> SURE?
-check(`re-open confirm`, layer() === L3 && row() === 'SURE?');
+check(`re-open confirm`, layer() === L3 && row() === 'DELETE ALL');
 ev(EVT.S1); ev(EVT.REL);                                        // SAVE -> fire
 check(`SAVE arms the factory reset (pending=${resetPending()})`, resetPending() === 1);
 resetStep();                                                    // the main loop services it

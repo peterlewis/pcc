@@ -21,6 +21,12 @@ const raF      = w('emu_star_ra',   'number', ['number']);
 const decF     = w('emu_star_dec',  'number', ['number']);
 const nameF    = w('emu_star_name', 'string', ['number']);
 const loadStars= w('emu_load_stars','void');
+const pmraF    = w('emu_star_pmra', 'number', ['number']);
+const pmdecF   = w('emu_star_pmdec','number', ['number']);
+const raNowF   = w('emu_star_ra_now','number', ['number']);
+const decNowF  = w('emu_star_dec_now','number', ['number']);
+const refresh  = w('emu_star_refresh','void');
+const fromCard = w('emu_star_from_card','number');
 const maxMag   = w('emu_star_max_mag','void', ['number']);
 const regFile  = w('emu_register_file','void', ['number','number','number']);
 const renderM  = w('emu_render_mode','void', ['number']);
@@ -67,13 +73,28 @@ check(`star_max_mag=400 saturates -> loads all ${fileCount} (not a wrapped-negat
 maxMag(6.0); loadStars();   // restore the full catalogue for the transit checks
 
 // Oracle: independent double-precision recomputation reading the LOADED catalogue + LST.
+// Apparent place = linear proper motion then RIGOROUS IAU-1976 precession (zeta/z/theta rotation) —
+// the same MODEL the firmware uses, implemented independently here; absolute authority comes from
+// the astropy FK5-of-date anchors below.
+function apparent(a, d, pmra, pmdec, yrs) {
+  const T = yrs / 100;
+  const zeta  = (2306.2181*T + 0.30188*T*T + 0.017998*T*T*T) / 3600 * D2R;
+  const z     = (2306.2181*T + 1.09468*T*T + 0.018203*T*T*T) / 3600 * D2R;
+  const theta = (2004.3109*T - 0.42665*T*T - 0.041833*T*T*T) / 3600 * D2R;
+  const cd = Math.max(Math.cos(d * D2R), 1e-6);
+  const a0 = a + (pmra / cd) * yrs / 3600000 / 15;      // mas/yr (mu_alpha*) -> hours
+  const d0 = d + pmdec * yrs / 3600000;                 // mas/yr -> degrees
+  const ar = a0 * 15 * D2R + zeta, dr = d0 * D2R;
+  const A = Math.cos(dr) * Math.sin(ar);
+  const B = Math.cos(theta) * Math.cos(dr) * Math.cos(ar) - Math.sin(theta) * Math.sin(dr);
+  const C = Math.sin(theta) * Math.cos(dr) * Math.cos(ar) + Math.cos(theta) * Math.sin(dr);
+  let aNow = (Math.atan2(A, B) + z) / D2R / 15; aNow = ((aNow % 24) + 24) % 24;
+  return { aNow, dNow: Math.asin(Math.max(-1, Math.min(1, C))) / D2R };
+}
 function predict(t, lat, lon) {
   const lst = lstF(t, lon), yrs = (t - J2000) / 31557600.0, N = nStar(), out = [];
   for (let i = 0; i < N; i++) {
-    const a = raF(i), d = decF(i), ar = a * 15 * D2R, dr = d * D2R;
-    const dra = (3.07496 + 1.33621 * Math.sin(ar) * Math.tan(dr)) * yrs;
-    const ddec = (20.0431 * Math.cos(ar) * yrs) / 3600;
-    const aNow = a + dra / 3600, dNow = d + ddec;
+    const { aNow, dNow } = apparent(raF(i), decF(i), pmraF(i), pmdecF(i), yrs);
     const alt = 90 - Math.abs(lat - dNow);
     if (alt <= 0) continue;
     let dt = (aNow - lst) % 24; if (dt < 0) dt += 24;
@@ -81,6 +102,25 @@ function predict(t, lat, lon) {
   }
   out.sort((x, y) => x.dt_s - y.dt_s);
   return out.slice(0, 8);
+}
+
+// ABSOLUTE anchors: apparent places from astropy (ICRS J2000 + space motion -> FK5 equinox-of-date,
+// i.e. IAU-1976 precession — the firmware's model family), computed from the SAME quantized record
+// values the firmware decodes, at this test's boot epoch T=1750000000 (J2025.454). The old oracle
+// reused the firmware's own constants, so a transcribed-wrong model would have passed silently —
+// these values come from an external authority. POLA is the near-pole case the previous first-order
+// formula got ~5 minutes wrong.
+refresh();
+const ANCHORS = [
+  ['POLA', 3.081430, 89.36531],
+  ['SIRI', 6.771251, -16.75673],
+  ['RIGI', 14.690001, -60.93496],
+];
+for (const [anm, ara, adec] of ANCHORS) {
+  let idx = -1; for (let i = 0; i < nStar(); i++) if (nameF(i) === anm) { idx = i; break; }
+  const raOk  = idx >= 0 && Math.abs(raNowF(idx)  - ara)  < 0.002;   // <0.002 h = 7.2 s of RA time
+  const decOk = idx >= 0 && Math.abs(decNowF(idx) - adec) < 0.003;   // <11 arcsec
+  check(`anchor ${anm}: apparent place matches astropy (ra ${idx>=0?raNowF(idx).toFixed(6):'?'} vs ${ara}, dec ${idx>=0?decNowF(idx).toFixed(5):'?'} vs ${adec})`, raOk && decOk);
 }
 
 setPos(LAT, LON);
@@ -93,11 +133,13 @@ if (mm) {
   check('serial: $PMSTAR checksum', cks === parseInt(mm[2], 16));
   const f = body.split(',');
   const n = parseInt(f[1], 10);
+  check(`serial: provenance field is C (card catalogue), got "${f[2]}"`, f[2] === 'C' && fromCard() === 1);
   const fw = [];
-  for (let k = 0; k < n; k++) fw.push({ nm: f[2 + 3 * k], dt_s: parseInt(f[3 + 3 * k], 10), alt: parseInt(f[4 + 3 * k], 10) });
+  for (let k = 0; k < n; k++) fw.push({ nm: f[3 + 3 * k], dt_s: parseInt(f[4 + 3 * k], 10), alt: parseInt(f[5 + 3 * k], 10) });
 
   const pred = predict(T, LAT, LON);
-  check(`count: firmware ${n} == oracle ${pred.length}`, n === pred.length && f.length === 2 + 3 * n);
+  check(`count: firmware ${n} == oracle ${pred.length}`, n === pred.length && f.length === 3 + 3 * n);
+  check(`serial: names are the FULL 4 chars (13 three-char prefixes collide across the card)`, fw.every(s => s.nm.trim().length >= 2 && s.nm.length <= 4));
 
   let asc = true; for (let k = 1; k < fw.length; k++) if (fw[k].dt_s < fw[k - 1].dt_s) asc = false;
   check('order: firmware list ascending by time-to-transit', asc);
@@ -119,7 +161,7 @@ if (mm) {
 
 // no-fix fallback: invalid position -> empty list + "STAr ----"
 setPos(-9999, -9999);
-check(`serial: no fix -> "${starLine().trim()}" (n=0)`, /^\$PMSTAR,0\*/.test(starLine().trim()));
+check(`serial: no fix -> "${starLine().trim()}" (n=0)`, /^\$PMSTAR,0,[CB]\*/.test(starLine().trim()));
 renderM(MODE_STAR);
 const rr = row();
 check(`display: no fix shows "${rr}"`, rr.startsWith('STAr') && rr.includes('----'));

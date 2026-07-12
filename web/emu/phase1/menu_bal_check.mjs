@@ -28,7 +28,7 @@ const setMtime= w('emu_set_mtime', 'void', ['number','number']);
 const cfgDef  = w('emu_cfg_defined', 'void', ['number','number']);
 const row = () => { const p = rowPtr(); let s = ''; for (let i = 1; i <= 10; i++) { const c = M.HEAPU8[p + i]; if (c < 32 || c > 126) break; s += String.fromCharCode(c); } return s.trimEnd(); };
 
-const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95 };
+const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95, S3: 0x96 };
 const L2 = 2, L3 = 3, SEC_DISP = 2, KID_BALANCE = 10;
 const results = [];
 const check = (n, pass) => results.push({ n, pass: !!pass });
@@ -39,7 +39,7 @@ function gotoBalance() {
   ev(EVT.S1); ev(EVT.REL);
   for (let g = 0; secOf() !== SEC_DISP && g < 8; g++) ev(EVT.BTN1);
   ev(EVT.S1); ev(EVT.REL);                                     // ENTER DISP -> L2, lands on the first item
-  for (let h = 0; !row().startsWith('BALANCE') && h < 12; h++) ev(EVT.BTN1);
+  for (let h = 0; !row().startsWith('BALANC') && h < 12; h++) ev(EVT.BTN1);
 }
 
 bootCold(1783627200);
@@ -65,7 +65,7 @@ setAnchors(2048, 20);                                          // restore defaul
 // --- the BALANCE editor: enter, tap to toggle (live), exit (DONE) saves; drives both systems + persists ---
 setBal(0, 0);
 gotoBalance();
-check(`DISP has a BALANCE toggle ("${row()}")`, row().startsWith('BALANCE') && secOf() === SEC_DISP);
+check(`DISP has a BALANCE toggle ("${row()}")`, row().startsWith('BALANC') && secOf() === SEC_DISP);
 ev(EVT.S1); ev(EVT.REL);                                       // EDIT -> editor
 ev(EVT.BTN1);                                                  // tap -> ON (live)
 check(`tap arms seg AND colon AUTO`, segBal() === 1 && colBal() === 1);

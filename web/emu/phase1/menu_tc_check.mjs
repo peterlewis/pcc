@@ -26,7 +26,7 @@ const setMtime= w('emu_set_mtime', 'void', ['number','number']);
 const cfgDef  = w('emu_cfg_defined', 'void', ['number','number']);
 const row = () => { const p = rowPtr(); let s = ''; for (let i = 1; i <= 10; i++) { const c = M.HEAPU8[p + i]; if (c < 32 || c > 126) break; s += String.fromCharCode(c); } return s.trimEnd(); };
 
-const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95 };
+const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95, S3: 0x96 };
 const L2 = 2, L3 = 3, SEC_DIAG = 3, KID_TEMPCOMP = 9;
 const results = [];
 const check = (n, pass) => results.push({ n, pass: !!pass });
@@ -40,7 +40,7 @@ function gotoTempcomp() {
   ev(EVT.S1); ev(EVT.REL);                                     // L0 -> L1 section ring
   for (let g = 0; secOf() !== SEC_DIAG && g < 8; g++) ev(EVT.BTN1);
   ev(EVT.S1); ev(EVT.REL);                                     // ENTER DIAG -> L2, lands on the first DIAG item
-  for (let h = 0; !row().startsWith('TEMPCOM') && h < 12; h++) ev(EVT.BTN1);
+  for (let h = 0; !row().startsWith('TEMPCO') && h < 12; h++) ev(EVT.BTN1);
 }
 
 bootCold(1783627200);
@@ -48,7 +48,7 @@ setTc(0, 0);                                                   // deterministic 
 
 // (0) the item exists in DIAG and reads as a toggle (not the "TC VIEW" mode).
 gotoTempcomp();
-check(`DIAG has a TEMPCOMP toggle item ("${row()}")`, row().startsWith('TEMPCOM') && secOf() === SEC_DIAG);
+check(`DIAG has a TEMPCOMP toggle item ("${row()}")`, row().startsWith('TEMPCO') && secOf() === SEC_DIAG);
 
 // (1) enter the editor, tap to ON (arms BOTH tc_learn + tc_apply live), exit (DONE) saves; again -> OFF.
 ev(EVT.S1); ev(EVT.REL);                                       // EDIT -> L3 editor

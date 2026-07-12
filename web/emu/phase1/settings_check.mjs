@@ -35,7 +35,7 @@ const sfState  = w('emu_ee_sfile_state', 'number');    // 0 no file / 1 ok / 2 f
 const eeNext   = w('emu_ee_next', 'number');
 const row = () => { const p = rowPtr(); let s = ''; for (let i = 1; i <= 10; i++) { const c = M.HEAPU8[p + i]; if (c < 32 || c > 126) break; s += String.fromCharCode(c); } return s.trimEnd(); };
 
-const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95 };
+const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95, S3: 0x96 };
 const SEC_DISP = 2;
 const results = [];
 const check = (n, pass) => results.push({ n, pass: !!pass });
@@ -45,7 +45,7 @@ function toggleBalanceOn(){        // enter DISP > BALANCE, editor flow: EDIT ->
   ev(EVT.S1); ev(EVT.REL);
   for (let g = 0; secOf() !== SEC_DISP && g < 8; g++) ev(EVT.BTN1);
   ev(EVT.S1); ev(EVT.REL);
-  for (let h = 0; !row().startsWith('BALANCE') && h < 12; h++) ev(EVT.BTN1);
+  for (let h = 0; !row().startsWith('BALANC') && h < 12; h++) ev(EVT.BTN1);
   ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL);
   backToL0();
 }

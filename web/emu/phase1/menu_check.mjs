@@ -50,7 +50,7 @@ ev(EVT.BTN1);   // -> DISP
 
 // (4) chord labels at L1: stage1 ENTER, stage2 EXIT, stage3 empty -> "----".
 ev(EVT.S3);
-check(`L1 empty stage 3 shows "${row()}"`, row() === '----');
+check(`L1 stage 3 shows "${row()}"`, row() === 'CLOCK');   // deep hold = bail to clock
 ev(EVT.S2);
 check(`L1 stage 2 shows "${row()}"`, row() === 'EXIT');
 ev(EVT.S1);
@@ -62,11 +62,11 @@ check(`ENTER -> L2 on the first item "${row()}"`, layer() === L2 && row().starts
 
 // (6) item scroll stays WITHIN the section (BRIGHT -> BALANCE -> COLON -> COLONALT, then back).
 ev(EVT.BTN1);
-check(`item fwd -> "${row()}"`, row().startsWith('BALANCE'));
+check(`item fwd -> "${row()}"`, row().startsWith('BALANC'));   // full OFF trims 7-char labels by one
 ev(EVT.BTN1);
 check(`item fwd -> "${row()}"`, row().startsWith('COLON') && !row().startsWith('COLONA'));
 ev(EVT.BTN1);
-check(`item fwd -> "${row()}"`, row().startsWith('COLONALT'));
+check(`item fwd -> "${row()}"`, row().startsWith('ACOLON'));   // renamed so the value fits at L2
 ev(EVT.BTN2); ev(EVT.BTN2); ev(EVT.BTN2);
 check(`item back -> "${row()}"`, row().startsWith('BRIGHT') && midx() === 0);
 
@@ -80,9 +80,12 @@ ev(EVT.BTN1);
 const after = row();
 check(`L3 step changes the live value ("${before}" -> "${after}")`, after !== before);
 
-// (8) CANCEL restores + returns to L2 on BRIGHT.
+// (8) CANCEL restores + returns to L2 on BRIGHT. CANCEL is the DEEP stage now, buffered one past
+// APPLY so an overshot commit can't silently discard the edit; stage 2 is the harmless "----".
 ev(EVT.S2);
-check(`L3 stage 2 shows "${row()}"`, row() === 'CANCEL');
+check(`L3 stage 2 is the "----" buffer ("${row()}")`, row() === '----');
+ev(EVT.S3);
+check(`L3 stage 3 shows "${row()}"`, row() === 'CANCEL');
 ev(EVT.REL);
 check(`CANCEL -> L2 on BRIGHT, restored "${row()}"`, layer() === L2 && row().startsWith('BRIGHT') && row().includes(before.trim()));
 
@@ -130,6 +133,63 @@ for (let s = 0; s < 5 && !lastSeen; s++) {
   }
 }
 check(`LASt guard fired and kept >=1 mode (count=${modecount()})`, lastSeen && guarded && modecount() >= 1);
+
+// ---- review-fix regressions (2026-07 Fable review) ----
+const mode  = w('emu_mode', 'number');
+const dirty = w('emu_menu_dirty', 'number');
+function toL0() { for (let i = 0; i < 6 && layer() !== L0; i++) { ev(layer() === L3 ? EVT.S3 : EVT.S2); ev(EVT.REL); } }
+toL0();
+
+// (14) releasing an L0 chord on an unlabeled stage restores the clock row (was: stuck on "----").
+ev(EVT.S1); ev(EVT.S2);
+check(`L0 stage 2 is unlabeled ("${row()}")`, row() === '----');
+ev(EVT.REL);
+check(`release on "----" restores the clock (layer ${layer()}, row "${row()}")`, layer() === L0 && row() !== '----');
+
+// (15) REBOOT arms only on the SECOND stage cycle: first-cycle stage 3 is unlabeled and safe.
+ev(EVT.S1); ev(EVT.S2); ev(EVT.S3);
+check(`L0 first-cycle stage 3 does NOT offer REBOOT ("${row()}")`, row() === '----');
+ev(EVT.REL);
+check(`first-cycle deep release is safe -> clock`, layer() === L0);
+ev(EVT.S1); ev(EVT.S2); ev(EVT.S3); ev(EVT.S1); ev(EVT.S2); ev(EVT.S3);   // hold through a full cycle
+check(`second-cycle stage 3 arms REBOOT ("${row()}")`, row() === 'REBOOT');
+ev(EVT.S1); ev(EVT.REL);                                                   // roll on to SETUP and take it (never release on REBOOT in a test)
+check(`rolling past REBOOT back to SETUP still enters the menu`, layer() === L1);
+toL0();
+
+// (16) a staggered both-press that leaked a single tap (mode changed) is undone when SETUP fires.
+// (the LASt walker above left only ONE mode enabled — enable a second so nextMode has somewhere to go)
+ev(EVT.S1); ev(EVT.REL);
+for (let g = 0; section() !== SEC.CAL && g < 8; g++) ev(EVT.BTN1);
+ev(EVT.S1); ev(EVT.REL);
+for (let h = 0; !row().endsWith('OFF') && h < 14; h++) ev(EVT.BTN1);   // first disabled CAL mode
+ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL);       // EDIT, tap ON, DONE
+toL0();
+const m0 = mode();
+ev(EVT.BTN1);                                   // the leaked half of the chord: nextMode fires
+check(`leaked single tap changed the mode`, mode() !== m0);
+ev(EVT.S1); ev(EVT.REL);                        // ...then the chord completes as SETUP
+check(`SETUP undoes the leaked mode change (mode ${mode()} == ${m0})`, layer() === L1 && mode() === m0);
+toL0();
+
+// (17) toggle editor: deep stage 3 = CANCEL (the shallow stages say DONE and save; CANCEL must not).
+ev(EVT.S1); ev(EVT.REL);                         // SETUP
+for (let g = 0; section() !== SEC.DISP && g < 8; g++) ev(EVT.BTN1);
+ev(EVT.S1); ev(EVT.REL);                         // ENTER DISP
+for (let h = 0; !row().startsWith('SIG FA') && h < 12; h++) ev(EVT.BTN1);
+const sigRow0 = row();
+ev(EVT.S1); ev(EVT.REL);                         // EDIT
+ev(EVT.BTN1);                                    // tap: toggled live
+ev(EVT.S3);
+check(`toggle stage 3 is labeled CANCEL ("${row()}")`, row() === 'CANCEL');
+ev(EVT.REL);
+check(`toggle CANCEL reverts (row "${row()}")`, layer() === L2 && row() === sigRow0);
+
+// (18) a no-op editor visit (enter, no change, DONE) records nothing — no spurious flash override.
+const dirty0 = dirty();
+ev(EVT.S1); ev(EVT.REL); ev(EVT.S1); ev(EVT.REL);   // EDIT then immediately DONE, value untouched
+check(`no-op toggle visit leaves nothing to commit (dirty ${dirty()})`, layer() === L2 && dirty() === dirty0);
+toL0();
 
 let fail = 0;
 for (const r of results) { if (!r.pass) fail++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}`); }

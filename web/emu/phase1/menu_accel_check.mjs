@@ -2,7 +2,7 @@
 // Drives the sectioned nav to the PAGE MS editor and asserts: a single fresh tap moves exactly one
 // step; a held run (rapid same-direction taps) accelerates and reaches the floor in far fewer taps;
 // accelerated values snap to the step grid; a reversal and a >350 ms pause both drop back to fine;
-// and the ring shows the compact "5.5S" unit form (never a hidden value). Run: node menu_accel_check.mjs
+// and the ring shows the compact "5.5" unit form (never a hidden value). Run: node menu_accel_check.mjs
 import factory from '../clock-fw.mjs';
 
 const M = await factory();
@@ -15,11 +15,12 @@ const secOf = w('emu_menu_section', 'number');
 const rowPtr = w('emu_daterow', 'number');
 const row = () => { const p = rowPtr(); let s = ''; for (let i = 1; i <= 10; i++) { const c = M.HEAPU8[p + i]; if (c < 32 || c > 126) break; s += String.fromCharCode(c); } return s.trimEnd(); };
 
-const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95 };
+const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95, S3: 0x96 };
 const L3 = 3, SEC_DISP = 2, STEP = 250, LO = 250;
 const results = [];
 const check = (n, pass) => results.push({ n, pass: !!pass });
-const val = () => parseInt(row().replace(/[^\d-]/g, ''), 10);
+const menuVal = w('emu_menu_val', 'number');
+const val = () => menuVal();   // raw editor value (the row renders '5.5' seconds now)
 
 bootCold(1783627200);
 
@@ -33,7 +34,7 @@ function gotoPageMs() {
 gotoPageMs();
 
 // §3b: the ring shows the compact unit form, not a hidden value.
-check(`§3b ring shows compact "5.5S" ("${row()}")`, row().includes('5.5S'));
+check(`§3b ring shows compact "5.5" ("${row()}")`, row() === 'PAGE 5.5');   // seconds, no unit-S (S == the 5 glyph)
 
 ev(EVT.S1); ev(EVT.REL);                                     // EDIT -> L3 editor (raw number)
 check(`editor opens at effective 5500 ("${row()}")`, layer() === L3 && val() === 5500);
@@ -67,7 +68,7 @@ check(`idle abandoned the edit -> value reverted to 5500 (scrubbed was ${scrubbe
 
 // (6) MATRIX renders in clean kHz (K/Z have no 7-seg glyph, so no "KHZ" unit): item reads
 // "MATRIX 20" (full label fits), editor reads "20" and steps by 1 kHz. Value stays Hz underneath.
-for (let i = 0; i < 4 && layer() !== 0; i++) { ev(EVT.S2); ev(EVT.REL); }   // back out to the clock
+for (let i = 0; i < 6 && layer() !== 0; i++) { ev(layer() === L3 ? EVT.S3 : EVT.S2); ev(EVT.REL); }   // back out (L3: CANCEL is the deep stage now)
 const SEC_SYS = 4;
 ev(EVT.S1); ev(EVT.REL);
 for (let g = 0; secOf() !== SEC_SYS && g < 8; g++) ev(EVT.BTN1);
@@ -75,9 +76,9 @@ ev(EVT.S1); ev(EVT.REL);                                     // ENTER SYS
 for (let h = 0; !row().startsWith('MATRIX') && h < 12; h++) ev(EVT.BTN1);
 check(`MATRIX item is clean kHz, no bad glyphs ("${row()}")`, row() === 'MATRIX 20');
 ev(EVT.S1); ev(EVT.REL);                                     // EDIT
-check(`MATRIX editor shows kHz ("${row()}")`, layer() === L3 && val() === 20);
+check(`MATRIX editor shows kHz ("${row()}")`, layer() === L3 && row() === '20' && val() === 20000);  // display kHz, raw value Hz
 ev(EVT.BTN1);                                                // +1 step
-check(`MATRIX +1 step -> 21 kHz ("${row()}")`, val() === 21);
+check(`MATRIX +1 step -> 21 kHz ("${row()}")`, row() === '21' && val() === 21000);
 
 let fail = 0;
 for (const r of results) { if (!r.pass) fail++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}`); }

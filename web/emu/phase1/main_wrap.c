@@ -86,12 +86,16 @@ double emu_holdover_u_us(void){ return 0; }
 #if EMU_HAS_ADEV
 void   emu_adev_reset(void){ adev_reset(); }
 void   emu_adev_push(double x_ticks){ adev_push_x((int32_t)lround(x_ticks)); }  /* bypass the DWT delta */
+void   emu_adev_push_dwt(double dwt, double epoch){ adev_push_dwt((uint32_t)dwt, (uint32_t)epoch); }  /* the REAL capture path: wrap/gap/missed-second semantics */
+int    emu_adev_valid(void){ return (int)adev_valid; }
 void   emu_adev_reduce(void){ adev_reduce(); }
 double emu_adev_sigma(int m){ return (m > 0) ? (double)adev_sigma_for_m((uint32_t)m) : 0.0; }
 int    emu_adev_noctave(void){ return (int)adev_noct; }
 #else
 void   emu_adev_reset(void){}
 void   emu_adev_push(double x){ (void)x; }
+void   emu_adev_push_dwt(double dwt, double epoch){ (void)dwt; (void)epoch; }
+int    emu_adev_valid(void){ return 0; }
 void   emu_adev_reduce(void){}
 double emu_adev_sigma(int m){ (void)m; return 0.0; }
 int    emu_adev_noctave(void){ return 0; }
@@ -245,6 +249,7 @@ int    emu_ee_backing(void){ return (int)ee_backing; }        /* 0 NONE / 1 INTE
 int    emu_ee_sfile_state(void){ return (int)ee_sfile_state; }/* 0 no file / 1 ok / 2 fragmented */
 int    emu_ee_next(void){ return (int)ee_next; }              /* append cursor (skip-to-blank checks) */
 int    emu_menu_dirty(void){ return menu_dirty; }
+int    emu_menu_val(void){ return (int)menu_val; }   /* raw editor value (display renders unit forms) */
 void   emu_menu_reset(void){ menu_reset_pending = 1; menu_reset_step(); }   /* factory-reset the menu store */
 int    emu_menu_reset_pending(void){ return menu_reset_pending; }           /* SYS>RESET confirm sets this */
 void   emu_menu_reset_step(void){ menu_reset_step(); }                      /* service it (the main loop does this on hardware) */
@@ -348,6 +353,12 @@ double emu_lst(double unix_s, double lon){ return local_sidereal_time(unix_s, lo
 int    emu_star_count(void){ return (int)star_count; }                                 /* loaded catalogue read-out (SD or default) */
 float  emu_star_ra(int i){ return (i >= 0 && i < (int)star_count) ? star_buf[i].ra  : -1.0f; }
 float  emu_star_dec(int i){ return (i >= 0 && i < (int)star_count) ? star_buf[i].dec : -999.0f; }
+int    emu_star_pmra(int i){ return (i >= 0 && i < (int)star_count) ? star_buf[i].pmra  : 0; }   /* mas/yr, mu_alpha* */
+int    emu_star_pmdec(int i){ return (i >= 0 && i < (int)star_count) ? star_buf[i].pmdec : 0; }
+float  emu_star_ra_now(int i){ return (i >= 0 && i < (int)star_count) ? star_buf[i].ra_now  : -1.0f; }   /* apparent of date */
+float  emu_star_dec_now(int i){ return (i >= 0 && i < (int)star_count) ? star_buf[i].dec_now : -999.0f; }
+void   emu_star_refresh(void){ star_refresh_apparent(); }                               /* force the daily apparent-place refresh */
+int    emu_star_from_card(void){ return (int)star_from_card; }                          /* provenance: 1 card, 0 baked */
 void   emu_load_stars(void){ loadStars(); }        /* re-scan /STARS.BIN (register the file first); falls back to the baked set */
 void   emu_star_max_mag(float m){ star_max_mag = m; }
 const char* emu_star_name(int i){ static char b[5]; if (i<0||i>=(int)star_count) return ""; memcpy(b,star_buf[i].nm,4); b[4]=0; return b; }
@@ -357,6 +368,12 @@ double emu_lst(double unix_s, double lon){ (void)unix_s; (void)lon; return -1.0;
 int    emu_star_count(void){ return 0; }
 float  emu_star_ra(int i){ (void)i; return -1.0f; }
 float  emu_star_dec(int i){ (void)i; return -999.0f; }
+int    emu_star_pmra(int i){ (void)i; return 0; }
+int    emu_star_pmdec(int i){ (void)i; return 0; }
+float  emu_star_ra_now(int i){ (void)i; return -1.0f; }
+float  emu_star_dec_now(int i){ (void)i; return -999.0f; }
+void   emu_star_refresh(void){}
+int    emu_star_from_card(void){ return 0; }
 void   emu_load_stars(void){}
 void   emu_star_max_mag(float m){ (void)m; }
 const char* emu_star_name(int i){ (void)i; return ""; }
