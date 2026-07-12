@@ -26,8 +26,8 @@
             <canvas ref="{{refEntryDate}}" style="position:absolute;left:20px;top:5px;width:440px;height:112px"></canvas>
           </div>
           <div ref="{{refLinkPlate}}" style="position:absolute;left:0;top:-35px;width:35px;height:71px;background:var(--inset);border:1px solid var(--clock-bezel);border-radius:18px">
-            <span ref="{{refPinTop}}" style="position:absolute;left:13px;top:13px;width:9px;height:9px;border-radius:50%;background:#2c2f35"></span>
-            <span ref="{{refPinBot}}" style="position:absolute;left:13px;top:49px;width:9px;height:9px;border-radius:50%;background:#2c2f35"></span>
+            <span ref="{{refPinTop}}" style="position:absolute;left:13px;top:13px;width:9px;height:9px;border-radius:50%;background:radial-gradient(circle at 50% 44%,#25282f 0 34%,#3e434d 34% 52%,#15171b 52%);box-shadow:0 0 0 .5px #2b2f38"></span>
+            <span ref="{{refPinBot}}" style="position:absolute;left:13px;top:49px;width:9px;height:9px;border-radius:50%;background:radial-gradient(circle at 50% 44%,#25282f 0 34%,#3e434d 34% 52%,#15171b 52%);box-shadow:0 0 0 .5px #2b2f38"></span>
           </div>
         </div>
       </div>
@@ -61,8 +61,8 @@
               <canvas ref="{{refHdrTime}}" style="position:absolute"></canvas>
             </div>
             <div ref="{{refHdrLink}}" style="position:absolute;left:337px;top:0;width:32px;height:16px;background:var(--inset);border:1px solid var(--clock-bezel);border-radius:8px">
-              <span ref="{{refHdrPinA}}" style="position:absolute;border-radius:50%;background:#2c2f35"></span>
-              <span ref="{{refHdrPinB}}" style="position:absolute;border-radius:50%;background:#2c2f35"></span>
+              <span ref="{{refHdrPinA}}" style="position:absolute;border-radius:50%;background:radial-gradient(circle at 50% 44%,#25282f 0 34%,#3e434d 34% 52%,#15171b 52%);box-shadow:0 0 0 .5px #2b2f38"></span>
+              <span ref="{{refHdrPinB}}" style="position:absolute;border-radius:50%;background:radial-gradient(circle at 50% 44%,#25282f 0 34%,#3e434d 34% 52%,#15171b 52%);box-shadow:0 0 0 .5px #2b2f38"></span>
             </div>
           </div>
           <button onClick="{{onCloseHdrClock}}" title="Collapse the clock — free up the menu bar" style="align-self:center;width:20px;height:46px;display:flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--line);color:var(--txt3);cursor:pointer;padding:0" style-hover="color:var(--txt);border-color:var(--line2)"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 2l6 6M8 2l-6 6"></path></svg></button>
@@ -579,8 +579,8 @@
                       <canvas ref="{{refDispTime}}" style="position:absolute"></canvas>
                     </div>
                     <div ref="{{refDispLink}}" style="position:absolute;left:574px;top:0;width:91px;height:46px;background:var(--inset);border:1px solid var(--clock-bezel);border-radius:23px">
-                      <span ref="{{refDispPinA}}" style="position:absolute;left:17px;top:17px;width:12px;height:12px;border-radius:50%;background:#2c2f35"></span>
-                      <span ref="{{refDispPinB}}" style="position:absolute;left:63px;top:17px;width:12px;height:12px;border-radius:50%;background:#2c2f35"></span>
+                      <span ref="{{refDispPinA}}" style="position:absolute;left:17px;top:17px;width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 50% 44%,#25282f 0 34%,#3e434d 34% 52%,#15171b 52%);box-shadow:0 0 0 .5px #2b2f38"></span>
+                      <span ref="{{refDispPinB}}" style="position:absolute;left:63px;top:17px;width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 50% 44%,#25282f 0 34%,#3e434d 34% 52%,#15171b 52%);box-shadow:0 0 0 .5px #2b2f38"></span>
                     </div>
                   </div>
                 </div>
@@ -1468,6 +1468,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=217"></script>
+<script type="module" src="js/app-controller.js?v=218"></script>
 </body>
 </html>

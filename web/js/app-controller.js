@@ -100,7 +100,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=111'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=105'), import('./emu-driver.js?v=35'), import('./ppsts.js?v=15'), import('./demo7.js?v=4')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=105'), import('./emu-driver.js?v=35'), import('./ppsts.js?v=15'), import('./demo7.js?v=4')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S

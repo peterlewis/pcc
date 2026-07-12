@@ -73,10 +73,14 @@ const GLOW = true;
 // buttons, GPS/USB fittings — everything buildHardware() draws from DEFAULT_HW) is NOT rendered, so
 // the face reads clean for demonstrating the on-device menu via the external button strip. The
 // DEFAULT_HW data and all plumbing are RETAINED — flip this to true to restore the full furniture.
-// The physical HINGE (the DOM link-plate + its two pins in index.html) is a separate element and is
-// unaffected: it always stays. The calibration overlay (hwCalibrate) still forces the layer on so
-// that dev tool keeps working regardless of this switch.
+// The calibration overlay (hwCalibrate) still forces the whole layer on so that dev tool keeps working.
 const FURNITURE_LAYER = false;
+// The two screws ON the hinge piece the user wants kept are NOT drawn here: as SVG they live inside a
+// board half (z-index:1 stacking context) and are trapped BEHIND the opaque DOM link-plate that
+// bridges the seam — no z-index on the transparent holder can clear it. They are instead rendered as
+// children of the link-plate itself (index.html: the two hinge pins, styled as fastener screws), so
+// they are guaranteed to paint ON the opaque hinge. See refDispPinA/B, refPinTop/Bot, refHdrPinA/B.
+const FURNITURE_KEEP = [];
 
 export function createClockFaceSVG(container, opts = {}) {
   const {
@@ -226,7 +230,7 @@ export function createClockFaceSVG(container, opts = {}) {
       cellEls.push(rowCells);
     }
 
-    if (state.hardware && (FURNITURE_LAYER || state.hwCalibrate)) buildHardware();
+    if (state.hardware) buildHardware();   // buildHardware self-gates on FURNITURE_LAYER / FURNITURE_KEEP / hwCalibrate
 
     container.appendChild(svg);
     // refs are wired; caller renders next.
@@ -295,8 +299,10 @@ export function createClockFaceSVG(container, opts = {}) {
     const cy = (frac) => rowTop + frac * GEO.cellH;
     if (state.hwCalibrate) drawCalibGrid(g, uw, rowTop);
     const items = (state.hwSpec && state.hwSpec.length) ? state.hwSpec : DEFAULT_HW;
+    const layerOn = FURNITURE_LAYER || state.hwCalibrate;
     for (const it of items) {
       if (it.row !== rowType) continue;
+      if (!layerOn && !FURNITURE_KEEP.includes(it.id)) continue;   // layer off → draw ONLY the kept hinge screws
       const x = HW_VBX(it.x), y = cy(it.y);
       if (it.kind === 'screw') screw(x, y, HW_VBR(it.r || 2.5));   // r in mm (radius); 2.5 = 5 mm heads
       else if (it.kind === 'sensor') sensor(x, y, HW_VBR(it.r || 2.5));
