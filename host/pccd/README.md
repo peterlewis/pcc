@@ -47,10 +47,11 @@ Note (Linux): reading the serial device usually needs membership of the
 
 ## Run
 
-    ./pccd                          # auto-picks the device, dry-run prints offsets
+    ./pccd                          # auto-pick device; feeds the default chrony socket, silent per-sample
+    ./pccd -n -v                    # dry-run + verbose: preview offsets, never write to chrony
     ./pccd -d /dev/cu.usbmodemXXXX  # explicit device (macOS)
     ./pccd -d /dev/ttyACM0          # explicit device (Linux)
-    ./pccd -s /var/run/chrony.pcc.sock   # feed chrony (default is dry-run)
+    ./pccd -s /var/run/chrony.pcc.sock   # explicit chrony SOCK path (this is already the default)
 
 Auto-pick looks for `/dev/cu.usbmodem*` on macOS, and
 `/dev/serial/by-id/*STM32*` then `/dev/ttyACM*` on Linux.
@@ -59,7 +60,7 @@ Flags: `-d <device>` serial device, `-s <path>` chrony SOCK socket path,
 `-p <port>` HTTP/WS port (default 4192), `-w <dir>` serve the PCC app from dir
 (same-origin, fixes Safari — see below), `-o <secs>` fixed offset trim,
 `-n` dry-run, `-v` verbose, `-r` raw (bypass the sample prefilter),
-`-t` self-test, `-T` frame-clock probe (macOS).
+`-t` self-test, `-T` frame-clock probe (macOS), `-h` help.
 
 The daemon listens on 127.0.0.1 only. It reconnects automatically when the
 clock re-enumerates (unplug, reboot, firmware flash).
@@ -236,4 +237,4 @@ Binaries are built locally and attached to a GitHub release:
     docker run --rm --platform linux/amd64 -v "$PWD":/src:ro -v "$PWD/dist":/dist alpine:3.20 \
       sh -c 'apk add -q gcc musl-dev && gcc -O2 -static -o /dist/pccd-linux-x86_64 /src/pccd.c && /dist/pccd-linux-x86_64 -t'
     (cd dist && shasum -a 256 pccd-* > SHA256SUMS)
-    gh release create pccd-v0.1 dist/pccd-* dist/SHA256SUMS --title "pccd v0.1" --notes "..."
+    gh release create pccd-v0.3 dist/pccd-* dist/SHA256SUMS --title "pccd v0.3" --notes "..."

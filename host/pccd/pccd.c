@@ -36,6 +36,7 @@
 //           -r  raw: bypass the sample prefilter (outlier gate + trimmed-mean aggregation)
 //           -t  self-test (SHA-1 / handshake / prefilter vectors) and exit
 //           -T  frame probe: burst-read the USB frame clock and report bracket widths (macOS)
+//           -h  print usage and exit
 //
 // chrony.conf:   refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4
 // (run chronyd first so it creates the socket; pccd connects when it appears.)
@@ -44,7 +45,12 @@
 #define _GNU_SOURCE                       /* strcasestr on glibc — must precede all includes */
 #endif
 
-#define PCCD_VERSION "0.3-dev"
+#define PCCD_VERSION "0.3"
+#ifdef PCCD_GIT
+#define PCCD_VERSTR PCCD_VERSION "+" PCCD_GIT      /* Makefile stamps the short git hash for traceable /health */
+#else
+#define PCCD_VERSTR PCCD_VERSION
+#endif
 
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -85,6 +91,13 @@ static int         opt_dry  = 0;
 static int         opt_verb = 0;
 static int         opt_raw  = 0;
 static const char *opt_webroot = NULL;   // -w: serve the PCC app from this dir (same-origin, no mixed content)
+
+// ---- daemon liveness / health state (file-scope so the /health handler can read it) --------------
+static long   g_nseen=0, g_nsent=0;   // $PMTXTS parsed / usable samples (promoted from main for /health)
+static double g_last_sample_mono=0;   // now_mono_ns() of the last accepted PPS sample (0 = none yet)
+static double g_last_offset=0;        // last accepted offset, seconds (true - system)
+static int    g_serial_open=0;        // is the serial fd currently open?
+static int    g_nodev_warned=0;       // "no clock found" printed once per outage (mirrors g_chrony_warned)
 
 // ---- monotonic time + wall mapping ---------------------------------------------------------------
 // One monotonic nanosecond clock for retry timers, arrival stamps and (on macOS) the IOKit frame
@@ -608,10 +621,20 @@ static void http_or_upgrade(Client *c){
   char *q=strchr(path,'?'); if (q) *q=0;                    // drop the query string
 
   if (!strncmp(path,"/health",7)){
-    char json[700];
-    snprintf(json,sizeof json,"{\"pccd\":1,\"version\":\"" PCCD_VERSION "\",\"device\":\"%s\",\"chrony\":%s}",
-             g_devpath, (g_chrony>=0)?"true":"false");
-    char resp[768];
+    // liveness, not just presence: is the tty open, when did the last accepted PPS land, what was
+    // it, and how many samples have flowed vs been rejected — so the app can tell a streaming clock
+    // from one that unplugged (serial_open:false) or went quiet (last_sample_age_s grows unbounded).
+    char json[900], agebuf[32], offbuf[32];
+    if (g_last_sample_mono>0){
+      snprintf(agebuf,sizeof agebuf,"%.3f",(now_mono_ns()-g_last_sample_mono)*1e-9);
+      snprintf(offbuf,sizeof offbuf,"%.9f",g_last_offset);
+    } else { snprintf(agebuf,sizeof agebuf,"null"); snprintf(offbuf,sizeof offbuf,"null"); }
+    snprintf(json,sizeof json,
+      "{\"pccd\":1,\"version\":\"" PCCD_VERSTR "\",\"device\":\"%s\",\"chrony\":%s,"
+      "\"serial_open\":%s,\"last_sample_age_s\":%s,\"last_offset_s\":%s,\"sent\":%ld,\"rejected\":%ld}",
+      g_devpath, (g_chrony>=0)?"true":"false",
+      g_serial_open?"true":"false", agebuf, offbuf, g_nsent, g_nseen-g_nsent);
+    char resp[1024];
     int n=snprintf(resp,sizeof resp,
       "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\n"
       "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",strlen(json),json);
@@ -633,7 +656,14 @@ static void ws_read(Client *c, int serial_fd){
     unsigned char *mask = b+off; if (masked) off+=4;
     if (c->len < off+plen) return;                              // partial frame — wait
     if (op==0x8){ close(c->fd); c->fd=-1; return; }             // close
-    if (op==0x9){ b[0]=0x8A; write(c->fd,b,off+plen); }         // ping -> pong (echo payload)
+    if (op==0x9){                                               // ping -> pong
+      // RFC 6455 §5.1: server->client frames MUST NOT be masked. Build a fresh unmasked pong
+      // (control frames carry <=125 bytes) rather than echoing the client's masked frame back.
+      unsigned char pong[2+125]; int pl = plen>125 ? 125 : plen;
+      pong[0]=0x8A; pong[1]=(unsigned char)pl;                  // FIN|pong, mask bit clear
+      for (int i=0;i<pl;i++) pong[2+i] = masked ? (unsigned char)(b[off+i]^mask[i&3]) : b[off+i];
+      if (write(c->fd,pong,2+pl)<0){ close(c->fd); c->fd=-1; return; }
+    }
     if (op==0x1 && serial_fd>=0){                               // text: a command line
       char cmd[300]; int n = plen<(int)sizeof cmd-2 ? plen : (int)sizeof cmd-2;
       for (int i=0;i<n;i++) cmd[i] = masked ? (char)(b[off+i]^mask[i&3]) : (char)b[off+i];
@@ -668,18 +698,42 @@ static void on_sig(int s){ (void)s; g_stop=1; }
 
 int main(int argc, char **argv){
   char devbuf[512]={0};   // roomy: /dev/serial/by-id/ symlinks can be long
+  static const char USAGE[] =
+    "usage: pccd [-d dev] [-p port] [-s chrony.sock] [-w webroot] [-o trim_s] [-n] [-v] [-r] [-t] [-T] [-h]\n"
+    "  -d dev    serial device (default: auto-pick cu.usbmodem* / STM32 by-id / ttyACM*)\n"
+    "  -p port   HTTP/WebSocket port on 127.0.0.1, 1..65535 (default 4192)\n"
+    "  -s path   chrony SOCK path (default /var/run/chrony.pcc.sock)\n"
+    "  -w dir    serve the PCC web app from this dir (same-origin bridge)\n"
+    "  -o secs   fixed offset trim added to every sample\n"
+    "  -n        dry run: compute offsets, never write to chrony\n"
+    "  -v        verbose per-sample logging\n"
+    "  -r        raw: bypass the sample prefilter\n"
+    "  -t        self-test and exit\n"
+    "  -T        USB frame-clock probe and exit (macOS)\n"
+    "  -h        print this help and exit\n";
   for (int i=1;i<argc;i++){
-    if (!strcmp(argv[i],"-d") && i+1<argc) opt_dev=argv[++i];
-    else if (!strcmp(argv[i],"-p") && i+1<argc) opt_port=atoi(argv[++i]);
-    else if (!strcmp(argv[i],"-s") && i+1<argc) opt_sock=argv[++i];
-    else if (!strcmp(argv[i],"-o") && i+1<argc) opt_trim=atof(argv[++i]);
-    else if (!strcmp(argv[i],"-n")) opt_dry=1;
-    else if (!strcmp(argv[i],"-v")) opt_verb=1;
-    else if (!strcmp(argv[i],"-r")) opt_raw=1;
-    else if (!strcmp(argv[i],"-w") && i+1<argc) opt_webroot=argv[++i];
-    else if (!strcmp(argv[i],"-t")) return self_test();
-    else if (!strcmp(argv[i],"-T")) return frame_probe();
-    else { fprintf(stderr,"usage: pccd [-d dev] [-p port] [-s chrony.sock] [-w webroot] [-o trim_s] [-n dry] [-v] [-r raw] [-t selftest] [-T frameprobe]\n"); return 2; }
+    const char *a=argv[i];
+    if (!strcmp(a,"-h") || !strcmp(a,"--help")){ fputs(USAGE,stdout); return 0; }
+    else if (!strcmp(a,"-n")) opt_dry=1;
+    else if (!strcmp(a,"-v")) opt_verb=1;
+    else if (!strcmp(a,"-r")) opt_raw=1;
+    else if (!strcmp(a,"-t")) return self_test();
+    else if (!strcmp(a,"-T")) return frame_probe();
+    else if (!strcmp(a,"-d")||!strcmp(a,"-p")||!strcmp(a,"-s")||!strcmp(a,"-o")||!strcmp(a,"-w")){
+      if (i+1>=argc){ fprintf(stderr,"[pccd] missing value for %s\n%s",a,USAGE); return 2; }
+      const char *val=argv[++i];
+      if (!strcmp(a,"-d")) opt_dev=val;
+      else if (!strcmp(a,"-s")) opt_sock=val;
+      else if (!strcmp(a,"-o")) opt_trim=atof(val);
+      else if (!strcmp(a,"-w")) opt_webroot=val;         // serve the PCC app same-origin (e07d308)
+      else {                                              // -p: reject non-numeric / out-of-range ports
+        char *end=NULL; long p=strtol(val,&end,10);
+        if (!*val || (end && *end) || p<1 || p>65535){
+          fprintf(stderr,"[pccd] invalid port '%s' (want 1..65535)\n",val); return 2; }
+        opt_port=(int)p;
+      }
+    }
+    else { fprintf(stderr,"[pccd] unknown option %s\n%s",a,USAGE); return 2; }
   }
   pf_sink = pf_emit_chrony;
   init_mono();
@@ -688,13 +742,12 @@ int main(int argc, char **argv){
 
   g_listen = listen_open(opt_port);
   if (g_listen<0){ fprintf(stderr,"[pccd] cannot listen on 127.0.0.1:%d\n",opt_port); return 1; }
-  fprintf(stderr,"[pccd] v" PCCD_VERSION " — http/ws on http://127.0.0.1:%d  (health: /health)%s\n",opt_port,opt_dry?"  [DRY RUN]":"");
+  fprintf(stderr,"[pccd] v" PCCD_VERSTR " — http/ws on http://127.0.0.1:%d  (health: /health)%s\n",opt_port,opt_dry?"  [DRY RUN]":"");
   if (opt_webroot) fprintf(stderr,"[pccd] serving PCC app from %s  —  open http://localhost:%d\n",opt_webroot,opt_port);
 
   int sfd=-1; double next_retry=0;
-  char line[512]; int li=0;
+  char line[512]; int li=0, overrun=0;
   double f_dwt=80e6; int haveRate=0; uint32_t prevDwt=0; int havePrev=0;
-  long nsent=0, nseen=0;
 
   while (!g_stop){
     // (re)open serial + USB interface — the clock re-enumerates on config edits and firmware flashes,
@@ -703,14 +756,31 @@ int main(int argc, char **argv){
       const char *dev = opt_dev;
       if (!dev && serial_autopick(devbuf,sizeof devbuf)==0) dev=devbuf;
       if (dev && (sfd=serial_open(dev))>=0){
+        if (g_nodev_warned){ fprintf(stderr,"[pccd] clock reappeared: %s\n",dev); g_nodev_warned=0; }
+        g_serial_open=1;
         usb_close(); usb_open(0x0483,-1);               // STM32 VID; frame clock rides the same bus
 #ifdef __APPLE__
         fprintf(stderr,"[pccd] serial open: %s%s\n",dev,g_usb?"":"  (no USB frame clock — arrival timestamps, ~ms accuracy)");
 #else
         fprintf(stderr,"[pccd] serial open: %s  (arrival timestamps — Linux has no USB frame clock; ~ms accuracy)\n",dev);
 #endif
-        havePrev=0; haveRate=0; li=0; pf_reset(); reg_reset();
-      } else next_retry = now_mono_ns()+2e9;
+        havePrev=0; haveRate=0; li=0; overrun=0; pf_reset(); reg_reset();
+      } else {
+        // Nothing to open. Say so ONCE per outage (mirrors the chrony-EACCES warn-once above): a
+        // launchd pccd otherwise logs the listen banner then goes silent — same signature as a hang.
+        if (!g_nodev_warned){
+          g_nodev_warned = 1;
+          if (opt_dev)
+            fprintf(stderr,"[pccd] waiting for %s (cannot open yet) — retrying every 2s\n",opt_dev);
+          else
+#ifdef __APPLE__
+            fprintf(stderr,"[pccd] no clock found (looked for /dev/cu.usbmodem*) — retrying every 2s\n");
+#else
+            fprintf(stderr,"[pccd] no clock found (looked for /dev/serial/by-id/*STM32* then /dev/ttyACM*) — retrying every 2s\n");
+#endif
+        }
+        next_retry = now_mono_ns()+2e9;
+      }
     }
     chrony_try_connect();
 
@@ -744,10 +814,11 @@ int main(int argc, char **argv){
       double rx_mono = now_mono_ns();                    // arrival stamp for the frame-clock fallback
       char chunk[256];
       int r=(int)read(sfd,chunk,sizeof chunk);
-      if (r<=0){ fprintf(stderr,"[pccd] serial lost — will retry\n"); close(sfd); sfd=-1; usb_close(); next_retry=now_mono_ns()+2e9; continue; }
+      if (r<=0){ fprintf(stderr,"[pccd] serial lost — will retry\n"); close(sfd); sfd=-1; g_serial_open=0; usb_close(); li=0; overrun=0; next_retry=now_mono_ns()+2e9; continue; }
       for (int i=0;i<r;i++){
         char ch=chunk[i];
-        if (ch=='\n' || li>=(int)sizeof line-1){
+        if (ch=='\n'){
+          if (overrun){ overrun=0; li=0; continue; }     // this '\n' just closes a dropped over-long line
           line[li]=0; int len=li; li=0;
           if (!len) continue;
           broadcast_line(line);                          // every line goes to every PCC tab
@@ -755,11 +826,11 @@ int main(int argc, char **argv){
             uint64_t hf; double hmono; int gotF=(usb_frame(&hf,&hmono)==0);
             Pmtxts x;
             if (parse_pmtxts(line,&x)==0){
-              nseen++;
+              g_nseen++;
               if (x.ext && havePrev){ int32_t d=(int32_t)(x.dwt_pps-prevDwt);
                 if (d>60000000 && d<100000000){ f_dwt = haveRate ? 0.9*f_dwt+0.1*d : (double)d; haveRate=1; } }
               if (x.ext){ prevDwt=x.dwt_pps; havePrev=1; }
-              if (x.flags==7){
+              if ((x.flags & 3) == 3){                   // require valid(b0)+pps(b1); rtc(b2) NOT required
                 double pps_wall; const char *how;
                 // Portable SOF-regression anchor (runs on every platform when the SOF fields + a
                 // DWT-rate estimate are present). NAN until it has REG_MIN history.
@@ -786,21 +857,34 @@ int main(int argc, char **argv){
                 if (offset>-0.5 && offset<0.5){
                   if (opt_raw){ if (!opt_dry) chrony_send(pps_wall,offset); }
                   else pf_push(pps_wall,offset);
-                  nsent++;
+                  g_nsent++;
+                  g_last_sample_mono = now_mono_ns();    // liveness stamp for /health
+                  g_last_offset = offset;
                   if (opt_verb || opt_dry)
                     fprintf(stderr,"[pccd] pps seq=%lu offset=%+11.6fs [%s] (host %s chrony)%s\n",
                             x.seq, offset, how, (g_chrony>=0&&!opt_dry)?"->":"-x",
                             opt_dry?"  [dry]":"");
                 } else if (opt_verb)
                   fprintf(stderr,"[pccd] pps seq=%lu offset=%+.3fs [%s] REJECTED (sanity: check epoch/NTP)\n",x.seq,offset,how);
+              } else if (opt_verb){
+                // distinct from the sanity/range reject above: the sample failed the flags gate
+                fprintf(stderr,"[pccd] pps seq=%lu flags=0x%lx REJECTED (need valid+pps; b0=%ld b1=%ld b2=%ld)\n",
+                        x.seq, (unsigned long)x.flags, x.flags&1L, (x.flags>>1)&1L, (x.flags>>2)&1L);
               }
             }
           }
+        } else if (overrun){
+          continue;                                      // still discarding an over-long line
+        } else if (li>=(int)sizeof line-1){
+          // buffer full with no newline: drop this line and everything up to the next '\n' rather than
+          // force-terminating and broadcasting a mid-sentence fragment (plus its tail as a second line)
+          overrun=1;
+          if (opt_verb) fprintf(stderr,"[pccd] serial line exceeded %d bytes — dropping to next newline\n",(int)sizeof line-1);
         } else if (ch!='\r'){ line[li++]=ch; }
       }
     }
   }
-  fprintf(stderr,"[pccd] exiting — %ld PPS samples processed, %ld usable, %ld sent as avg%d groups, %ld outliers rejected\n",nseen,nsent,pf_groups,PF_AGG,pf_rejects);
+  fprintf(stderr,"[pccd] exiting — %ld PPS samples processed, %ld usable, %ld sent as avg%d groups, %ld outliers rejected\n",g_nseen,g_nsent,pf_groups,PF_AGG,pf_rejects);
   if (reg_dn>0){ double m=reg_dsum/reg_dn, v=reg_dsq/reg_dn-m*m; if(v<0)v=0;
     fprintf(stderr,"[pccd] SOF-regression vs IOKit anchor: n=%ld  bias=%+.1fus  jitter(RMS about mean)=%.1fus\n",reg_dn,m*1e-3,sqrt(v)*1e-3); }
   if (sfd>=0) close(sfd);
