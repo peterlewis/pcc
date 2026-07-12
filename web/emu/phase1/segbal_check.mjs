@@ -39,6 +39,11 @@ function drive(ms) {
 // point. So the C digit's segment count is pop(.low) + DP, the DP duty-cycles WITH its digit,
 // and the addressing bits must be byte-identical in every one of the 16 cycles.
 const DP = 0x10;
+// Nested dither order (bit-reversed k, D=16): slot k is lit iff REV16[k] < s, so the lit set for
+// s+1 is the lit set for s plus exactly one slot. Positions are part of the contract — a spread
+// that reshuffles on s±1 (e.g. (k*s) % 16 < s) keeps the counts but re-phases the column's light
+// whenever a digit's segment count changes, a hardware-visible once-per-second step.
+const REV16 = [0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15];
 function verify(strength, label) {
   // mirrors segbal_duty(): linear blend to 100, power law (gamma = strength/100) above
   const sFor = (n) => {
@@ -46,7 +51,7 @@ function verify(strength, label) {
     if (strength <= 100) return 16 - Math.floor((strength * (16 - 2 * n)) / 100);
     return Math.max(1, Math.min(16, Math.floor(16 * Math.pow(n / 8, strength / 100) + 0.5)));
   };
-  let colsWithSegs = 0, allCat = true, allCsel = true, allDuty = true, allClean = true;
+  let colsWithSegs = 0, allCat = true, allCsel = true, allDuty = true, allClean = true, allNested = true;
   const detail = [];
   for (let col = 0; col < 5; col++) {
     const mb = E.bufb(col) & 0xFFFF, ml = E.bufcLo(col) & 0xFF, mh = E.bufcHi(col) & 0xFF;
@@ -65,6 +70,9 @@ function verify(strength, label) {
       else if (bs !== 0) allClean = false;                   // must be master-or-dark
       if (l === ml) { if (ml) litL++; } else if (l !== 0) allClean = false;
       if (h & DP) { if (mh & DP) litDP++; else allClean = false; }
+      // positional contract: lit slots are EXACTLY the nested-rank prefix (k=0 is the master)
+      if (mb & BSEG) { if ((bs === (mb & BSEG)) !== (REV16[k] < sFor(nb))) allNested = false; }
+      if (ml)        { if ((l === ml && ml !== 0) !== (REV16[k] < sFor(nc))) allNested = false; }
     }
     if ((mb & BSEG) && litB !== sFor(nb)) allDuty = false;
     if (ml && litL !== sFor(nc)) allDuty = false;            // .low duty comes from the FULL digit N
@@ -77,6 +85,7 @@ function verify(strength, label) {
   check(`${label}: every slot is master-or-dark (no corruption)`, allClean);
   check(`${label}: lit-cycle count == s for every digit (DP counted + synced)`, allDuty,
     detail.map(d => `c${d.col}[N ${d.nb}/${d.nc}${d.dp ? '+dp' : ''} lit ${d.litB}/${d.litL}${d.dp ? '/' + d.litDP : ''}]`).join(' '));
+  check(`${label}: lit slots are the nested bit-reversed prefix (no reshuffle on duty steps)`, allNested);
   return detail;
 }
 
