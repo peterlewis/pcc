@@ -106,17 +106,39 @@ check(`display: empty ring shows "${rf}"`, rf.startsWith('Adev') && rf.includes(
   if (ok) {
     const body = mm[1]; let cks = 0; for (let i = 0; i < body.length; i++) cks ^= body.charCodeAt(i);
     const cksOk = cks === parseInt(mm[2], 16);
-    const f = body.split(',');                            // [PMADEV, valid, noct, s0, s1, ...]
-    const noct = parseInt(f[2], 10);
-    const countOk = f.length === 3 + noct && noct === A.noct();
+    const f = body.split(',');                            // [PMADEV, epoch, tau0, valid, noct, s0, ...]
+    const epochOk = /^\d+$/.test(f[1]) && f[2] === '1';    // self-describing: unix epoch + tau0
+    const noct = parseInt(f[4], 10);
+    const countOk = epochOk && f.length === 5 + noct && noct === A.noct();
     let sigOk = noct > 0;
     for (let k = 0; k < noct; k++) {                      // each dumped sigma == the cache it read
-      const got = parseFloat(f[3 + k]), want = A.sigma(1 << k);
+      const got = parseFloat(f[5 + k]), want = A.sigma(1 << k);
       if (!(Math.abs(got / want - 1) < 5e-3)) sigOk = false;  // %.2e keeps 3 sig figs
     }
     ok = cksOk && countOk && sigOk;
   }
   check(`serial: $PMADEV framing+checksum+${mm ? mm[1].split(',').length - 3 : '?'} octaves match cache — "${line}"`, ok);
+}
+
+// ---- $PMHDEV: the Hadamard twin. Pure LINEAR FREQUENCY DRIFT (quadratic phase) is exactly what
+// plain ADEV retains (sigma rising with tau) and the third-difference kernel annihilates: HDEV == 0.
+{
+  const hdevLine = w('emu_hdev_line', 'string');
+  A.reset();
+  for (let i = 0; i < 256; i++) A.push(3 * i * i);   // x_i = 3*i^2, integer-EXACT quadratic -> pure drift (rounding would leak into the 3rd difference)
+  A.reduce();
+  check(`drift series: ADEV sees the ramp (sigma1=${A.sigma(1)})`, A.sigma(1) > 0);
+  const hl = hdevLine().trim();
+  const hm = /^\$(PMHDEV,[^*]*)\*([0-9A-Fa-f]{2})$/.exec(hl);
+  let hOk = !!hm;
+  if (hOk) {
+    const body = hm[1]; let cks = 0; for (let i = 0; i < body.length; i++) cks ^= body.charCodeAt(i);
+    const f = body.split(',');
+    const noct = parseInt(f[4], 10);
+    hOk = cks === parseInt(hm[2], 16) && /^\d+$/.test(f[1]) && f[2] === '1' && f.length === 5 + noct
+          && noct > 0 && f.slice(5).every(v => parseFloat(v) === 0);   // third difference of quadratic phase = exactly 0
+  }
+  check(`$PMHDEV: framed, self-describing, and drift-immune (HDEV==0 on a pure ramp) — "${hl.slice(0, 40)}..."`, hOk);
 }
 
 // ---- the REAL capture path (adev_push_dwt): wrap exactness, missed-second tolerance, gap honesty ----

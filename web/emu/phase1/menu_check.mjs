@@ -191,6 +191,24 @@ ev(EVT.S1); ev(EVT.REL); ev(EVT.S1); ev(EVT.REL);   // EDIT then immediately DON
 check(`no-op toggle visit leaves nothing to commit (dirty ${dirty()})`, layer() === L2 && dirty() === dirty0);
 toL0();
 
+// (19) read-only INFO rows: DIAG ends with the live PPS readout, ASTRO with the catalogue count.
+// No editor: the chord offers no EDIT ("----") and release stays at L2.
+ev(EVT.S1); ev(EVT.REL);
+for (let g = 0; section() !== SEC.DIAG && g < 8; g++) ev(EVT.BTN1);
+ev(EVT.S1); ev(EVT.REL);
+for (let h = 0; !row().startsWith('PPS ') && h < 14; h++) ev(EVT.BTN1);
+check(`DIAG has the PPS readout ("${row()}") — no pulse yet at cold boot`, row() === 'PPS ----');
+ev(EVT.S1);
+check(`INFO row offers no EDIT ("${row()}")`, row() === '----');
+ev(EVT.REL);
+check(`release on an INFO row stays at L2`, layer() === L2 && row() === 'PPS ----');
+ev(EVT.S2); ev(EVT.REL);                                  // BACK -> L1
+for (let g = 0; section() !== SEC.ASTRO && g < 8; g++) ev(EVT.BTN1);
+ev(EVT.S1); ev(EVT.REL);
+for (let h = 0; !row().startsWith('STARS') && h < 14; h++) ev(EVT.BTN1);
+check(`ASTRO has the catalogue readout ("${row()}") — baked fallback tagged 'b'`, /^STARS b\d+$/.test(row()));
+toL0();
+
 let fail = 0;
 for (const r of results) { if (!r.pass) fail++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}`); }
 console.log(fail ? `\n${fail} FAIL` : `\nALL PASS`);

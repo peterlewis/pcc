@@ -95,10 +95,11 @@ function predict(t, lat, lon) {
   const lst = lstF(t, lon), yrs = (t - J2000) / 31557600.0, N = nStar(), out = [];
   for (let i = 0; i < N; i++) {
     const { aNow, dNow } = apparent(raF(i), decF(i), pmraF(i), pmdecF(i), yrs);
-    const alt = 90 - Math.abs(lat - dNow);
-    if (alt <= 0) continue;
+    const diff = lat - dNow;
+    const alt = 90 - Math.abs(diff);
+    if (alt <= -0.57) continue;                                     // refraction band, like the firmware
     let dt = (aNow - lst) % 24; if (dt < 0) dt += 24;
-    out.push({ dt_s: Math.round(dt * SIDSEC), alt: Math.round(alt) });
+    out.push({ dt_s: Math.round(dt * SIDSEC), alt: alt >= 0 ? Math.round(alt) : 0, dir: diff >= 0 ? 'S' : 'N' });
   }
   out.sort((x, y) => x.dt_s - y.dt_s);
   return out.slice(0, 8);
@@ -135,10 +136,11 @@ if (mm) {
   const n = parseInt(f[1], 10);
   check(`serial: provenance field is C (card catalogue), got "${f[2]}"`, f[2] === 'C' && fromCard() === 1);
   const fw = [];
-  for (let k = 0; k < n; k++) fw.push({ nm: f[3 + 3 * k], dt_s: parseInt(f[4 + 3 * k], 10), alt: parseInt(f[5 + 3 * k], 10) });
+  for (let k = 0; k < n; k++) fw.push({ nm: f[3 + 4 * k], dt_s: parseInt(f[4 + 4 * k], 10), alt: parseInt(f[5 + 4 * k], 10), dir: f[6 + 4 * k] });
 
   const pred = predict(T, LAT, LON);
-  check(`count: firmware ${n} == oracle ${pred.length}`, n === pred.length && f.length === 3 + 3 * n);
+  check(`count: firmware ${n} == oracle ${pred.length}`, n === pred.length && f.length === 3 + 4 * n);
+  check(`direction: every entry culminates N or S and matches the oracle`, fw.every((s2, k) => s2.dir === pred[k].dir));
   check(`serial: names are the FULL 4 chars (13 three-char prefixes collide across the card)`, fw.every(s => s.nm.trim().length >= 2 && s.nm.length <= 4));
 
   let asc = true; for (let k = 1; k < fw.length; k++) if (fw[k].dt_s < fw[k - 1].dt_s) asc = false;

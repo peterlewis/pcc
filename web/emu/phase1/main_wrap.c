@@ -549,7 +549,7 @@ int emu_MODE_MODIFIED_JD(void){ return MODE_MODIFIED_JD; }
  * definition that lands the bytes in RAM, so the emulator can read back the firmware's OWN
  * byte-faithfully-formatted $PMTXTS (same snprintf, same NMEA checksum) for comparison against a
  * bench capture. (Replaces the stubs.js no-op; native_stubs.c's copy is weak so this wins there.) */
-static char emu_pmtxts_buf[128];
+static char emu_pmtxts_buf[224];   /* $PMSTAR with 8 x 4-field entries (~160 B) outgrew 128 */
 uint8_t CDC_Copy_Transmit(uint8_t* buf, uint16_t Len){
   uint16_t n = Len < (uint16_t)(sizeof(emu_pmtxts_buf)-1) ? Len : (uint16_t)(sizeof(emu_pmtxts_buf)-1);
   for (uint16_t i = 0; i < n; i++) emu_pmtxts_buf[i] = (char)buf[i];
@@ -577,6 +577,17 @@ const char* emu_adev_line(void){
   hUsbDeviceFS.dev_state = USBD_STATE_CONFIGURED;  /* satisfy adev_dump_step's host-present gate */
   adev_dump_pending = 1;
   adev_dump_step();                                /* builds + "sends" -> CDC shim -> emu_pmtxts_buf */
+#else
+  emu_pmtxts_buf[0] = 0;
+#endif
+  return emu_pmtxts_buf;
+}
+const char* emu_hdev_line(void){                   /* the Hadamard twin */
+#if EMU_HAS_ADEV
+  emu_pmtxts_buf[0] = 0;
+  hUsbDeviceFS.dev_state = USBD_STATE_CONFIGURED;
+  hdev_dump_pending = 1;
+  hdev_dump_step();
 #else
   emu_pmtxts_buf[0] = 0;
 #endif
