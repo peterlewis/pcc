@@ -66,6 +66,7 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     menuTick: w('emu_menu_tick','void',['number']),     // advance uwTick (drives the 15 s idle exit)
     menuLayer: w('emu_menu_layer','number'), menuSection: w('emu_menu_section','number'),
     menuIdx: w('emu_menu_idx','number'), menuDirty: w('emu_menu_dirty','number'),
+    starLine: w('emu_star_line','string'),   // firmware $PMSTAR for the sim observer (SIMULATED TRANSITS)
     hadPps: w('emu_had_pps','number'), sincePps: w('emu_since_pps','number'),
     satcount: w('emu_satcount','number'),
     colonMode: w('emu_colon_mode','number'),
@@ -296,6 +297,9 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     menuEvent(code) { E.menuEvent(code); drain(); },
     menuTick(ms) { E.menuTick(ms); drain(); },
     menuState() { return { layer: E.menuLayer(), section: E.menuSection(), idx: E.menuIdx(), dirty: E.menuDirty() }; },
+    // The firmware's own $PMSTAR meridian-transit sentence for the current (simulated) observer —
+    // the same MODE_STAR predictor a real clock emits. '' if no catalogue / no fix.
+    starLine() { return E.starLine ? E.starLine() : ''; },
     setBrightness(v01) { state.adc = Math.max(0, Math.min(4095, Math.round(v01*4095))); E.setAdc(state.adc); },
     setLocation(la, lo, src = 'manual') { return setLoc(la, lo, src); },   // returns a promise → resolved zone (manual)
     denyGeo,   // browser refused / failed geolocation → keep DEFAULT but flag it honestly

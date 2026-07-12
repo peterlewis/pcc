@@ -8,6 +8,7 @@ import * as DS from './datasources.js?v=90';
 import { TelemetryLog } from './telemetrylog.js?v=4';
 import { prepReview, drawReview, sampleAt, tAtX } from './review.js?v=1';
 import { subSatellitePoint } from './satpass.js?v=1';
+import { parsePMSTAR } from './pmext.mjs?v=1';
 import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=4';
 
 // config.txt is the single source of truth: the clock-behaviour defaults (enabled modes, colon,
@@ -1233,6 +1234,20 @@ class Component extends DcLite {
         this.realdev.send('tc_dump = on');
         if (this.session.log) this.session.log('tx', 'tc_dump = on');
       }
+    }
+    // SIMULATED TRANSITS: the emulator runs the firmware's own MODE_STAR predictor for the sim
+    // observer, so the NEXT TRANSITS panel needn't stay blank in Simulation. Refresh every ~10 s
+    // (transits move slowly); the panel labels this SIMULATED, kept visually distinct from a real
+    // clock's list, so it can never masquerade as device data.
+    this._simStarTick = (this._simStarTick || 0) + 1;
+    if (this.appMode() === 'simulation' && this.emu && this.emu.starLine) {
+      if (this._simStarTick >= 10 || !this.session.S.simStar) {
+        this._simStarTick = 0;
+        const r = parsePMSTAR(this.emu.starLine());
+        this.session.S.simStar = r ? { ...r, at: Math.floor(Date.now() / 1000) } : null;
+      }
+    } else if (this.session.S.simStar) {
+      this.session.S.simStar = null;   // leaving simulation drops the synthesized list
     }
     // Sky-history persistence: snapshot the accumulations every 30 s while a session is live, so a
     // reload (or an accidental unplug) doesn't erase hours of collected sky. Kind-separated buckets.
@@ -2463,11 +2478,12 @@ class Component extends DcLite {
       sCover: Math.round(S.bins.size / (36 * 9) * 100) + '%',
       nGps: String(cnt('G')), nGlo: String(cnt('R')), nGal: String(cnt('E')), nBds: String(cnt('C')),
     });
-    // NEXT TRANSITS — the star-transit predictor's $PMSTAR list (MODE_STAR, draft
-    // firmware), parsed in realdev.js → S.star. Real-or-nothing: the panel exists
-    // only in CONNECTED mode once a sentence has landed; standby/simulation never
-    // synthesise one, so sc-if starShow removes it entirely everywhere else.
-    const star = S.real ? S.star : null;
+    // NEXT TRANSITS — the star-transit predictor's $PMSTAR list (MODE_STAR). From a real clock
+    // (realdev.js → S.star) when Connected; from the emulator's own predictor (S.simStar, refreshed
+    // in onTick) when Simulating. The panel's source label (starSrc) marks which, so a SIMULATED
+    // list is never mistaken for device data; Standby still synthesises nothing.
+    const star = S.real ? S.star : (this.appMode() === 'simulation' ? S.simStar : null);
+    const starSrc = S.real ? 'DEVICE' : (star ? 'SIMULATED' : '');
     const nowS = Math.floor(Date.now() / 1000);
     // Countdown formats: mm:ss under an hour, h:mm above (transit lists span hours).
     const eta = (s) => {
@@ -2478,6 +2494,7 @@ class Component extends DcLite {
     };
     Object.assign(out, {
       starShow: !!(star && star.stars.length),
+      starSrc,
       starRows: star ? star.stars.map((x) => ({
         name: x.name,
         // sec_to_transit was true at receive time (star.at) — age it against the

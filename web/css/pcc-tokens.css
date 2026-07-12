@@ -61,5 +61,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root { --t-disclose: 0ms; --t-room: 0ms; --t-fold: 0ms; }
+  /* Zero EVERY motion token (was only disclose/room/fold), so any transition wired through a
+     token — nav dots, the precision meter, the monitor drawer — honours the user's preference. */
+  :root { --t-tick: 0ms; --t-ui: 0ms; --t-disclose: 0ms; --t-room: 0ms; --t-fold: 0ms; }
 }
