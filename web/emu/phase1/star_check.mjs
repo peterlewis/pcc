@@ -60,6 +60,10 @@ maxMag(0.5); loadStars();
 const nBright = nStar();
 check(`star_max_mag=0.5 trims the mag-sorted file (${nBright} bright stars < full ${fileCount})`, nBright > 0 && nBright < fileCount);
 check(`star_max_mag: brightest is still Sirius`, nameF(0) === 'SIRI');
+// review fix: an out-of-range star_max_mag must saturate to "load all", not wrap negative and collapse
+// to the baked fallback (mag*100 would overflow int16 without the clamp).
+maxMag(400.0); loadStars();
+check(`star_max_mag=400 saturates -> loads all ${fileCount} (not a wrapped-negative fallback)`, nStar() === fileCount);
 maxMag(6.0); loadStars();   // restore the full catalogue for the transit checks
 
 // Oracle: independent double-precision recomputation reading the LOADED catalogue + LST.
