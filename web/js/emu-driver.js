@@ -61,6 +61,7 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     _loadStars: w('emu_load_stars','void',[]),
     feedNmea: w('emu_feed_nmea','void',['string']),
     now: w('emu_now','number'), mode: w('emu_mode','number'),
+    modeId: w('emu_mode_id','number',['string']),   // MODE_ name → firmware enum int (face label sync)
     hadPps: w('emu_had_pps','number'), sincePps: w('emu_since_pps','number'),
     satcount: w('emu_satcount','number'),
     colonMode: w('emu_colon_mode','number'),
@@ -284,6 +285,7 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     // --- inputs / shims ---
     button1() { E.button1(); drain(); },
     button2() { E.button2(); drain(); },
+    modeId(name) { return E.modeId(name); },   // MODE_ constant name → firmware enum value (-1 if absent)
     setBrightness(v01) { state.adc = Math.max(0, Math.min(4095, Math.round(v01*4095))); E.setAdc(state.adc); },
     setLocation(la, lo, src = 'manual') { return setLoc(la, lo, src); },   // returns a promise → resolved zone (manual)
     denyGeo,   // browser refused / failed geolocation → keep DEFAULT but flag it honestly

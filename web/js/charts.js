@@ -703,18 +703,25 @@ export function drawGlobe(canvas, tok, g) {
   ctx.strokeStyle = 'rgba(150,190,230,0.42)'; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
 
-  // ground trails (per-constellation, subtle; trailBreak splits at disconnect gaps — no chords)
+  // ground trails (per-constellation, subtle; trailBreak splits at disconnect gaps — no chords).
+  // Age-faded per segment (newest brightest → oldest faintest) over a 30-min window, matching the
+  // polar plot so all three sky views cue track age the same way (points carry `t`).
   if (g.opts.trails) {
+    const nowS = Date.now() / 1000;
     for (const [key, tr] of g.gtrails) {
-      const sat = g.sats.find((x) => x.key === key); if (!sat) continue;
-      ctx.strokeStyle = tok[sat.tok]; ctx.globalAlpha = 0.4; ctx.beginPath(); let s = false, prev = null;
+      const sat = g.sats.find((x) => x.key === key); if (!sat || tr.length < 2) continue;
+      const col = tok[sat.tok]; const refT = tr[tr.length - 1].t || nowS;
+      let prev = null, pq = null;
       for (const p of tr) {
         const q = proj(p.lat, p.lon);
-        if (!q.vis) { s = false; prev = p; continue; }
-        if (s && prev && trailBreak(prev, p)) s = false;
-        s ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y); s = true; prev = p;
+        if (!q.vis) { prev = p; pq = null; continue; }
+        if (prev && pq && !trailBreak(prev, p)) {
+          const age = Math.min(1, Math.max(0, (refT - (p.t || refT)) / 1800));
+          ctx.globalAlpha = 0.5 * (1 - age) + 0.05; ctx.strokeStyle = col;
+          ctx.beginPath(); ctx.moveTo(pq.x, pq.y); ctx.lineTo(q.x, q.y); ctx.stroke();
+        }
+        prev = p; pq = q;
       }
-      ctx.stroke();
     }
     ctx.globalAlpha = 1;
   }
@@ -748,6 +755,17 @@ export function drawGlobe(canvas, tok, g) {
     if (sp.vis) {
       ctx.fillStyle = 'rgba(255,220,120,0.95)'; ctx.shadowColor = 'rgba(255,210,90,0.9)'; ctx.shadowBlur = 20;
       ctx.beginPath(); ctx.arc(sp.x, sp.y, 4.5, 0, TAU); ctx.fill(); ctx.shadowBlur = 0;
+    }
+  }
+
+  // sub-lunar cool glow — the moon was polar-plot-only; drawing it here makes the celestial
+  // markers symmetric across views (it hides behind the limb like the sun via the vis test).
+  if (g.moon) {
+    const mp = proj(g.moon.subLat, g.moon.subLon);
+    if (mp.vis) {
+      const r = 3 + 1.8 * (g.moon.illum || 0);
+      ctx.fillStyle = 'rgba(200,210,230,0.92)'; ctx.shadowColor = 'rgba(159,176,208,0.85)'; ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.arc(mp.x, mp.y, r, 0, TAU); ctx.fill(); ctx.shadowBlur = 0;
     }
   }
 
@@ -801,8 +819,9 @@ export function drawMap(canvas, tok, g) {
   // latitude is atan(-cos(Δlon)/tan(δ)). On this already-dark map, DARKENING the night is invisible,
   // so instead we LIFT the daylit hemisphere with a soft wash and trace the terminator as a faint
   // line — a legible day/night without breaking the muted palette. (The design left an unused
-  // gradient here; this completes that intent and matches the globe's terminator.)
-  if (g.sun) {
+  // gradient here; this completes that intent and matches the globe's terminator.) Gated on the
+  // TERMINATOR toggle so the map matches the globe (it used to be always-on with no control).
+  if (g.opts.terminator && g.sun) {
     const dsLat = g.sun.subLat, dsLon = g.sun.subLon;
     let tanD = Math.tan(dsLat * D2R); if (Math.abs(tanD) < 1e-4) tanD = (tanD < 0 ? -1 : 1) * 1e-4;
     const northNight = dsLat < 0; // sun in the south → north pole is in shadow (day pole is south)
@@ -826,16 +845,22 @@ export function drawMap(canvas, tok, g) {
   // real ground tracks — per-constellation, subtle (mirrors the globe's gtrails treatment;
   // trailBreak splits at disconnect gaps AND the ±180° seam — no chords, no full-width streaks)
   if (g.opts.trails && g.gtrails) {
-    ctx.lineWidth = 1.3; ctx.globalAlpha = 0.4;
+    ctx.lineWidth = 1.3;
+    const nowS = Date.now() / 1000;
     for (const [key, tr] of g.gtrails) {
       const sat = g.sats.find((x) => x.key === key); if (!sat || tr.length < 2) continue;
-      ctx.strokeStyle = tok[sat.tok] || tok.txt3; ctx.beginPath(); let s = false, prev = null;
+      const col = tok[sat.tok] || tok.txt3; const refT = tr[tr.length - 1].t || nowS;
+      let prev = null, pq = null;
       for (const p of tr) {
         const q = P(p.lon, p.lat);
-        if (s && prev && trailBreak(prev, p, true)) s = false;
-        s ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y); s = true; prev = p;
+        // age-faded per segment (newest brightest), matching the globe + polar plot
+        if (prev && pq && !trailBreak(prev, p, true)) {
+          const age = Math.min(1, Math.max(0, (refT - (p.t || refT)) / 1800));
+          ctx.globalAlpha = 0.45 * (1 - age) + 0.05; ctx.strokeStyle = col;
+          ctx.beginPath(); ctx.moveTo(pq.x, pq.y); ctx.lineTo(q.x, q.y); ctx.stroke();
+        }
+        prev = p; pq = q;
       }
-      ctx.stroke();
     }
     ctx.globalAlpha = 1;
   }
@@ -857,6 +882,15 @@ export function drawMap(canvas, tok, g) {
     const sp = P(g.sun.subLon, g.sun.subLat);
     ctx.fillStyle = tok.acq; ctx.shadowColor = tok.acq; ctx.shadowBlur = 16;
     ctx.beginPath(); ctx.arc(sp.x, sp.y, 6, 0, TAU); ctx.fill(); ctx.shadowBlur = 0;
+  }
+
+  // sub-lunar glyph — cool, dimmer than the sun, so celestial markers are symmetric with the
+  // polar plot (which was the only view drawing the moon). Radius tracks illuminated fraction.
+  if (g.moon) {
+    const mp = P(g.moon.subLon, g.moon.subLat), r = 3.5 + 2 * (g.moon.illum || 0);
+    ctx.fillStyle = '#c8d2e6'; ctx.shadowColor = '#9fb0d0'; ctx.shadowBlur = 8;
+    ctx.beginPath(); ctx.arc(mp.x, mp.y, r, 0, TAU); ctx.fill(); ctx.shadowBlur = 0;
+    if (g.opts.labels) { ctx.fillStyle = tok.txt3; ctx.fillText('☾', mp.x + 6, mp.y + 3); }
   }
 
   // observer — cross-haired ring

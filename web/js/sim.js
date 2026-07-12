@@ -461,6 +461,9 @@ export function createSession(opts = {}) {
       if (Array.isArray(S.dopHist)) S.dopHist.length = 0;
       if (Array.isArray(S.fixHist)) S.fixHist.length = 0;
       if (S.pps && Array.isArray(S.pps.list)) S.pps.list.length = 0;   // → TIMING KPIs go honest (no stale stream)
+      if (S.pps && Array.isArray(S.pps.samples)) S.pps.samples.length = 0;  // drift-vs-temp scatter reads this ungated
+      S.fixAgeT = 0;      // don't leave this sim's fix timestamp for a later Connected session to inherit
+      prerolled = false;  // let the NEXT connect() re-preroll — else a restarted sim shows empty charts
     },
     reboot() {
       S.rebooting = true;

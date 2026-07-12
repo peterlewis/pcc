@@ -337,6 +337,30 @@ double emu_tc2_probe(int field){ (void)field; return 0; }
 void emu_enable_mode(int m){ if (m>=0 && m<NUM_DISPLAY_MODES) config.modes_enabled[m] = 1; }
 void emu_set_pos(float lat, float lon){ latitude = lat; longitude = lon; }
 int  emu_mode(void){ return displayMode; }
+/* Resolve a MODE_ constant NAME to its firmware enum value, so the JS face can map the
+ * emulator's live displayMode (which the two cover buttons step in firmware-enum order,
+ * exactly like the hardware) back to the app's mode key — instead of running a second,
+ * app-order cursor that silently desynced the label from the segments. Emu-only shim;
+ * the real firmware never needs a name table. Guards mirror the per-mode exports below. */
+int emu_mode_id(const char* name){
+  if (!name) return -1;
+  #define M(n) if (!strcmp(name, #n)) return n;
+  M(MODE_ISO8601_STD) M(MODE_ISO_ORDINAL) M(MODE_ISO_WEEK) M(MODE_UNIX)
+  M(MODE_JULIAN_DATE) M(MODE_MODIFIED_JD) M(MODE_SHOW_OFFSET) M(MODE_SHOW_TZ_NAME)
+  M(MODE_WEEKDAY) M(MODE_WEEKDA_DD) M(MODE_WDY_MM_DD)
+  M(MODE_SUN) M(MODE_SUN_AZEL) M(MODE_MOON) M(MODE_GRID) M(MODE_LATLON) M(MODE_TEMPCOMP)
+  #if EMU_HAS_ALT
+  M(MODE_LST) M(MODE_SOLAR)
+  #endif
+  #if EMU_HAS_ADEV
+  M(MODE_ADEV)
+  #endif
+  #if EMU_HAS_STAR
+  M(MODE_STAR)
+  #endif
+  #undef M
+  return -1;
+}
 #if EMU_HAS_ALT
 int  emu_MODE_LST(void){ return MODE_LST; }
 int  emu_MODE_SOLAR(void){ return MODE_SOLAR; }

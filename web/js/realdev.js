@@ -76,6 +76,7 @@ export function createRealDevice(session) {
     let obsAtConnect = null;      // pre-connect observer, restored on disconnect
     let lastHistT = 0;            // last whole-second we sampled POSITION/DOP/continuity history
     let lastCn0T = 0;             // last whole-second we sampled per-sat C/N0 history
+    let lastRxT = 0;              // uwTick-equivalent: last time ANY line arrived (RX-staleness watchdog)
     let rxSeq = 0;                // monotonic id per rx line — survives the 420 front-trim (see log())
 
     /// Push one line into S.nmeaLog with the sim's item shape, capped like sim.
@@ -103,8 +104,16 @@ export function createRealDevice(session) {
         if (Array.isArray(S.dopHist)) S.dopHist.length = 0;
         if (Array.isArray(S.fixHist)) S.fixHist.length = 0;
         if (S.pps && Array.isArray(S.pps.list)) S.pps.list.length = 0;   // TIMING KPIs go honest (no stale stream)
+        // The drift-vs-temp scatter + OSC DRIFT staircase read S.pps.samples with
+        // NO appMode gate, so leaving these behind shows a vanished device's
+        // oscillator data in Standby and contaminates a later sim fit. connect()
+        // already clears both; every leave-path must mirror it.
+        if (S.pps && Array.isArray(S.pps.samples)) S.pps.samples.length = 0;
+        ppsLastCalerr = null;
         S.star = null;   // $PMSTAR transit list — real-device data, leaves with the device
         S.stab = null;   // $PMADEV/$PMHDEV stability ladders — likewise
+        S.fixAgeT = 0;   // freshness stamp is per-session — never bleed a prior fix/sim value
+        lastRxT = 0;     // RX-staleness watchdog resets with the session
         lastHistT = 0; lastCn0T = 0;
         // Restore the observer we adopted from the device fix back to whatever it
         // was before connecting, so the sim resumes from the honest default.
@@ -253,6 +262,12 @@ export function createRealDevice(session) {
         const text = String(line).trim();
         if (!text) return;
         log(text, false);
+        // RX-staleness watchdog: over the pccd bridge an unplug on the daemon HOST
+        // does NOT close the browser WebSocket (pccd just retries the serial port),
+        // so ws.onclose never fires and the app stays CONNECTED on frozen telemetry.
+        // Stamp every arriving line; onTick flips to a no-signal state if this ages out.
+        lastRxT = Date.now();
+        S.lastRxT = lastRxT;
 
         // GGA — position + fix quality → S.fix
         if (/GGA/.test(text) && text.startsWith('$')) {
@@ -261,6 +276,12 @@ export function createRealDevice(session) {
                 if (Number.isFinite(g.fix) && g.fix > 0 &&
                     Number.isFinite(g.lat) && Number.isFinite(g.lon)) {
                     S.fix.valid = true;
+                    // FIX AGE freshness stamp. Without this the header/CONNECTION
+                    // age readouts (which render `S.fix.valid && S.fixAgeT ? … : '—'`)
+                    // are dead on a live clock — S.fixAgeT was only ever set by the
+                    // simulator, so a real device showed '—' forever and could inherit
+                    // a prior sim's timestamp. Stamp it here, exactly as sim.tick does.
+                    S.fixAgeT = Date.now();
                     // GGA's quality field (1=GPS, 2=DGPS, 4=RTK…) is not the
                     // GSA 2D/3D flag; any positive quality means we have a
                     // position. Match the sim's convention of type 3 for a
@@ -422,6 +443,23 @@ export function createRealDevice(session) {
         // or null. The app polls this for the Connection room's live BRIDGE row.
         detectBridge() { return BridgeClock.detect(); },
 
+        // RX-staleness watchdog (bridge parity). The direct Web Serial transport detects an unplug
+        // two ways (navigator.serial 'disconnect' + readLoop end). The bridge transport only reacts
+        // to ws.onclose — so when the clock is unplugged from the pccd HOST, pccd keeps the browser
+        // socket open and silently retries the port, the line stream just stops, and the app would
+        // sit CONNECTED forever on frozen telemetry. Called each app tick: if a live device has sent
+        // nothing for STALE_MS, mirror the physical-unplug teardown (drop to Standby; the user
+        // reconnects, exactly like the direct path after an unplug). Self-guards, so it's harmless
+        // on the direct path — a genuinely dead direct device deserves the same treatment.
+        checkRxStale(nowMs = Date.now()) {
+            if (!S.real || !S.connected || !lastRxT) return false;
+            if (nowMs - lastRxT <= 8000) return false;
+            log('[serial] no data for 8 s — clock lost at the pccd host; dropping to Standby', true);
+            S.real = false; S.rebooting = false;
+            clearRealBuffers();
+            return true;
+        },
+
         async connect() {
             // Transport: if the pccd bridge daemon is running it OWNS the serial port (and is
             // feeding chrony), so direct Web Serial would fail anyway — auto-prefer the bridge.
@@ -498,6 +536,8 @@ export function createRealDevice(session) {
             S.tc = null;   // learned model belongs to ONE device — never show a previous clock's
             S.star = null; // same rule for the transit list and stability ladders: they arrive
             S.stab = null; // fresh from THIS device or not at all
+            S.fixAgeT = 0; // no fix seen yet this session — FIX AGE dashes until a valid GGA lands
+            S.lastRxT = 0; lastRxT = 0;   // watchdog clock starts when the first line arrives
         },
 
         async disconnect() {

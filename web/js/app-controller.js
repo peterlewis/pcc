@@ -7,6 +7,7 @@ import * as ASTRO from './astro-fw.js?v=90';
 import * as DS from './datasources.js?v=90';
 import { TelemetryLog } from './telemetrylog.js?v=4';
 import { prepReview, drawReview, sampleAt, tAtX } from './review.js?v=1';
+import { subSatellitePoint } from './satpass.js?v=1';
 import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=4';
 
 // config.txt is the single source of truth: the clock-behaviour defaults (enabled modes, colon,
@@ -51,6 +52,9 @@ class Component extends DcLite {
     sigMedian: true, sigFilter: 'all',
     posWindow: 1800,
     globeTerm: true, globeTrails: true, globeLabels: false, globeGrat: true, globeRotate: true, globeClock: true,
+    // MAP has its own toggle state so it stops silently driving the hidden GLOBE (and vice-versa);
+    // TERMINATOR gives the map the day/night control the globe already had.
+    mapTerm: true, mapTrails: true, mapLabels: false, mapGrat: true,
     wxOffline: false, wxInterval: 'off',
     monPaused: false, monAutoscroll: true,
     hdrBar: false, rebootArm: false,
@@ -671,7 +675,14 @@ class Component extends DcLite {
   // Read the firmware's latched segment buffers and push them onto the six emulator-driven faces.
   paintEmuFrame() {
     const frame = this.emu.frame();
-    const colon = this.emu.colonName();
+    // Colon fix-tell — the canonical hardware affordance: an animated colon means a live
+    // GPS-disciplined fix; the firmware HOLDS it SOLID whenever it lacks one (acquiring, or
+    // holdover after signal loss). The emulator's colonStep free-runs, so gate it here — the
+    // same rule applyFaceState applies to JS faces (noFixFreeze) and the FORMATS caption
+    // documents. Without this a DROP-GPS scenario kept pulsing the colons as if still locked.
+    const pr = this.emu.precision ? this.emu.precision() : null;
+    const heldSolid = pr ? !(pr.hadPps && pr.signal !== false) : false;
+    const colon = heldSolid ? 'solid' : this.emu.colonName();
     // boot reveal: multiply brightness by the driver's 0..1 fade so a reboot goes blank then fades in.
     const bright = Math.pow(this.state.brightness, this.state.gamma) * (this.emu.reveal ? this.emu.reveal() : 1);
     for (const k of this.EMU_FACES) {
@@ -1177,6 +1188,10 @@ class Component extends DcLite {
       }
     }
     this.mirrorDeviceClock();
+    // Bridge RX-staleness watchdog: a host-side unplug over the pccd bridge leaves the WebSocket
+    // open, so without this the app stays CONNECTED on a frozen stream. Drops to Standby after 8 s
+    // of silence (self-guarded; a no-op in Standby/Simulation and on a healthy stream).
+    if (this.realdev && this.realdev.checkRxStale) this.realdev.checkRxStale();
     // Telemetry logging — CONNECTED real data only, and ONLY when the user has opted in. The
     // opt-in gate must sit on beginSession/record too, not just the UI: the logger's contract is
     // "no silent persistence", so nothing (not even the sessions row with the observer's home
@@ -1301,7 +1316,8 @@ class Component extends DcLite {
     if (name === 'globe') {
       return CH.drawGlobe(el, T, {
         rot: this.globeRot, land: this.land, sats: S.sats, gtrails: gcut(S.gtrails),
-        sun: this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon), obs: S.obs,
+        sun: this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon),
+        moon: this.SIM.moonPos(Date.now(), S.obs.lat, S.obs.lon), obs: S.obs,
         opts: { terminator: st.globeTerm, trails: st.globeTrails, labels: st.globeLabels, graticule: st.globeGrat },
         dark: st.theme === 'dark',
       });
@@ -1309,8 +1325,9 @@ class Component extends DcLite {
     if (name === 'map') {
       return CH.drawMap(el, T, {
         land: this.land, sats: S.sats, gtrails: gcut(S.gtrails),
-        sun: this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon), obs: S.obs,
-        opts: { trails: st.globeTrails, labels: st.globeLabels, graticule: st.globeGrat },
+        sun: this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon),
+        moon: this.SIM.moonPos(Date.now(), S.obs.lat, S.obs.lon), obs: S.obs,
+        opts: { terminator: st.mapTerm, trails: st.mapTrails, labels: st.mapLabels, graticule: st.mapGrat },
         dark: st.theme === 'dark',
       });
     }
@@ -1691,11 +1708,41 @@ class Component extends DcLite {
     this.setState({ currentMode: key });
     this.pushMode(this.modeDef(key).mode, true);
   }
+  // firmware displayMode int → MODE_DEFS key, built once from the emulator's own enum so the
+  // face label always names the mode the firmware is actually showing (no hardcoded enum ints).
+  fwModeKey(modeInt) {
+    if (!this.emu || !this.emu.modeId) return null;
+    if (!this._fwModeKey) {
+      this._fwModeKey = new Map();
+      for (const d of this.MODE_DEFS) {
+        const id = this.emu.modeId(d.mode);
+        if (id >= 0) this._fwModeKey.set(id, d.key);
+      }
+    }
+    return this._fwModeKey.get(modeInt) || null;
+  }
   // The two tactile buttons on the switch cover (clicked on the on-screen board). Like the real
-  // clock, they step through the enabled display modes — forward on 1, back on 2.
+  // clock, they step through the enabled display modes — forward on 1, back on 2. The button id
+  // arrives as the furniture-item string ('d-btn-2') OR a raw number; the back button is #2, so
+  // match the trailing digit (the old `btn === 2` test was always false against a string id, so
+  // BOTH buttons stepped forward — the back button was dead).
   onFaceButton(btn) {
-    if (this.emu) { btn === 2 ? this.emu.button2() : this.emu.button1(); }
-    this.cycleMode(btn === 2 ? -1 : 1);
+    const back = /2$/.test(String(btn));
+    if (this.emu) {
+      // The emulator IS the firmware: let ITS cursor be the single source of truth. Step it (in
+      // firmware-enum order, exactly like the hardware), then derive the label from the resulting
+      // mode — instead of also advancing an independent app-order cursor that desynced the caption
+      // from the segments (the two enabled-sets and orderings differed).
+      back ? this.emu.button2() : this.emu.button1();
+      const key = this.fwModeKey(this.emu.state().mode);
+      if (key) {
+        this.setState({ currentMode: key });
+        // Mirror to a connected clock so its face follows too (the emulator drives the picture).
+        if (this.session && this.session.S && this.session.S.real) this.devSend(this.modeDef(key).mode + ' = enabled');
+      }
+    } else {
+      this.cycleMode(back ? -1 : 1);
+    }
   }
 
   // ---- hardware calibration: drag the on-screen buttons/screws/sensor, read the mm back --------
@@ -1718,6 +1765,11 @@ class Component extends DcLite {
       { id: 't-hng-0', row: 'time', kind: 'screw', x: 9.5, y: 0.16, r: 2 },
       { id: 't-hng-1', row: 'time', kind: 'screw', x: 9.5, y: 0.5, r: 2 },
       { id: 't-hng-2', row: 'time', kind: 'screw', x: 9.5, y: 0.84, r: 2 },
+      // Signature right-edge fittings the face was missing: the gold GPS SMA jack and the USB port.
+      // PLACEHOLDER positions (drag-to-calibrate); the loadHwConfig merge folds these into an existing
+      // saved config as new items WITHOUT a VER bump, so the hand-measured furniture above is untouched.
+      { id: 't-ant', row: 'time', kind: 'antenna', x: 266, y: 0.33, r: 2.6 },
+      { id: 't-usb', row: 'time', kind: 'usb', x: 266, y: 0.67, r: 2.4 },
     ];
   }
   loadHwConfig() {
@@ -2506,6 +2558,12 @@ class Component extends DcLite {
       cbGTrails: this.cb(st.globeTrails), oGTrails: () => this.setState({ globeTrails: !st.globeTrails }, () => this.drawChart('globe')),
       cbGLabels: this.cb(st.globeLabels), oGLabels: () => this.setState({ globeLabels: !st.globeLabels }, () => this.drawChart('globe')),
       cbGGrat: this.cb(st.globeGrat), oGGrat: () => this.setState({ globeGrat: !st.globeGrat }, () => this.drawChart('globe')),
+      // MAP's own toggles — independent state, and they redraw the MAP (the visible surface), not
+      // the off-screen globe the shared handlers used to repaint a beat late.
+      cbMTerm: this.cb(st.mapTerm), oMTerm: () => this.setState({ mapTerm: !st.mapTerm }, () => this.drawChart('map')),
+      cbMTrails: this.cb(st.mapTrails), oMTrails: () => this.setState({ mapTrails: !st.mapTrails }, () => this.drawChart('map')),
+      cbMLabels: this.cb(st.mapLabels), oMLabels: () => this.setState({ mapLabels: !st.mapLabels }, () => this.drawChart('map')),
+      cbMGrat: this.cb(st.mapGrat), oMGrat: () => this.setState({ mapGrat: !st.mapGrat }, () => this.drawChart('map')),
       cbGRot: this.cb(st.globeRotate), oGRot: () => this.setState({ globeRotate: !st.globeRotate }),
       cbGClock: this.cb(st.globeClock), oGClock: () => this.setState({ globeClock: !st.globeClock }),
       globeClockOn: st.globeClock,
@@ -2810,12 +2868,38 @@ class Component extends DcLite {
         if (r.pps.temp != null && r.pps.ppm !== lastPpm) { ppsSamples.push({ t: r.t, temp: r.pps.temp, ppm: r.pps.ppm }); lastPpm = r.pps.ppm; }
       }
     }
+    // Sub-satellite point reconstruction (exactly what the live real-device path does): the log
+    // stores observer-relative az/el + constellation identity, so GLOBE and MAP can plot the past
+    // as faithfully as the polar plot instead of going empty (they skip any sat whose geo is NaN).
+    // The log doesn't carry the raw CONSTELLATIONS object, only its id, so map id → nominal orbit
+    // altitude (the only field subSatellitePoint reads).
+    const ALT = { G: 20200, R: 19100, E: 23222, C: 21528 };
+    const subPt = (az, el, constId) => {
+      if (!(el > 0) || az == null) return { lat: NaN, lon: NaN };
+      const sp = subSatellitePoint({ azDeg: az, elDeg: el, constellation: { altitudeKm: ALT[constId] || 20200 }, observerLat: refLat, observerLon: refLon });
+      return sp ? { lat: sp.lat, lon: sp.lon } : { lat: NaN, lon: NaN };
+    };
     const cur = win.length ? win[win.length - 1] : null;
     S.sats = (cur ? cur.sats : []).map((s) => ({
       key: s.key || ('G' + String(s.prn).padStart(2, '0')), prn: s.prn, constId: s.constId || 'G', tok: s.tok || 'gps',
       talker: s.talker || 'GP', sysId: s.sysId || 1, az: s.az, el: s.el, cn0: s.cn0, used: s.used,
-      visible: s.el != null && s.el > 0, geo: { lat: NaN, lon: NaN },
+      visible: s.el != null && s.el > 0, geo: subPt(s.az, s.el, s.constId || 'G'),
     }));
+    // Rebuild windowed ground tracks from the same az/el trails, downsampled to the live ~45 s
+    // gtrail cadence so GLOBE/MAP show the scrubbed history's tracks (and the TRAIL-length gcut,
+    // which assumes 45 s/point, slices them correctly).
+    const gtrails = new Map();
+    for (const [key, tr] of trails) {
+      const constId = key[0];
+      const g = []; let lastT = -Infinity;
+      for (const p of tr) {
+        if (p.t - lastT < 45 || !(p.el > 0)) continue;
+        const geo = subPt(p.az, p.el, constId);
+        if (Number.isFinite(geo.lat)) { g.push({ lat: geo.lat, lon: geo.lon, t: p.t }); lastT = p.t; }
+      }
+      if (g.length) gtrails.set(key, g);
+    }
+    S.gtrails = gtrails;
     if (cur && cur.fix) S.fix = { valid: true, lat: cur.fix.lat, lon: cur.fix.lon, alt: cur.fix.alt, hdop: cur.fix.hdop, pdop: cur.fix.pdop, vdop: cur.fix.vdop, type: cur.fix.type, sats: cur.fix.sats };
     else S.fix = { ...S.fix, valid: false, type: 0, sats: 0 };
     S.posHist = posHist; S.dopHist = dopHist; S.fixHist = fixHist; S.cn0Hist = cn0Hist; S.trails = trails;
@@ -2834,6 +2918,9 @@ class Component extends DcLite {
       posHist: cpArr(S.posHist), dopHist: cpArr(S.dopHist), fixHist: cpArr(S.fixHist),
       cn0Hist: S.cn0Hist instanceof Map ? new Map(S.cn0Hist) : S.cn0Hist,
       trails: S.trails instanceof Map ? new Map(S.trails) : S.trails,
+      // reconstructReview now rebuilds S.gtrails too, so it must be snapshotted or the live ground
+      // tracks would be replaced by the scrubbed window on exit.
+      gtrails: S.gtrails instanceof Map ? new Map(S.gtrails) : S.gtrails,
       pps: S.pps ? { ...S.pps, list: cpArr(S.pps.list) } : S.pps,
     };
     this._reviewing = true;

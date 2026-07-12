@@ -56,24 +56,14 @@ const DEFAULT_HW = [
   { id: 't-hng-0', row: 'date', kind: 'screw', x: 9, y: 0.812 },
   { id: 't-hng-1', row: 'time', kind: 'screw', x: 9, y: 0.5 },
   { id: 't-hng-2', row: 'time', kind: 'screw', x: 9, y: 0.826 },
+  // GPS SMA jack + USB port — the two signature right-edge fittings the face was missing. Positions
+  // are PLACEHOLDERS (drag-to-calibrate via the overlay); they fold into a saved config as new items.
+  { id: 't-ant', row: 'time', kind: 'antenna', x: 268, y: 0.33, r: 2.6 },
+  { id: 't-usb', row: 'time', kind: 'usb', x: 268, y: 0.67, r: 2.4 },
 ];
-const HW_SPEC = {
-  // DATE board: 2 tactile buttons in the switch cover + edge screws (outer); + the hinge-end pins
-  // (x=12) which, after the date half's 180° flip, land at the seam / centre of the display.
-  date: {
-    coverX: HW_VBX(262), screwX: HW_VBX(265.365), hingeX: HW_VBX(12),
-    buttons: [{ y: 0.34 }, { y: 0.66 }],
-    coverScrews: [{ y: 0.11 }, { y: 0.89 }],
-    hingeScrews: [{ y: 0.174 }, { y: 0.500 }],
-  },
-  // TIME board: the VTT9812FH phototransistor (light sensor, dead-centre) + edge + hinge screws
-  time: {
-    sensorX: HW_VBX(265.365), screwX: HW_VBX(265.365), hingeX: HW_VBX(12),
-    sensor: { y: 0.500, r: 2.5 },
-    coverScrews: [{ y: 0.189 }, { y: 0.812 }],
-    hingeScrews: [{ y: 0.500 }, { y: 0.826 }],
-  },
-};
+// (Removed HW_SPEC — a never-read structured constant that disagreed with DEFAULT_HW on button
+// positions and screw radii, so editing it changed nothing on screen. DEFAULT_HW, consumed by
+// buildHardware, is the single source of truth for board-furniture geometry.)
 // Lit-only glow layer. The bloom is a GPU-composited CSS drop-shadow on the GLOW group (whose
 // polys are shown only where a segment is lit), NOT an feGaussianBlur (which re-rasterises
 // every frame and tanks paint) and NOT on the crisp layer (which would halo off-segments too).
@@ -254,6 +244,20 @@ export function createClockFaceSVG(container, opts = {}) {
       g.appendChild(el('circle', { cx: x, cy: y, r, fill: HW_MATTE, stroke: HW_LINE, 'stroke-width': uw }));   // flat holder
       g.appendChild(el('circle', { cx: x, cy: y, r: r * 0.42, fill: HW_EYE }));                                 // flat aperture — no lens dome
     };
+    // Gold SMA jack — the GPS antenna connector, the clock's most functionally-signature edge
+    // fitting: a warm hex nut ring around a bright centre pin, distinct from the grey furniture.
+    const HW_GOLD = '#b9975a';
+    const antenna = (x, y, r) => {
+      const pts = [];
+      for (let i = 0; i < 6; i++) { const a = (Math.PI / 3) * i - Math.PI / 6; pts.push(`${(x + r * Math.cos(a)).toFixed(2)},${(y + r * Math.sin(a)).toFixed(2)}`); }
+      g.appendChild(el('polygon', { points: pts.join(' '), fill: HW_MATTE, stroke: HW_GOLD, 'stroke-width': uw }));  // hex nut
+      g.appendChild(el('circle', { cx: x, cy: y, r: r * 0.34, fill: HW_GOLD }));                                     // centre pin
+    };
+    // USB port — a small rounded rectangle (the Type-C receptacle mouth).
+    const usb = (x, y, r) => {
+      const wdt = r * 2.0, hgt = r * 0.95;
+      g.appendChild(el('rect', { x: x - wdt / 2, y: y - hgt / 2, width: wdt, height: hgt, rx: hgt * 0.5, fill: HW_EYE, stroke: HW_LINE, 'stroke-width': uw }));
+    };
     const button = (x, y, r, idx) => {
       const ring = el('circle', { cx: x, cy: y, r: r * 1.15, fill: 'none', stroke: HW_LINE, 'stroke-width': uw });  // recess outline
       const cap = el('circle', { cx: x, cy: y, r, fill: HW_CAP, stroke: HW_LINE, 'stroke-width': uw });              // flat tactile cap
@@ -279,6 +283,8 @@ export function createClockFaceSVG(container, opts = {}) {
       if (it.kind === 'screw') screw(x, y, HW_VBR(it.r || 2.5));   // r in mm (radius); 2.5 = 5 mm heads
       else if (it.kind === 'sensor') sensor(x, y, HW_VBR(it.r || 2.5));
       else if (it.kind === 'button') button(x, y, HW_VBR(it.r || 2.7), it.id);
+      else if (it.kind === 'antenna') antenna(x, y, HW_VBR(it.r || 2.6));   // gold SMA jack
+      else if (it.kind === 'usb') usb(x, y, HW_VBR(it.r || 2.4));           // USB receptacle
       if (state.hwCalibrate) addHandle(g, x, y, it, rowTop);
     }
     svg.appendChild(g);
