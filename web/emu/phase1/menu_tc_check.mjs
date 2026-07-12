@@ -50,21 +50,22 @@ setTc(0, 0);                                                   // deterministic 
 gotoTempcomp();
 check(`DIAG has a TEMPCOMP toggle item ("${row()}")`, row().startsWith('TEMPCOM') && secOf() === SEC_DIAG);
 
-// (1) one-press EDIT toggles TEMPCOMP in place (no editor) and arms BOTH tc_learn + tc_apply; a second
-//     EDIT turns it back off.
-ev(EVT.S1); ev(EVT.REL);                                       // EDIT toggles ON at L2
-check(`stays at L2 (a toggle has no editor)`, layer() === L2);
-check(`ON arms learn AND apply`, tcLearn() === 1 && tcApply() === 1);
-ev(EVT.S1); ev(EVT.REL);                                       // EDIT again -> OFF
+// (1) enter the editor, tap to ON (arms BOTH tc_learn + tc_apply live), exit (DONE) saves; again -> OFF.
+ev(EVT.S1); ev(EVT.REL);                                       // EDIT -> L3 editor
+check(`EDIT opens the editor at L3`, layer() === L3);
+ev(EVT.BTN1);                                                  // tap -> ON (live)
+check(`tap arms learn AND apply`, tcLearn() === 1 && tcApply() === 1);
+ev(EVT.S1); ev(EVT.REL);                                       // DONE -> L2, saved
+check(`DONE returns to L2`, layer() === L2);
+ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL);// enter, tap -> OFF, DONE
 check(`toggle off disarms both (learn=${tcLearn()} apply=${tcApply()})`, tcLearn() === 0 && tcApply() === 0);
 backToL0();
 
-// (2) the one-press toggle persists across a reboot: it records immediately (no separate SAVE), and the
-//     commit gate / eeCommit writes it to flash.
+// (2) the toggle persists across a reboot: exiting (DONE) records; the commit gate / eeCommit writes it.
 eeReset(); setMtime(0x5AA5, 0x1234);
 gotoTempcomp();
-ev(EVT.S1); ev(EVT.REL);                                       // EDIT -> ON, recorded in place
-check(`toggle ON at L2 (learn=${tcLearn()})`, layer() === L2 && tcLearn() === 1);
+ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL);// EDIT, tap -> ON, DONE (records)
+check(`toggled ON + exited (learn=${tcLearn()})`, layer() === L2 && tcLearn() === 1);
 check(`commit writes a record`, eeCommit() === 1);
 backToL0();
 setTc(0, 0);                                                   // scribble live flags off (as if power-lost)

@@ -40,7 +40,7 @@ bootCold(1783627200);
 // records it), then force a commit.
 eeReset(); setMtime(0x5AA5, 0x1234); setBal(0, 0);
 gotoSection(SEC_DISP, 'BALANCE');
-ev(EVT.S1); ev(EVT.REL);                                        // EDIT toggles BALANCE ON (recorded)
+ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL); // enter, tap BALANCE ON, DONE (recorded)
 check(`set up a stored override (commit ${eeCommit()})`, ovrValid() === 1);
 backToL0();
 

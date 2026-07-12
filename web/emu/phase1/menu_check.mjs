@@ -121,9 +121,11 @@ for (let s = 0; s < 5 && !lastSeen; s++) {
   for (let pass = 0; pass < 15 && safety < 500 && !lastSeen; pass++) {
     safety++;
     if (row().trim().split(/\s+/).pop() === 'ON') {            // an enabled toggle (renders "LABEL ON")
-      ev(EVT.S1); ev(EVT.REL);                                 // one-press EDIT toggles it OFF in place...
+      ev(EVT.S1); ev(EVT.REL);                                 // EDIT -> editor
+      ev(EVT.BTN1);                                            // tap toggles it OFF...
       if (row().includes('LASt')) { lastSeen = true; if (modecount() < 1) guarded = false; }  // ...unless it's the last mode -> LASt guard refuses it
-    }                                                          // non-toggles (numbers/enums) are left alone (EDIT would open their editor)
+      ev(EVT.S1); ev(EVT.REL);                                 // DONE -> L2 (saved)
+    }                                                          // non-toggles (numbers/enums) are left alone
     if (layer() === L2) ev(EVT.BTN1);                          // next item in this section
   }
 }

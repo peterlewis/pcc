@@ -62,23 +62,25 @@ check(`override floor honoured (dac 4095 -> 60)`, colScale(4095) === 60);
 check(`override anchor honoured (dac 1024 -> 256)`, near(colScale(1024), 256, 1));
 setAnchors(2048, 20);                                          // restore defaults for the rest
 
-// --- the BALANCE menu toggle drives both systems + persists (one-press, no editor) ---
-setBal(0, 0);                                                  // deterministic OFF so EDIT toggles ON
+// --- the BALANCE editor: enter, tap to toggle (live), exit (DONE) saves; drives both systems + persists ---
+setBal(0, 0);
 gotoBalance();
 check(`DISP has a BALANCE toggle ("${row()}")`, row().startsWith('BALANCE') && secOf() === SEC_DISP);
-ev(EVT.S1); ev(EVT.REL);                                       // EDIT toggles ON at L2
-check(`stays at L2 (a toggle has no editor)`, layer() === L2);
-check(`ON arms seg AND colon AUTO`, segBal() === 1 && colBal() === 1);
-ev(EVT.S1); ev(EVT.REL);                                       // EDIT again -> OFF
+ev(EVT.S1); ev(EVT.REL);                                       // EDIT -> editor
+ev(EVT.BTN1);                                                  // tap -> ON (live)
+check(`tap arms seg AND colon AUTO`, segBal() === 1 && colBal() === 1);
+ev(EVT.S1); ev(EVT.REL);                                       // DONE -> L2, saved
+check(`DONE returns to L2`, layer() === L2);
+ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL);// enter, tap -> OFF, DONE
 check(`toggle off disarms both (seg=${segBal()} col=${colBal()})`, segBal() === 0 && colBal() === 0);
 backToL0();
 
-// one-press toggle persists across a reboot (recorded immediately, no SAVE).
+// the editor toggle persists across a reboot (exiting records, no separate SAVE).
 eeReset(); setMtime(0x5AA5, 0x1234);
 setBal(0, 0);
 gotoBalance();
-ev(EVT.S1); ev(EVT.REL);                                       // EDIT -> ON, recorded in place
-check(`ON at L2 (seg=${segBal()})`, layer() === L2 && segBal() === 1);
+ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL);// EDIT, tap -> ON, DONE
+check(`ON + exited (seg=${segBal()})`, layer() === L2 && segBal() === 1);
 check(`commit writes a record`, eeCommit() === 1);
 backToL0();
 setBal(0, 0);                                                  // scribble off (as if power-lost)
@@ -99,7 +101,7 @@ check(`defined-in-config + mtime mismatch -> override skipped`, segBal() === 0 &
 // AUTO(1) on boot. config parse sets the manual values first; menu_apply_overrides sees them already
 // nonzero and leaves them. (Old code did seg_balance=colon_balance=1, silently wiping the calibration.)
 eeReset(); setMtime(0x5AA5, 0x1234);
-setBal(0, 0); gotoBalance(); ev(EVT.S1); ev(EVT.REL);        // EDIT toggles ON (records ovr.bal=1)
+setBal(0, 0); gotoBalance(); ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL);  // enter, tap ON, DONE (records ovr.bal=1)
 check(`stored a BALANCE=on override`, eeCommit() === 1);
 backToL0();
 setBal(150, 128);                                             // config.txt manual strengths (seg 150 / colon 128)
@@ -108,8 +110,8 @@ eeApply();
 check(`BALANCE=on preserves the config manual strengths (seg=${segBal()} col=${colBal()})`, segBal() === 150 && colBal() === 128);
 // ...and a stored BALANCE=off still forces both off regardless of a manual config value.
 eeReset(); setMtime(0x5AA5, 0x1234);
-setBal(1, 1);                                                // deterministic ON so one EDIT toggles OFF
-gotoBalance(); ev(EVT.S1); ev(EVT.REL);                       // EDIT toggles OFF (records ovr.bal=0)
+setBal(1, 1);                                                // deterministic ON so one tap toggles OFF
+gotoBalance(); ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL);  // enter, tap OFF, DONE (records ovr.bal=0)
 eeCommit(); backToL0();
 setBal(150, 128); cfgDef(1 << KID_BALANCE, 0); setMtime(0x5AA5, 0x1234);
 eeApply();
