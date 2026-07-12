@@ -40,7 +40,7 @@ function gotoTempcomp() {
   ev(EVT.S1); ev(EVT.REL);                                     // L0 -> L1 section ring
   for (let g = 0; secOf() !== SEC_DIAG && g < 8; g++) ev(EVT.BTN1);
   ev(EVT.S1); ev(EVT.REL);                                     // ENTER DIAG -> L2, lands on the first DIAG item
-  for (let h = 0; !row().startsWith('TEMPCOMP') && h < 12; h++) ev(EVT.BTN1);
+  for (let h = 0; !row().startsWith('TEMPCOM') && h < 12; h++) ev(EVT.BTN1);
 }
 
 bootCold(1783627200);
@@ -48,24 +48,23 @@ setTc(0, 0);                                                   // deterministic 
 
 // (0) the item exists in DIAG and reads as a toggle (not the "TC VIEW" mode).
 gotoTempcomp();
-check(`DIAG has a TEMPCOMP toggle item ("${row()}")`, row().startsWith('TEMPCOMP') && secOf() === SEC_DIAG);
+check(`DIAG has a TEMPCOMP toggle item ("${row()}")`, row().startsWith('TEMPCOM') && secOf() === SEC_DIAG);
 
-// (1) EDIT + turn ON -> BOTH tc_learn and tc_apply arm together; CANCEL reverts them.
-ev(EVT.S1); ev(EVT.REL);                                       // EDIT -> L3
-check(`editor opens at L3`, layer() === L3);
-ev(EVT.BTN1);                                                  // toggle 0 -> 1 (live)
+// (1) one-press EDIT toggles TEMPCOMP in place (no editor) and arms BOTH tc_learn + tc_apply; a second
+//     EDIT turns it back off.
+ev(EVT.S1); ev(EVT.REL);                                       // EDIT toggles ON at L2
+check(`stays at L2 (a toggle has no editor)`, layer() === L2);
 check(`ON arms learn AND apply`, tcLearn() === 1 && tcApply() === 1);
-ev(EVT.S2); ev(EVT.REL);                                       // CANCEL -> L2, revert to pre-edit (off)
-check(`CANCEL reverts both flags (learn=${tcLearn()} apply=${tcApply()})`, tcLearn() === 0 && tcApply() === 0);
+ev(EVT.S1); ev(EVT.REL);                                       // EDIT again -> OFF
+check(`toggle off disarms both (learn=${tcLearn()} apply=${tcApply()})`, tcLearn() === 0 && tcApply() === 0);
 backToL0();
 
-// (2) SAVE persists across a reboot. Arm ON, SAVE, commit; scribble the flags off; wipe RAM + re-scan
-//     flash; the merge re-arms both.
+// (2) the one-press toggle persists across a reboot: it records immediately (no separate SAVE), and the
+//     commit gate / eeCommit writes it to flash.
 eeReset(); setMtime(0x5AA5, 0x1234);
 gotoTempcomp();
-ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1);                         // EDIT, ON
-ev(EVT.S1); ev(EVT.REL);                                       // SAVE -> L2
-check(`SAVE returns to L2`, layer() === L2);
+ev(EVT.S1); ev(EVT.REL);                                       // EDIT -> ON, recorded in place
+check(`toggle ON at L2 (learn=${tcLearn()})`, layer() === L2 && tcLearn() === 1);
 check(`commit writes a record`, eeCommit() === 1);
 backToL0();
 setTc(0, 0);                                                   // scribble live flags off (as if power-lost)

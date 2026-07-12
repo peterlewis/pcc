@@ -120,14 +120,10 @@ for (let s = 0; s < 5 && !lastSeen; s++) {
   if (layer() !== L2) continue;
   for (let pass = 0; pass < 15 && safety < 500 && !lastSeen; pass++) {
     safety++;
-    ev(EVT.S1); ev(EVT.REL);                                   // EDIT
-    if (layer() === L3) {
-      if (row() === 'ON') {
-        ev(EVT.BTN1);                                          // toggle -> OFF (or refused)
-        if (row() === 'LASt') { lastSeen = true; if (modecount() < 1) guarded = false; ev(EVT.S2); ev(EVT.REL); }
-        else { ev(EVT.S1); ev(EVT.REL); }                      // SAVE the OFF
-      } else { ev(EVT.S2); ev(EVT.REL); }                      // STEP/ENUM/OFF -> CANCEL back to L2
-    }
+    if (row().trim().split(/\s+/).pop() === 'ON') {            // an enabled toggle (renders "LABEL ON")
+      ev(EVT.S1); ev(EVT.REL);                                 // one-press EDIT toggles it OFF in place...
+      if (row().includes('LASt')) { lastSeen = true; if (modecount() < 1) guarded = false; }  // ...unless it's the last mode -> LASt guard refuses it
+    }                                                          // non-toggles (numbers/enums) are left alone (EDIT would open their editor)
     if (layer() === L2) ev(EVT.BTN1);                          // next item in this section
   }
 }
