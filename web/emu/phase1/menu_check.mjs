@@ -209,6 +209,41 @@ for (let h = 0; !row().startsWith('STARS') && h < 14; h++) ev(EVT.BTN1);
 check(`ASTRO has the catalogue readout ("${row()}") — baked fallback tagged 'b'`, /^STARS b\d+$/.test(row()));
 toL0();
 
+// (20) §7A editor blink: a RESTING editor value blinks at 1 Hz (blank/visible), stays SOLID while
+// scrubbing, and any event restores it. The idle warning flickers the whole row once at T-3 s.
+ev(EVT.S1); ev(EVT.REL);                          // SETUP
+for (let g = 0; section() !== SEC.DISP && g < 8; g++) ev(EVT.BTN1);
+ev(EVT.S1); ev(EVT.REL);                          // ENTER DISP -> BRIGHT
+ev(EVT.S1); ev(EVT.REL);                          // EDIT -> L3
+const editRow = row();
+check(`editor opens solid ("${editRow}")`, layer() === L3 && editRow !== '');
+tick(400);                                        // still inside the 600 ms scrub grace
+check(`fresh editor does not blink yet ("${row()}")`, row() === editRow);
+tick(800);                                        // since=1200 -> blank phase (visible 600-1100, blank 1100-1600)
+check(`resting editor blinks blank`, row() === '');
+tick(500);                                        // since=1700 -> visible phase
+check(`blink returns the value ("${row()}")`, row() === editRow);
+ev(EVT.BTN1);                                     // a scrub event -> solid again immediately
+const scrubbed = row();
+tick(400);
+check(`scrubbing holds the value solid ("${row()}")`, row() === scrubbed && row() !== '');
+tick(10900);                                      // since=11300: pre-warning, still blinking territory...
+tick(750);                                        // since=12050 -> inside the T-3 s flicker window
+check(`idle warning flickers the row at T-3 s`, row() === '');
+tick(650);                                        // window passed; land on a VISIBLE blink phase (since=12700 -> even)
+check(`warning ends, value restored ("${row()}")`, row() === scrubbed);
+tick(4000);                                       // ...and the 15 s abandon still fires
+check(`idle abandon still exits to the clock`, layer() === L0);
+
+// (21) VBAT joined DIAG as a normal mode toggle.
+ev(EVT.S1); ev(EVT.REL);
+for (let g = 0; section() !== SEC.DIAG && g < 8; g++) ev(EVT.BTN1);
+ev(EVT.S1); ev(EVT.REL);
+let vseen = false;
+for (let h = 0; h < 16 && !vseen; h++) { if (row().startsWith('VBAT')) vseen = true; else ev(EVT.BTN1); }
+check(`DIAG has a VBAT toggle ("${row()}")`, vseen && /^VBAT (ON|OFF)$/.test(row()));
+toL0();
+
 let fail = 0;
 for (const r of results) { if (!r.pass) fail++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}`); }
 console.log(fail ? `\n${fail} FAIL` : `\nALL PASS`);
