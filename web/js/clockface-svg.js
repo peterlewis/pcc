@@ -262,13 +262,22 @@ export function createClockFaceSVG(container, opts = {}) {
       const ring = el('circle', { cx: x, cy: y, r: r * 1.15, fill: 'none', stroke: HW_LINE, 'stroke-width': uw });  // recess outline
       const cap = el('circle', { cx: x, cy: y, r, fill: HW_CAP, stroke: HW_LINE, 'stroke-width': uw });              // flat tactile cap
       g.appendChild(ring); g.appendChild(cap);
-      if (state.onButton) {
+      if (state.onButton || state.onButtonDown) {
         const hit = el('circle', { cx: x, cy: y, r: r * 1.5, fill: 'transparent' });   // generous tap target
         hit.style.cursor = 'pointer';
-        hit.addEventListener('click', (e) => { e.stopPropagation(); state.onButton(idx); });
-        hit.addEventListener('pointerdown', () => cap.setAttribute('fill', HW_MATTE));   // subtle matte press (darken, no gloss)
-        const up = () => cap.setAttribute('fill', HW_CAP);
-        hit.addEventListener('pointerup', up); hit.addEventListener('pointerleave', up);
+        // Chord-aware wiring: press/release drive the date-board chord protocol (hold BOTH to enter
+        // the menu). When the controller supplies onButtonDown/Up we use those and DON'T also fire
+        // the click (the release IS the tap); a bare onButton falls back to the old click behaviour.
+        if (state.onButtonDown) {
+          hit.addEventListener('pointerdown', (e) => { e.stopPropagation(); cap.setAttribute('fill', HW_MATTE); state.onButtonDown(idx); });
+          const up = (e) => { cap.setAttribute('fill', HW_CAP); if (state.onButtonUp) state.onButtonUp(idx); };
+          hit.addEventListener('pointerup', up); hit.addEventListener('pointerleave', up); hit.addEventListener('pointercancel', up);
+        } else {
+          hit.addEventListener('click', (e) => { e.stopPropagation(); state.onButton(idx); });
+          hit.addEventListener('pointerdown', () => cap.setAttribute('fill', HW_MATTE));
+          const up = () => cap.setAttribute('fill', HW_CAP);
+          hit.addEventListener('pointerup', up); hit.addEventListener('pointerleave', up);
+        }
         g.appendChild(hit);
       }
     };

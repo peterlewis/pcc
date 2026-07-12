@@ -223,6 +223,8 @@ class Component extends DcLite {
           faceOpts.hwSpec = this.hwConfig;
           if (name !== 'hdrDate' && name !== 'hdrTime') {
             faceOpts.onButton = (btn) => this.onFaceButton(btn);
+            faceOpts.onButtonDown = (btn) => this.onFaceButtonDown(btn);   // chord protocol (hold both → menu)
+            faceOpts.onButtonUp = (btn) => this.onFaceButtonUp(btn);
             faceOpts.hwCalibrate = !!this.state.hwCalibrate;
             faceOpts.onHwMove = (id, mm) => this.onHwMove(id, mm);
           }
@@ -607,6 +609,9 @@ class Component extends DcLite {
       this.paintFaceAt(new Date(((this._review && this._review.playT) || 0) * 1000));
       return;
     }
+    // MENU OPEN → the firmware's menu display owns the face in every state (the physical menu works
+    // with or without GPS). paintEmuFrame reads the firmware's live buffers, which menu_poll updated.
+    if (this.emu && this.emu.menuState && this.emu.menuState().layer !== 0) { this.paintEmuFrame(); return; }
     const mode = this.appMode();
     if (mode === 'standby' || !this.emu) {   // STANDBY: honest host time, no GPS, no virtual anything
       // Self-healing, not edge-triggered: assert live=false EVERY frame we're not CONNECTED. A
@@ -1187,6 +1192,13 @@ class Component extends DcLite {
         if (this.session.S.fix) this.session.S.fix.sats = rs.length;
       }
     }
+    // Menu idle-exit: menu_poll only runs on our menuEvent/menuTick calls (emu_poll doesn't drive
+    // it), so pump one tick/second while the menu is open — advancing uwTick in Standby (where the
+    // firmware clock is frozen) and just re-polling in the live modes — to honour the 15 s auto-exit.
+    if (this.emu && this.emu.menuState && this.emu.menuState().layer !== 0) {
+      this.emu.menuTick(this.appMode() === 'standby' ? 1000 : 0);
+      this.repaintFace();
+    }
     this.mirrorDeviceClock();
     // Bridge RX-staleness watchdog: a host-side unplug over the pccd bridge leaves the WebSocket
     // open, so without this the app stays CONNECTED on a frozen stream. Drops to Standby after 8 s
@@ -1728,6 +1740,13 @@ class Component extends DcLite {
   // BOTH buttons stepped forward — the back button was dead).
   onFaceButton(btn) {
     const back = /2$/.test(String(btn));
+    // MENU OPEN → the tap scrolls the menu ring / steps the editor value, exactly like the hardware
+    // (the same two buttons do double duty). menuState().layer 0 = clock (closed).
+    if (this.emu && this.emu.menuState && this.emu.menuState().layer !== 0) {
+      this.emu.menuEvent(back ? 0x92 : 0x91);
+      this.repaintFace();
+      return;
+    }
     if (this.emu) {
       // The emulator IS the firmware: let ITS cursor be the single source of truth. Step it (in
       // firmware-enum order, exactly like the hardware), then derive the label from the resulting
@@ -1744,6 +1763,46 @@ class Component extends DcLite {
       this.cycleMode(back ? -1 : 1);
     }
   }
+
+  // Chord protocol reproduction — the physical date board debounces the two switches and emits
+  // 0x91/0x92 (tap) or 0x94/95/96 (rolling both-held stage crossings) + 0x93 (release). Here the two
+  // SVG buttons drive the same bytes: hold BOTH to open/drive the on-device menu; a lone tap steps
+  // modes / scrolls the open menu via onFaceButton. Without this the whole menu dimension — compiled,
+  // tested, and rendered by the firmware — was unreachable (the face only single-tapped).
+  _chord = { down: {}, active: false, stage: 0, timer: null };
+  onFaceButtonDown(btn) {
+    const n = /2$/.test(String(btn)) ? 2 : 1;
+    this._chord.down[n] = Date.now();
+    if (this._chord.down[1] && this._chord.down[2] && !this._chord.active && this.emu && this.emu.menuEvent) {
+      // both held → enter the chord; emit stage 1, then roll 1→2→3→1… while held so the firmware
+      // pages its self-labelled stages (SETUP/ENTER/EXIT/…). Release fires the shown stage.
+      this._chord.active = true; this._chord.stage = 1;
+      this.emu.menuEvent(0x94); this.repaintFace();
+      this._chord.timer = setInterval(() => {
+        this._chord.stage = (this._chord.stage % 3) + 1;
+        this.emu.menuEvent(0x93 + this._chord.stage);   // 0x94/95/96
+        this.repaintFace();
+      }, 800);
+    }
+  }
+  onFaceButtonUp(btn) {
+    const n = /2$/.test(String(btn)) ? 2 : 1;
+    const downAt = this._chord.down[n];
+    delete this._chord.down[n];
+    if (this._chord.active) {
+      // release out of a chord → fire the shown stage (0x93), then reset so a still-held partner
+      // doesn't retrigger. The firmware's own idle-exit handles an abandoned hold.
+      if (this._chord.timer) { clearInterval(this._chord.timer); this._chord.timer = null; }
+      this._chord.active = false; this._chord.stage = 0; this._chord.down = {};
+      if (this.emu && this.emu.menuEvent) { this.emu.menuEvent(0x93); this.repaintFace(); }
+      return;
+    }
+    // lone tap (partner not held) → the normal button action (mode step, or menu scroll if open)
+    if (downAt) this.onFaceButton(btn);
+  }
+  // Force an immediate face repaint after a menu event (menu FSM updated the firmware buffers, but
+  // the render loop is only ~1 Hz — the menu must feel responsive).
+  repaintFace() { try { this.driveEmu(); } catch (e) {} }
 
   // ---- hardware calibration: drag the on-screen buttons/screws/sensor, read the mm back --------
   defaultHwConfig() {

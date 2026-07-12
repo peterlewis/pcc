@@ -62,6 +62,10 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     feedNmea: w('emu_feed_nmea','void',['string']),
     now: w('emu_now','number'), mode: w('emu_mode','number'),
     modeId: w('emu_mode_id','number',['string']),   // MODE_ name → firmware enum int (face label sync)
+    menuEvent: w('emu_menu_event','void',['number']),   // date-board button/chord event byte → FSM
+    menuTick: w('emu_menu_tick','void',['number']),     // advance uwTick (drives the 15 s idle exit)
+    menuLayer: w('emu_menu_layer','number'), menuSection: w('emu_menu_section','number'),
+    menuIdx: w('emu_menu_idx','number'), menuDirty: w('emu_menu_dirty','number'),
     hadPps: w('emu_had_pps','number'), sincePps: w('emu_since_pps','number'),
     satcount: w('emu_satcount','number'),
     colonMode: w('emu_colon_mode','number'),
@@ -286,6 +290,12 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     button1() { E.button1(); drain(); },
     button2() { E.button2(); drain(); },
     modeId(name) { return E.modeId(name); },   // MODE_ constant name → firmware enum value (-1 if absent)
+    // On-device two-button menu (the real firmware FSM, exercised by the physical date board's
+    // chord protocol). Event bytes: 0x91/0x92 tap b1/b2, 0x93 chord release, 0x94/95/96 chord
+    // stages 1/2/3. menuState().layer: 0 = clock (menu closed), 1 = section, 2 = item, 3 = edit.
+    menuEvent(code) { E.menuEvent(code); drain(); },
+    menuTick(ms) { E.menuTick(ms); drain(); },
+    menuState() { return { layer: E.menuLayer(), section: E.menuSection(), idx: E.menuIdx(), dirty: E.menuDirty() }; },
     setBrightness(v01) { state.adc = Math.max(0, Math.min(4095, Math.round(v01*4095))); E.setAdc(state.adc); },
     setLocation(la, lo, src = 'manual') { return setLoc(la, lo, src); },   // returns a promise → resolved zone (manual)
     denyGeo,   // browser refused / failed geolocation → keep DEFAULT but flag it honestly
