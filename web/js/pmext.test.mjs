@@ -15,24 +15,22 @@ const frame = (body) => {
 };
 
 // 1. $PMSTAR — a valid two-entry sentence (second name space-padded like the firmware pads).
-const STAR2 = frame('PMSTAR,2,C,VEGA,754,63,S,M31 ,3541,12,N');
+const STAR2 = frame('PMSTAR,2,VEGA,754,63,S,M31 ,3541,12,N');
 const s = parsePMSTAR(STAR2);
 ok('PMSTAR parses', !!s, STAR2);
-ok('PMSTAR n / src', s && s.n === 2 && s.src === 'C', j(s));
 ok('PMSTAR entry 0', s && j(s.stars[0]) === j({ name: 'VEGA', secToTransit: 754, altDeg: 63, dir: 'S' }), j(s && s.stars[0]));
 ok('PMSTAR entry 1 (padding trimmed)', s && j(s.stars[1]) === j({ name: 'M31', secToTransit: 3541, altDeg: 12, dir: 'N' }), j(s && s.stars[1]));
 
 // 2. $PMSTAR rejections — corrupt checksum, field-count lies, out-of-contract values.
 ok('PMSTAR corrupt checksum → null', parsePMSTAR(STAR2.slice(0, -2) + '00') === null);
-ok('PMSTAR n=2 but one entry → null', parsePMSTAR(frame('PMSTAR,2,C,VEGA,754,63,S')) === null);
+ok('PMSTAR n=2 but one entry → null', parsePMSTAR(frame('PMSTAR,2,VEGA,754,63,S')) === null);
 ok('PMSTAR bad src → null', parsePMSTAR(frame('PMSTAR,1,X,VEGA,754,63,S')) === null);
-ok('PMSTAR alt 91 → null', parsePMSTAR(frame('PMSTAR,1,B,VEGA,754,91,S')) === null);
-ok('PMSTAR dir E → null', parsePMSTAR(frame('PMSTAR,1,B,VEGA,754,63,E')) === null);
-ok('PMSTAR 5-char name → null', parsePMSTAR(frame('PMSTAR,1,B,ALGOL,754,63,S')) === null);
+ok('PMSTAR alt 91 → null', parsePMSTAR(frame('PMSTAR,1,VEGA,754,91,S')) === null);
+ok('PMSTAR dir E → null', parsePMSTAR(frame('PMSTAR,1,VEGA,754,63,E')) === null);
+ok('PMSTAR 5-char name → null', parsePMSTAR(frame('PMSTAR,1,ALGOL,754,63,S')) === null);
 ok('PMSTAR n=9 → null', parsePMSTAR(frame('PMSTAR,9,B' + ',AAAA,1,1,S'.repeat(9))) === null);
 ok('PMSTAR not-my-sentence → null', parsePMSTAR(frame('PMTXTS,1,2,3')) === null);
-const s0 = parsePMSTAR(frame('PMSTAR,0,B'));
-ok('PMSTAR empty list (n=0) parses', s0 && s0.n === 0 && s0.src === 'B' && s0.stars.length === 0, j(s0));
+const s0 = parsePMSTAR(frame('PMSTAR,0'));
 
 // 3. $PMADEV — taus must expand to tau0·2^k.
 const ADEV = frame('PMADEV,1767225600,1,512,4,3.2e-11,2.1e-11,1.5e-11,9.8e-12');

@@ -358,7 +358,7 @@ int    emu_star_pmdec(int i){ return (i >= 0 && i < (int)star_count) ? star_buf[
 float  emu_star_ra_now(int i){ return (i >= 0 && i < (int)star_count) ? star_buf[i].ra_now  : -1.0f; }   /* apparent of date */
 float  emu_star_dec_now(int i){ return (i >= 0 && i < (int)star_count) ? star_buf[i].dec_now : -999.0f; }
 void   emu_star_refresh(void){ star_refresh_apparent(); }                               /* force the daily apparent-place refresh */
-int    emu_star_from_card(void){ return (int)star_from_card; }                          /* provenance: 1 card, 0 baked */
+int    emu_star_from_card(void){ return star_count > 0 ? 1 : 0; }                       /* single-source now: loaded == from the file (no baked fallback) */
 void   emu_load_stars(void){ loadStars(); }        /* re-scan /STARS.BIN (register the file first); falls back to the baked set */
 void   emu_star_max_mag(float m){ star_max_mag = m; }
 const char* emu_star_name(int i){ static char b[5]; if (i<0||i>=(int)star_count) return ""; memcpy(b,star_buf[i].nm,4); b[4]=0; return b; }

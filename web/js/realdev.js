@@ -372,8 +372,7 @@ export function createRealDevice(session) {
             return;
         }
 
-        // $PMSTAR — MODE_STAR's next-meridian-transit list (SD catalogue or baked
-        // fallback). Latest sentence wins: the firmware re-emits the whole re-sorted
+        // $PMSTAR — MODE_STAR's next-meridian-transit list (requires STARS.BIN on the CLOCK drive). Latest sentence wins: the firmware re-emits the whole re-sorted
         // list, so there is no history to keep. `at` timestamps the receive second so
         // the NEXT TRANSITS readout can age the countdowns between emissions.
         if (text.startsWith('$PMSTAR,')) {
@@ -614,14 +613,14 @@ export function createRealDevice(session) {
             checks.push({ name: 'cn0Hist sampled for G02', ok: ch0.length === 1 && ch0[0].v === 44, detail: `cn0Hist(G02)=${JSON.stringify(ch0)}` });
 
             //   PMSTAR: two transits (VEGA 754 s → 63° S, M31 space-padded 3541 s → 12° N)
-            const STAR = '$PMSTAR,2,C,VEGA,754,63,S,M31 ,3541,12,N*2C';
+            const STAR = '$PMSTAR,2,VEGA,754,63,S,M31 ,3541,12,N*2C';
             //   PMADEV/PMHDEV: 3 octaves at tau0=1 → taus [1,2,4]
             const ADEV = '$PMADEV,1767225600,1,512,3,3.2e-11,2.1e-11,1.5e-11*77';
             const HDEV = '$PMHDEV,1767225600,1,512,3,3.0e-11,2.0e-11,1.4e-11*7C';
 
             rd.ingestLine(STAR);
             const star = fake.S.star;
-            checks.push({ name: 'PMSTAR → S.star (2 entries, SD catalogue)', ok: !!star && star.n === 2 && star.src === 'C' && star.stars.length === 2, detail: `star=${JSON.stringify(star)}` });
+            checks.push({ name: 'PMSTAR → S.star (2 entries, SD catalogue)', ok: !!star && star.n === 2 &&  star.stars.length === 2, detail: `star=${JSON.stringify(star)}` });
             checks.push({ name: 'PMSTAR entry parsed (name/sec/alt/dir)', ok: !!star && star.stars[0].name === 'VEGA' && star.stars[0].secToTransit === 754 && star.stars[0].altDeg === 63 && star.stars[0].dir === 'S', detail: `star[0]=${JSON.stringify(star && star.stars[0])}` });
             rd.ingestLine(STAR.slice(0, -2) + '00');   // corrupt checksum must not replace the good list
             checks.push({ name: 'PMSTAR corrupt line dropped', ok: fake.S.star === star, detail: 'S.star replaced by a bad-checksum line' });

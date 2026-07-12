@@ -206,7 +206,7 @@ ev(EVT.S2); ev(EVT.REL);                                  // BACK -> L1
 for (let g = 0; section() !== SEC.ASTRO && g < 8; g++) ev(EVT.BTN1);
 ev(EVT.S1); ev(EVT.REL);
 for (let h = 0; !row().startsWith('STARS') && h < 14; h++) ev(EVT.BTN1);
-check(`ASTRO has the catalogue readout ("${row()}") — baked fallback tagged 'b'`, /^STARS b\d+$/.test(row()));
+check(`ASTRO has the catalogue readout ("${row()}") — 0 = no STARS.BIN loaded`, /^STARS \d+$/.test(row()));
 toL0();
 
 // (20) §7A editor blink: a RESTING editor value blinks at 1 Hz (blank/visible), stays SOLID while

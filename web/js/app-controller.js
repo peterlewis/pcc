@@ -2367,7 +2367,6 @@ class Component extends DcLite {
     };
     Object.assign(out, {
       starShow: !!(star && star.stars.length),
-      starSrc: star ? (star.src === 'C' ? 'SD CATALOGUE' : 'BAKED SET') : '',
       starRows: star ? star.stars.map((x) => ({
         name: x.name,
         // sec_to_transit was true at receive time (star.at) — age it against the

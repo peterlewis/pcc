@@ -44,11 +44,14 @@ const T = 1750000000, LAT = 20.0, LON = 0.0;
 bootCold(T);
 if (MODE_STAR < 0) { console.log('SKIP — firmware has no star-transit engine'); process.exit(0); }
 
-// (a) fallback: no /STARS.BIN registered -> loadStars() uses the baked default bright set.
+// (a) NO fallback by design: without /STARS.BIN the catalogue stays EMPTY and the mode shows
+// "STAr ----" — it never quietly substitutes lookalike data (user call, 2026-07-12).
 loadStars();
-const nDefault = nStar();
-check(`fallback: no card -> baked default loaded (${nDefault} stars)`, nDefault >= 20 && nDefault <= 40);
-check(`fallback: first star has a name ("${nameF(0)}")`, /^[A-Z]/.test(nameF(0)));
+check(`no STARS.BIN -> catalogue empty (${nStar()} stars)`, nStar() === 0);
+setPos(20, 0);
+check(`no STARS.BIN -> $PMSTAR reports zero ("${starLine().trim()}")`, /^\$PMSTAR,0\*/.test(starLine().trim()));
+renderM(MODE_STAR);
+check(`no STARS.BIN -> display shows the honest blank ("${row()}")`, row().startsWith('STAr') && row().includes('----'));
 
 // (b) SD path: register the REAL stars.bin and load it through the firmware's loadStars().
 const bin = readFileSync(new URL('../firmware/qspi/output/stars.bin', import.meta.url));
@@ -134,12 +137,11 @@ if (mm) {
   check('serial: $PMSTAR checksum', cks === parseInt(mm[2], 16));
   const f = body.split(',');
   const n = parseInt(f[1], 10);
-  check(`serial: provenance field is C (card catalogue), got "${f[2]}"`, f[2] === 'C' && fromCard() === 1);
   const fw = [];
-  for (let k = 0; k < n; k++) fw.push({ nm: f[3 + 4 * k], dt_s: parseInt(f[4 + 4 * k], 10), alt: parseInt(f[5 + 4 * k], 10), dir: f[6 + 4 * k] });
+  for (let k = 0; k < n; k++) fw.push({ nm: f[2 + 4 * k], dt_s: parseInt(f[3 + 4 * k], 10), alt: parseInt(f[4 + 4 * k], 10), dir: f[5 + 4 * k] });
 
   const pred = predict(T, LAT, LON);
-  check(`count: firmware ${n} == oracle ${pred.length}`, n === pred.length && f.length === 3 + 4 * n);
+  check(`count: firmware ${n} == oracle ${pred.length}`, n === pred.length && f.length === 2 + 4 * n);
   check(`direction: every entry culminates N or S and matches the oracle`, fw.every((s2, k) => s2.dir === pred[k].dir));
   check(`serial: names are the FULL 4 chars (13 three-char prefixes collide across the card)`, fw.every(s => s.nm.trim().length >= 2 && s.nm.length <= 4));
 
@@ -163,7 +165,7 @@ if (mm) {
 
 // no-fix fallback: invalid position -> empty list + "STAr ----"
 setPos(-9999, -9999);
-check(`serial: no fix -> "${starLine().trim()}" (n=0)`, /^\$PMSTAR,0,[CB]\*/.test(starLine().trim()));
+check(`serial: no fix -> "${starLine().trim()}" (n=0)`, /^\$PMSTAR,0\*/.test(starLine().trim()));
 renderM(MODE_STAR);
 const rr = row();
 check(`display: no fix shows "${rr}"`, rr.startsWith('STAr') && rr.includes('----'));
