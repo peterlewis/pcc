@@ -2188,6 +2188,10 @@ class Component extends DcLite {
         if (this.session && this.session.log) this.session.log('tx', 'holdover tolerances: ' + t1 + ' / ' + t10 + ' / ' + t100 + ' s');
       },
       brightVal: Math.round(st.brightness * 100), brightPctLabel: Math.round(st.brightness * 100) + '%', brightLock: st.brightLock,
+      // LED balance calibration read-back (#16): the seg/colon brightness equalisation was applied
+      // blind — surface the firmware's actual state (OFF / AUTO / manual strength) here.
+      balSeg: this.emu && this.emu.balanceState ? this.emu.balanceState().seg : '—',
+      balColon: this.emu && this.emu.balanceState ? this.emu.balanceState().colon : '—',
       onBright: (e) => { const b = (+e.target.value) / 100; this.setState({ brightness: b }); this.allFaces((f) => f.setBrightness(Math.pow(b, this.state.gamma))); this.drawChart('gammaCurve'); this.devBright(b); },
       // Observer location shim: drives the emulator's virtual GPS (sidereal/solar/grid + real sky).
       emuLatVal: this.emu ? this.emu.state().lat.toFixed(4) : '51.4779',

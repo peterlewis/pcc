@@ -67,6 +67,8 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     menuLayer: w('emu_menu_layer','number'), menuSection: w('emu_menu_section','number'),
     menuIdx: w('emu_menu_idx','number'), menuDirty: w('emu_menu_dirty','number'),
     starLine: w('emu_star_line','string'),   // firmware $PMSTAR for the sim observer (SIMULATED TRANSITS)
+    segBalance: w('emu_seg_balance','number'), colonBalance: w('emu_colon_balance','number'),
+    colonPreview: w('emu_colon_preview','number'),   // §3.5 preview (0xFF = none)
     hadPps: w('emu_had_pps','number'), sincePps: w('emu_since_pps','number'),
     satcount: w('emu_satcount','number'),
     colonMode: w('emu_colon_mode','number'),
@@ -300,6 +302,13 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     // The firmware's own $PMSTAR meridian-transit sentence for the current (simulated) observer —
     // the same MODE_STAR predictor a real clock emits. '' if no catalogue / no fix.
     starLine() { return E.starLine ? E.starLine() : ''; },
+    // LED per-segment / colon brightness balance calibration read-back (applied blind until now).
+    // 0 = off (stock), 1 = AUTO (the calibrated rail curve), 2..300 = fixed manual strength.
+    balanceState() {
+      const fmt = (v) => v === 0 ? 'OFF' : v === 1 ? 'AUTO' : String(v);
+      return { seg: fmt(E.segBalance ? E.segBalance() : 0), colon: fmt(E.colonBalance ? E.colonBalance() : 0),
+               preview: E.colonPreview ? E.colonPreview() : 0xFF };
+    },
     setBrightness(v01) { state.adc = Math.max(0, Math.min(4095, Math.round(v01*4095))); E.setAdc(state.adc); },
     setLocation(la, lo, src = 'manual') { return setLoc(la, lo, src); },   // returns a promise → resolved zone (manual)
     denyGeo,   // browser refused / failed geolocation → keep DEFAULT but flag it honestly
