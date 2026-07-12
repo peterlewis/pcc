@@ -313,15 +313,21 @@ int  emu_MODE_ADEV(void){ return -1; }    /* lean branch: no Allan-deviation eng
 #if EMU_HAS_STAR
 int    emu_MODE_STAR(void){ return MODE_STAR; }
 double emu_lst(double unix_s, double lon){ return local_sidereal_time(unix_s, lon); }  /* oracle hook */
-int    emu_star_count(void){ return (int)STAR_N; }                                     /* catalogue read-out */
-float  emu_star_ra(int i){ return (i >= 0 && i < (int)STAR_N) ? star_cat[i].ra  : -1.0f; }
-float  emu_star_dec(int i){ return (i >= 0 && i < (int)STAR_N) ? star_cat[i].dec : -999.0f; }
+int    emu_star_count(void){ return (int)star_count; }                                 /* loaded catalogue read-out (SD or default) */
+float  emu_star_ra(int i){ return (i >= 0 && i < (int)star_count) ? star_buf[i].ra  : -1.0f; }
+float  emu_star_dec(int i){ return (i >= 0 && i < (int)star_count) ? star_buf[i].dec : -999.0f; }
+void   emu_load_stars(void){ loadStars(); }        /* re-scan /STARS.BIN (register the file first); falls back to the baked set */
+void   emu_star_max_mag(float m){ star_max_mag = m; }
+const char* emu_star_name(int i){ static char b[5]; if (i<0||i>=(int)star_count) return ""; memcpy(b,star_buf[i].nm,4); b[4]=0; return b; }
 #else
 int    emu_MODE_STAR(void){ return -1; }  /* lean branch: no star-transit engine/mode */
 double emu_lst(double unix_s, double lon){ (void)unix_s; (void)lon; return -1.0; }
 int    emu_star_count(void){ return 0; }
 float  emu_star_ra(int i){ (void)i; return -1.0f; }
 float  emu_star_dec(int i){ (void)i; return -999.0f; }
+void   emu_load_stars(void){}
+void   emu_star_max_mag(float m){ (void)m; }
+const char* emu_star_name(int i){ (void)i; return ""; }
 #endif
 
 /* --- brightness inject: firmware reads ADC1 (phototransistor); make it settable --- */
