@@ -894,6 +894,24 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:12px;color:var(--txt2)">Sunrise</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{cRise}}</span></div>
                 <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px"><span style="font-size:12px;color:var(--txt2)">Sunset</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{cSet}}</span></div>
               </section>
+              <sc-if value="{{starShow}}" hint-placeholder-val="{{false}}">
+                <section style="background:var(--panel);border:1px solid var(--line)">
+                  <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
+                    <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">NEXT TRANSITS</span>
+                    <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--txt3)">$PMSTAR · {{starSrc}}</span>
+                  </div>
+                  <div style="padding:10px 12px">
+                    <sc-for list="{{starRows}}" as="b" hint-placeholder-count="4">
+                      <div style="display:grid;grid-template-columns:52px 1fr 44px 22px;gap:8px;align-items:center;padding:2.5px 0">
+                        <span style="font-family:var(--mono);font-size:10px;color:var(--txt2)">{{b.name}}</span>
+                        <span style="font-family:var(--mono);font-size:11px;color:var(--txt-hi);text-align:right">{{b.eta}}</span>
+                        <span style="font-family:var(--mono);font-size:11px;color:var(--txt);text-align:right">{{b.alt}}</span>
+                        <span style="font-family:var(--mono);font-size:10px;color:var(--txt3);text-align:right">{{b.dir}}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </section>
+              </sc-if>
               <section style="background:var(--panel);border:1px solid var(--line)">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
                   <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">SESSION</span>
@@ -1426,6 +1444,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=213"></script>
+<script type="module" src="js/app-controller.js?v=214"></script>
 </body>
 </html>

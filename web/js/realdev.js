@@ -15,6 +15,7 @@
 import { Clock, BridgeClock } from './serial.js?v=16';
 import { parseGGA, parseRMC, parseGSA, GSVBuffer } from './nmea.js?v=2';
 import { parsePMTXTS, parsePMTXTC, centrePhase, foldPhase1ms } from './ppsts.js?v=15';
+import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=1';
 // subSatellitePoint reconstructs a sat's ground point from observer-relative
 // az/el (all GSV gives us) — the exact inverse of the sim's forward azel(). The
 // import also runs satpass.js's augmentConstellations() IIFE, which sets
@@ -102,6 +103,8 @@ export function createRealDevice(session) {
         if (Array.isArray(S.dopHist)) S.dopHist.length = 0;
         if (Array.isArray(S.fixHist)) S.fixHist.length = 0;
         if (S.pps && Array.isArray(S.pps.list)) S.pps.list.length = 0;   // TIMING KPIs go honest (no stale stream)
+        S.star = null;   // $PMSTAR transit list — real-device data, leaves with the device
+        S.stab = null;   // $PMADEV/$PMHDEV stability ladders — likewise
         lastHistT = 0; lastCn0T = 0;
         // Restore the observer we adopted from the device fix back to whatever it
         // was before connecting, so the sim resumes from the honest default.
@@ -369,6 +372,33 @@ export function createRealDevice(session) {
             return;
         }
 
+        // $PMSTAR — MODE_STAR's next-meridian-transit list (SD catalogue or baked
+        // fallback). Latest sentence wins: the firmware re-emits the whole re-sorted
+        // list, so there is no history to keep. `at` timestamps the receive second so
+        // the NEXT TRANSITS readout can age the countdowns between emissions.
+        if (text.startsWith('$PMSTAR,')) {
+            const r = parsePMSTAR(text);
+            if (r) S.star = { ...r, at: Math.floor(Date.now() / 1000) };
+            return;
+        }
+
+        // $PMADEV / $PMHDEV — oscillator-stability ladders (Allan deviation, and the
+        // drift-immune Hadamard variant; one parser, tagged by kind). PARKED DATA:
+        // no room renders these yet — the Timing room (Phase 3) will chart σ(τ) from
+        // S.stab. Keep the latest sentence per kind plus a small bounded history so
+        // that chart can show evolution, capped like every other real-device buffer.
+        if (text.startsWith('$PMADEV,') || text.startsWith('$PMHDEV,')) {
+            const r = parsePMADEV(text);
+            if (r) {
+                const sb = (S.stab = S.stab || { adev: null, hdev: null, hist: [], at: 0 });
+                sb[r.kind] = r;
+                sb.hist.push(r);
+                if (sb.hist.length > 64) sb.hist.shift();
+                sb.at = Math.floor(Date.now() / 1000);
+            }
+            return;
+        }
+
         // tc_dump's human header carries the learn-state letter (A applying · F frozen · L learning ·
         // S seeded · - idle) and the observed die range — the only place the firmware reports them.
         if (text.startsWith('# tempcomp:')) {
@@ -467,6 +497,8 @@ export function createRealDevice(session) {
             ppsLastSeq = null;
             ppsLastCalerr = null;
             S.tc = null;   // learned model belongs to ONE device — never show a previous clock's
+            S.star = null; // same rule for the transit list and stability ladders: they arrive
+            S.stab = null; // fresh from THIS device or not at all
         },
 
         async disconnect() {
@@ -580,6 +612,25 @@ export function createRealDevice(session) {
             checks.push({ name: 'fixHist sampled (3D, 9 sats)', ok: fake.S.fixHist.length === 1 && fake.S.fixHist[0].type === 3 && fake.S.fixHist[0].sats === 9, detail: `fixHist=${JSON.stringify(fake.S.fixHist[0])}` });
             const ch0 = fake.S.cn0Hist.get('G02') || [];
             checks.push({ name: 'cn0Hist sampled for G02', ok: ch0.length === 1 && ch0[0].v === 44, detail: `cn0Hist(G02)=${JSON.stringify(ch0)}` });
+
+            //   PMSTAR: two transits (VEGA 754 s → 63° S, M31 space-padded 3541 s → 12° N)
+            const STAR = '$PMSTAR,2,C,VEGA,754,63,S,M31 ,3541,12,N*2C';
+            //   PMADEV/PMHDEV: 3 octaves at tau0=1 → taus [1,2,4]
+            const ADEV = '$PMADEV,1767225600,1,512,3,3.2e-11,2.1e-11,1.5e-11*77';
+            const HDEV = '$PMHDEV,1767225600,1,512,3,3.0e-11,2.0e-11,1.4e-11*7C';
+
+            rd.ingestLine(STAR);
+            const star = fake.S.star;
+            checks.push({ name: 'PMSTAR → S.star (2 entries, SD catalogue)', ok: !!star && star.n === 2 && star.src === 'C' && star.stars.length === 2, detail: `star=${JSON.stringify(star)}` });
+            checks.push({ name: 'PMSTAR entry parsed (name/sec/alt/dir)', ok: !!star && star.stars[0].name === 'VEGA' && star.stars[0].secToTransit === 754 && star.stars[0].altDeg === 63 && star.stars[0].dir === 'S', detail: `star[0]=${JSON.stringify(star && star.stars[0])}` });
+            rd.ingestLine(STAR.slice(0, -2) + '00');   // corrupt checksum must not replace the good list
+            checks.push({ name: 'PMSTAR corrupt line dropped', ok: fake.S.star === star, detail: 'S.star replaced by a bad-checksum line' });
+
+            rd.ingestLine(ADEV);
+            rd.ingestLine(HDEV);
+            const sb = fake.S.stab;
+            checks.push({ name: 'PMADEV → S.stab.adev (taus 1/2/4)', ok: !!sb && !!sb.adev && sb.adev.kind === 'adev' && JSON.stringify(sb.adev.taus) === '[1,2,4]', detail: `adev=${JSON.stringify(sb && sb.adev)}` });
+            checks.push({ name: 'PMHDEV → S.stab.hdev + history of 2', ok: !!sb && !!sb.hdev && sb.hdev.kind === 'hdev' && sb.hist.length === 2, detail: `hdev=${JSON.stringify(sb && sb.hdev)} hist=${sb && sb.hist.length}` });
 
             const pass = checks.every((c) => c.ok);
             return { pass, checks };

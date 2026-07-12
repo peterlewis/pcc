@@ -90,7 +90,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=104'), import('./emu-driver.js?v=35'), import('./ppsts.js?v=15')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=109'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=105'), import('./emu-driver.js?v=35'), import('./ppsts.js?v=15')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -2324,7 +2324,7 @@ class Component extends DcLite {
       oTrail90: () => this.setState({ skyTrailAge: 5400 }, () => this.drawChart('sky')),
     };
     if (!S) {
-      Object.assign(out, { fLat: '—', fLon: '—', fAlt: '—', fHdop: '—', fFix: '—', fSatsUV: '—', fGrid: '—', cSunAlt: '—', cSunAz: '—', cMoonAlt: '—', cMoonAz: '—', cMoonPhase: '—', cMoonIllum: '—', cRise: '—', cSet: '—', sStarted: '—', sPasses: '—', sObs: '—', sPeak: '—', sCover: '—', nGps: '·', nGlo: '·', nGal: '·', nBds: '·' });
+      Object.assign(out, { fLat: '—', fLon: '—', fAlt: '—', fHdop: '—', fFix: '—', fSatsUV: '—', fGrid: '—', cSunAlt: '—', cSunAz: '—', cMoonAlt: '—', cMoonAz: '—', cMoonPhase: '—', cMoonIllum: '—', cRise: '—', cSet: '—', sStarted: '—', sPasses: '—', sObs: '—', sPeak: '—', sCover: '—', nGps: '·', nGlo: '·', nGal: '·', nBds: '·', starShow: false, starSrc: '', starRows: [] });
       return out;
     }
     const sun = this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon);
@@ -2351,6 +2351,31 @@ class Component extends DcLite {
       sPeak: S.peakEl.toFixed(1) + '°',
       sCover: Math.round(S.bins.size / (36 * 9) * 100) + '%',
       nGps: String(cnt('G')), nGlo: String(cnt('R')), nGal: String(cnt('E')), nBds: String(cnt('C')),
+    });
+    // NEXT TRANSITS — the star-transit predictor's $PMSTAR list (MODE_STAR, draft
+    // firmware), parsed in realdev.js → S.star. Real-or-nothing: the panel exists
+    // only in CONNECTED mode once a sentence has landed; standby/simulation never
+    // synthesise one, so sc-if starShow removes it entirely everywhere else.
+    const star = S.real ? S.star : null;
+    const nowS = Math.floor(Date.now() / 1000);
+    // Countdown formats: mm:ss under an hour, h:mm above (transit lists span hours).
+    const eta = (s) => {
+      s = Math.max(0, s);   // 0 = transiting now; holds there until the next $PMSTAR
+      return s >= 3600
+        ? Math.floor(s / 3600) + ':' + String(Math.floor((s % 3600) / 60)).padStart(2, '0')
+        : String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+    };
+    Object.assign(out, {
+      starShow: !!(star && star.stars.length),
+      starSrc: star ? (star.src === 'C' ? 'SD CATALOGUE' : 'BAKED SET') : '',
+      starRows: star ? star.stars.map((x) => ({
+        name: x.name,
+        // sec_to_transit was true at receive time (star.at) — age it against the
+        // wall clock so the countdown ticks between sparse $PMSTAR emissions.
+        eta: eta(x.secToTransit - (nowS - star.at)),
+        alt: x.altDeg + '°',
+        dir: x.dir,
+      })) : [],
     });
     return out;
   }
