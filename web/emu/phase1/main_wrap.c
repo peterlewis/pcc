@@ -282,6 +282,7 @@ int    emu_ee2_commit(void){ return (int)ee2_commit(); }
 int    emu_ee2_peek(unsigned off){ off += EE2_EMU_OFF; return off<sizeof(ee_sfile)?ee_sfile[off]:-1; }
 void   emu_ee2_poke(unsigned off,int v){ off += EE2_EMU_OFF; if(off<sizeof(ee_sfile)) ee_sfile[off]=(uint8_t)v; }
 void   emu_tc_persist_set(int on){ tc_persist = on?1:0; }
+int    emu_tc_persist_get(void){ return (int)tc_persist; }
 void   emu_tc_seed_flag(int on){ tc_seed = on?1:0; }
 void   emu_cfg_tc_defined(unsigned mask){ cfg_tc_defined = (uint8_t)mask; }
 void   emu_tc_forget(void){ tc_forget_pending = 1; tc_forget_step(); }
@@ -320,6 +321,7 @@ int    emu_ee2_commit(void){ return 0; }
 int    emu_ee2_peek(unsigned off){ (void)off; return -1; }
 void   emu_ee2_poke(unsigned off,int v){ (void)off; (void)v; }
 void   emu_tc_persist_set(int on){ (void)on; }
+int    emu_tc_persist_get(void){ return 0; }
 void   emu_tc_seed_flag(int on){ (void)on; }
 void   emu_cfg_tc_defined(unsigned mask){ (void)mask; }
 void   emu_tc_forget(void){}

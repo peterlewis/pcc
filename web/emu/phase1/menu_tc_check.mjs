@@ -16,6 +16,8 @@ const rowPtr= w('emu_daterow', 'number');
 const tcLearn = w('emu_tc_learn', 'number');
 const tcApply = w('emu_tc_apply', 'number');
 const setTc   = w('emu_set_tc', 'void', ['number','number']);
+const tcPersist = w('emu_tc_persist_get', 'number');
+const tcPersistSet = w('emu_tc_persist_set', 'void', ['number']);
 const eeReset = w('emu_ee_reset', 'void');
 const eeLoad  = w('emu_ee_load', 'void');
 const eeCommit= w('emu_ee_commit', 'number');
@@ -54,11 +56,11 @@ check(`DIAG has a TEMPCOMP toggle item ("${row()}")`, row().startsWith('TEMPCO')
 ev(EVT.S1); ev(EVT.REL);                                       // EDIT -> L3 editor
 check(`EDIT opens the editor at L3`, layer() === L3);
 ev(EVT.BTN1);                                                  // tap -> ON (live)
-check(`tap arms learn AND apply`, tcLearn() === 1 && tcApply() === 1);
+check(`tap arms learn AND apply AND persist (the whole compensator)`, tcLearn() === 1 && tcApply() === 1 && tcPersist() === 1);
 ev(EVT.S1); ev(EVT.REL);                                       // DONE -> L2, saved
 check(`DONE returns to L2`, layer() === L2);
 ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL);// enter, tap -> OFF, DONE
-check(`toggle off disarms both (learn=${tcLearn()} apply=${tcApply()})`, tcLearn() === 0 && tcApply() === 0);
+check(`toggle off disarms the trio (learn=${tcLearn()} apply=${tcApply()} persist=${tcPersist()})`, tcLearn() === 0 && tcApply() === 0 && tcPersist() === 0);
 backToL0();
 
 // (2) the toggle persists across a reboot: exiting (DONE) records; the commit gate / eeCommit writes it.
@@ -68,14 +70,14 @@ ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL);// EDIT, tap -> O
 check(`toggled ON + exited (learn=${tcLearn()})`, layer() === L2 && tcLearn() === 1);
 check(`commit writes a record`, eeCommit() === 1);
 backToL0();
-setTc(0, 0);                                                   // scribble live flags off (as if power-lost)
+setTc(0, 0); tcPersistSet(0);                                  // scribble live flags off (as if power-lost)
 ovrClear();                                                    // RAM override store lost on reboot
 check(`after RAM wipe the store is empty`, ovrValid() === 0);
 eeLoad();                                                      // re-scan flash
 check(`reboot re-scan finds the record`, ovrValid() === 1);
 cfgDef(0, 0); setMtime(0x9999, 0x9999);                        // config defines nothing -> override applies
 eeApply();
-check(`armed TEMPCOMP SURVIVES reboot (learn=${tcLearn()} apply=${tcApply()})`, tcLearn() === 1 && tcApply() === 1);
+check(`armed TEMPCOMP SURVIVES reboot incl. persist (learn=${tcLearn()} apply=${tcApply()} persist=${tcPersist()})`, tcLearn() === 1 && tcApply() === 1 && tcPersist() === 1);
 
 // (3) precedence: config.txt DEFINES the tc_learn/tc_apply pair (KID_TEMPCOMP) with a mtime that DOESN'T
 //     match the override stamp -> config owns it, the stored override is skipped. Scribble off first;
