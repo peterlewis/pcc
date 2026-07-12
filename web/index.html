@@ -7,7 +7,7 @@
 <title>Precision Clock Companion</title>
 <meta name="description" content="Precision Clock Mk IV companion — emulator, GNSS sky, and GPS timing analytics. Static, offline-capable.">
 <link rel="stylesheet" href="css/base.css?v=96">
-<link rel="stylesheet" href="css/pcc-tokens.css?v=2">
+<link rel="stylesheet" href="css/pcc-tokens.css?v=3">
 </head>
 <body>
 <div id="root">
@@ -294,6 +294,7 @@
                       <button onClick="{{oAstMoon}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbAstMoon}}"></span>MOON PHASE</button>
                       <button onClick="{{oAstGrid}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbAstGrid}}"></span>MAIDENHEAD</button>
                       <button onClick="{{oAstLl}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbAstLl}}"></span>LAT · LON</button>
+                      <button onClick="{{oAstStar}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbAstStar}}"></span>STAR TRANSIT</button>
                     </div>
                   </div>
                   <div style="display:flex;flex-direction:column;gap:7px">
@@ -501,6 +502,7 @@
                     <button onClick="{{oDgVbat}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{rbDgVbat}}"></span>BATTERY</button>
                     <button onClick="{{oDgSat}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{rbDgSat}}"></span>SAT VIEW</button>
                     <button onClick="{{oDgTc}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbDgTc}}"></span>TEMP COMP</button>
+                    <button onClick="{{oDgAdev}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbDgAdev}}"></span>ALLAN DEV</button>
                     <div style="display:flex;align-items:center;gap:8px;padding:2px 0;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt3);opacity:.55">
                       <span style="width:12px;height:12px;flex:none;border:1px solid var(--line)"></span>TTFF
                       <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.1em">DEVICE ONLY</span>
@@ -580,6 +582,20 @@
                       <span ref="{{refDispPinA}}" style="position:absolute;left:17px;top:17px;width:12px;height:12px;border-radius:50%;background:#2c2f35"></span>
                       <span ref="{{refDispPinB}}" style="position:absolute;left:63px;top:17px;width:12px;height:12px;border-radius:50%;background:#2c2f35"></span>
                     </div>
+                  </div>
+                </div>
+                <!-- On-device MENU buttons. The board furniture is hidden for a clean face, so these
+                     stand in for the two physical switches: drive the real firmware menu (compiled to
+                     WASM) exactly as the hardware does. Tap = step; hold a single button to repeat;
+                     hold 1+2 to open/page the menu and release to select. -->
+                <div style="margin-top:15px;display:flex;flex-direction:column;align-items:center;gap:10px">
+                  <div style="display:flex;gap:10px">
+                    <button class="pcc-mbtn" onPointerDown="{{onB1Down}}" onPointerUp="{{onB1Up}}" onPointerCancel="{{onB1Up}}"><span style="font-size:var(--fs-nano);letter-spacing:.14em;color:var(--txt3);display:block;margin-bottom:1px">BUTTON</span>1</button>
+                    <button class="pcc-mbtn" onPointerDown="{{onB2Down}}" onPointerUp="{{onB2Up}}" onPointerCancel="{{onB2Up}}"><span style="font-size:var(--fs-nano);letter-spacing:.14em;color:var(--txt3);display:block;margin-bottom:1px">BUTTON</span>2</button>
+                    <button class="pcc-mbtn pcc-mbtn--chord" onPointerDown="{{onBBothDown}}" onPointerUp="{{onBBothUp}}" onPointerCancel="{{onBBothUp}}"><span style="font-size:var(--fs-nano);letter-spacing:.14em;color:var(--txt3);display:block;margin-bottom:1px">BUTTON</span>1 + 2</button>
+                  </div>
+                  <div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.07em;color:var(--txt3);text-align:center;max-width:520px;line-height:1.65">
+                    HOLD <b style="color:var(--txt2);font-weight:600">1 + 2</b> TO OPEN THE MENU · TAP <b style="color:var(--txt2);font-weight:600">1</b> / <b style="color:var(--txt2);font-weight:600">2</b> TO MOVE · HOLD <b style="color:var(--txt2);font-weight:600">1 + 2</b> AGAIN TO SELECT
                   </div>
                 </div>
                 <div style="display:flex;align-items:center;justify-content:flex-end;padding:9px 2px 2px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.14em;color:var(--txt3)">
@@ -1452,6 +1468,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=215"></script>
+<script type="module" src="js/app-controller.js?v=217"></script>
 </body>
 </html>

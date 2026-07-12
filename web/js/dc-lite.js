@@ -20,6 +20,7 @@ const EVT = {
   onmouseup: 'mouseup', onmousemove: 'mousemove', onkeydown: 'keydown', onkeyup: 'keyup',
   onfocus: 'focus', onblur: 'blur', onwheel: 'wheel', onpointerdown: 'pointerdown',
   onpointermove: 'pointermove', onpointerup: 'pointerup',
+  onpointerleave: 'pointerleave', onpointercancel: 'pointercancel',
 };
 const PH = /\{\{\s*([^}]+?)\s*\}\}/g;          // {{ name }}
 const lcFirst = (s) => s.charAt(0).toLowerCase() + s.slice(1);

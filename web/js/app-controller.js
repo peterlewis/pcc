@@ -2,7 +2,7 @@
 // Claude-Design prototype (PCC Web.dc.html), reparented onto the vanilla DcLite
 // runtime. All state, the fold sequence, the 14 renderVals builders, and the 1 Hz
 // tick are unchanged; only 'extends DCLogic' -> 'extends DcLite' and the boot differ.
-import { DcLite } from './dc-lite.js?v=90';
+import { DcLite } from './dc-lite.js?v=91';
 import * as ASTRO from './astro-fw.js?v=90';
 import * as DS from './datasources.js?v=90';
 import { TelemetryLog } from './telemetrylog.js?v=4';
@@ -100,7 +100,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=110'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=105'), import('./emu-driver.js?v=35'), import('./ppsts.js?v=15'), import('./demo7.js?v=4')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=111'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=105'), import('./emu-driver.js?v=35'), import('./ppsts.js?v=15'), import('./demo7.js?v=4')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -1910,6 +1910,45 @@ class Component extends DcLite {
     // lone tap (partner not held) → the normal button action (mode step, or menu scroll if open)
     if (downAt) this.onFaceButton(btn);
   }
+
+  // External button strip (index.html, below the clock) → the SAME two-button chord protocol as the
+  // on-face furniture buttons, so the on-device menu stays fully drivable now that the board
+  // furniture is hidden for the clean menu-demo face. `which`: 1 = Button 1, 2 = Button 2,
+  // 'both' = Button 1+2 (the chord that opens/pages the menu). Tap = one step; holding a single
+  // button auto-repeats the step (mirrors the firmware's held-tap value acceleration); holding 1+2
+  // rolls the chord stages and release fires the shown stage — both handled by onFaceButtonDown/Up.
+  // One strip button is tracked at a time (the dedicated 1+2 button performs the chord atomically),
+  // and _extHold.down makes the up handler idempotent since pointerup AND pointercancel both fire.
+  _extHold = { timer: null, repeated: false, down: false };
+  extBtnDown(which, e) {
+    if (e) { try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) {} }
+    if (this._extHold.down) return;
+    this._extHold.down = true; this._extHold.repeated = false;
+    if (which === 'both') { this.onFaceButtonDown('d-btn-1'); this.onFaceButtonDown('d-btn-2'); return; }
+    const id = which === 2 ? 'd-btn-2' : 'd-btn-1';
+    this.onFaceButtonDown(id);
+    const tick = () => {
+      if (this._chord.active) return;            // a chord took over → stop the single-button repeat
+      this._extHold.repeated = true;
+      this.onFaceButton(id);                     // repeat the step while held
+      this._extHold.timer = setTimeout(tick, 140);
+    };
+    this._extHold.timer = setTimeout(tick, 420); // initial hold delay before auto-repeat kicks in
+  }
+  extBtnUp(which, e) {
+    if (!this._extHold.down) return;             // idempotent: ignore the duplicate up (up + cancel/leave)
+    this._extHold.down = false;
+    if (this._extHold.timer) { clearTimeout(this._extHold.timer); this._extHold.timer = null; }
+    if (which === 'both') { this.onFaceButtonUp('d-btn-1'); this.onFaceButtonUp('d-btn-2'); return; }
+    const id = which === 2 ? 'd-btn-2' : 'd-btn-1';
+    if (this._extHold.repeated) {
+      this._extHold.repeated = false;
+      delete this._chord.down[which === 2 ? 2 : 1];   // hold already fired taps — drop the down without an extra lone tap
+    } else {
+      this.onFaceButtonUp(id);                   // short tap → the normal single step
+    }
+  }
+
   // Force an immediate face repaint after a menu event (menu FSM updated the firmware buffers, but
   // the render loop is only ~1 Hz — the menu must feel responsive).
   repaintFace() { try { this.driveEmu(); } catch (e) {} }
@@ -2166,6 +2205,10 @@ class Component extends DcLite {
       hwJsonStatus: this._hwJsonErr ? '✗ INVALID JSON — last valid edit still applied' : '✓ APPLIED LIVE TO THE CLOCK',
       onHwCopy: () => { try { navigator.clipboard.writeText(JSON.stringify(this.hwConfig, null, 2)); } catch (e) {} },
       onHwReset: () => this.resetHwConfig(),
+      // External button strip → drive the on-device menu (the board furniture buttons are hidden).
+      onB1Down: (e) => this.extBtnDown(1, e), onB1Up: (e) => this.extBtnUp(1, e),
+      onB2Down: (e) => this.extBtnDown(2, e), onB2Up: (e) => this.extBtnUp(2, e),
+      onBBothDown: (e) => this.extBtnDown('both', e), onBBothUp: (e) => this.extBtnUp('both', e),
       // STANDBY front door: connect-first. A real Mk IV is the point; a simulation is the equal-but-
       // quieter fallback for anyone without hardware. Shown only while in Standby.
       standbyOn: _mode === 'standby',
@@ -2236,7 +2279,9 @@ class Component extends DcLite {
       cbAstMoon: this.cb(!!st.modesEnabled.moon), oAstMoon: () => this.toggleMode('moon'),
       cbAstGrid: this.cb(!!st.modesEnabled.grid), oAstGrid: () => this.toggleMode('grid'),
       cbAstLl: this.cb(!!st.modesEnabled.latlon), oAstLl: () => this.toggleMode('latlon'),
+      cbAstStar: this.cb(!!st.modesEnabled.star), oAstStar: () => this.toggleMode('star'),   // MODE_STAR — the NEXT TRANSITS panel needs an enable path (was config-only)
       cbDgTc: this.cb(!!st.modesEnabled.tempcomp), oDgTc: () => this.toggleMode('tempcomp'),   // diagnostic read-out — lives in ADVANCED
+      cbDgAdev: this.cb(!!st.modesEnabled.adev), oDgAdev: () => this.toggleMode('adev'),   // MODE_ADEV — Allan-deviation page; parser + ingest existed but had no UI enable
       cbWdFull: this.cb(!!st.modesEnabled.weekday), oWdFull: () => this.toggleMode('weekday'),
       cbWdMmdd: this.cb(!!st.modesEnabled.wdy_mm_dd), oWdMmdd: () => this.toggleMode('wdy_mm_dd'),
       cbWdDd: this.cb(!!st.modesEnabled.weekda_dd), oWdDd: () => this.toggleMode('weekda_dd'),

@@ -69,6 +69,15 @@ const DEFAULT_HW = [
 // every frame and tanks paint) and NOT on the crisp layer (which would halo off-segments too).
 const GLOW = true;
 
+// Furniture layer switch. When false the board furniture (edge screws, light sensor, switch-cover
+// buttons, GPS/USB fittings — everything buildHardware() draws from DEFAULT_HW) is NOT rendered, so
+// the face reads clean for demonstrating the on-device menu via the external button strip. The
+// DEFAULT_HW data and all plumbing are RETAINED — flip this to true to restore the full furniture.
+// The physical HINGE (the DOM link-plate + its two pins in index.html) is a separate element and is
+// unaffected: it always stays. The calibration overlay (hwCalibrate) still forces the layer on so
+// that dev tool keeps working regardless of this switch.
+const FURNITURE_LAYER = false;
+
 export function createClockFaceSVG(container, opts = {}) {
   const {
     SEG_POLYS, GLYPH, GEO, segOn,
@@ -217,7 +226,7 @@ export function createClockFaceSVG(container, opts = {}) {
       cellEls.push(rowCells);
     }
 
-    if (state.hardware) buildHardware();
+    if (state.hardware && (FURNITURE_LAYER || state.hwCalibrate)) buildHardware();
 
     container.appendChild(svg);
     // refs are wired; caller renders next.
