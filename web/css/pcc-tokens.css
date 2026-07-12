@@ -11,11 +11,18 @@
      The prototype set everything in mono — prose moves to sans (--fs-body),
      which is half the perceived-density fix on its own. */
   --fs-display: 30px;    /* room hero metrics (CEP, jitter) · mono 700 */
+  --fs-heading: 26px;    /* large clock / hero numerals */
+  --fs-title:   24px;    /* section titles, big readouts */
   --fs-data-lg: 21px;    /* panel key values · mono 400 */
-  --fs-data:    13px;    /* tabular values, inputs · mono 400 */
+  --fs-lead:    15px;    /* lead-in / emphasised prose */
   --fs-body:    13.5px;  /* explanatory prose · SANS 400 — never mono */
+  --fs-data:    13px;    /* tabular values, inputs · mono 400 */
+  --fs-data-sm: 12px;    /* dense rows, table cells, secondary readouts (the workhorse) */
   --fs-label:   11px;    /* panel titles · mono 400, caps, --ls-label */
-  --fs-micro:   9.5px;   /* axis marks, meta, footnotes · mono 400, caps */
+  --fs-nano:    10px;    /* small labels, chips, meta */
+  --fs-micro:   9.5px;   /* axis marks, footnotes · mono 400, caps */
+  --fs-meta:    9px;     /* the smallest running meta / captions */
+  --fs-pico:    8px;     /* micro-annotations (unit ticks) */
   --ls-label: .14em;
   --ls-micro: .11em;
   --lh-body: 1.55;
