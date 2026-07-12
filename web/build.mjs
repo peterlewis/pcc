@@ -69,16 +69,31 @@ const result = await esbuild.build({
 const bundle = result.outputFiles[0].text;
 
 // 2. Assemble index.html: inline base.css (fix ../fonts -> fonts) + inline the bundle.
+//    IMPORTANT: pass a REPLACEMENT FUNCTION (not a string) to every .replace() that injects
+//    inlined content. A string replacement interprets `$&`, `$$`, `` $` ``, `$'`, `$n` — and the
+//    minified bundle DOES contain sequences like `$&&` (a var named `$` next to `&&`), so a string
+//    replacement expands `$&` into the matched <script> tag, splicing a literal </script> into the
+//    JS. That truncates the inline <script> in the browser → the whole app dies → raw {{…}} render.
+//    A function's return value is used verbatim, with zero `$`-pattern interpretation.
 let html = readFileSync(resolve(web, 'index.html'), 'utf8');
 const css = readFileSync(resolve(web, 'css/base.css'), 'utf8').replace(/\.\.\/fonts\//g, 'fonts/');
-html = html.replace(/<link rel="stylesheet" href="css\/base\.css(?:\?v=\d+)?">/, `<style>\n${css}\n</style>`);
+html = html.replace(/<link rel="stylesheet" href="css\/base\.css(?:\?v=\d+)?">/, () => `<style>\n${css}\n</style>`);
 // pcc-tokens.css (design-return tokens) — inline it too, AFTER base.css so its :root additions win.
 const tokens = readFileSync(resolve(web, 'css/pcc-tokens.css'), 'utf8');
-html = html.replace(/<link rel="stylesheet" href="css\/pcc-tokens\.css(?:\?v=\d+)?">/, `<style>\n${tokens}\n</style>`);
+html = html.replace(/<link rel="stylesheet" href="css\/pcc-tokens\.css(?:\?v=\d+)?">/, () => `<style>\n${tokens}\n</style>`);
 if (/href="css\/pcc-tokens\.css/.test(html)) throw new Error('pcc-tokens.css link not inlined');
 const scriptRe = /<script type="module" src="js\/app-controller\.js(?:\?v=\d+)?"><\/script>/;
 if (!scriptRe.test(html)) throw new Error('module <script> tag not found in index.html');
-html = html.replace(scriptRe, `<script>\n${bundle}\n</script>`);
+// Defence in depth: neutralise any literal `</script` in the bundle BEFORE inlining — inside a JS
+// string/template/regex `<\/script` is byte-for-byte equivalent at runtime, but the HTML parser no
+// longer sees a tag-closer, so it can never truncate the inline <script>. Zero occurrences today
+// (verified), but this makes the whole class of bug impossible if source ever emits the literal.
+const safeBundle = bundle.replace(/<\/script/gi, '<\\/script');
+html = html.replace(scriptRe, () => `<script>\n${safeBundle}\n</script>`);
+// Balanced-tag guard: the HTML parser closes the inline <script> at the FIRST `</script`, so the
+// opener and closer counts must match exactly. Any surplus `</script` means a truncation bug got in.
+const opens = (html.match(/<script[ >]/g) || []).length, closes = (html.match(/<\/script/g) || []).length;
+if (opens !== closes) throw new Error(`inline <script> truncation: ${opens} <script> vs ${closes} </script> — a </script> leaked into the bundle`);
 
 // 3. Emit docs/ — the deployable tree.
 rmSync(docs, { recursive: true, force: true });
