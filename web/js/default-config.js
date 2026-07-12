@@ -67,8 +67,13 @@ MODE_GRID     = disabled
 MODE_LATLON   = disabled
 
 # Bright-star meridian-transit predictor — paged countdowns to the soonest bright stars
-# crossing your local meridian, e.g. "SIR  0:45". Needs a position (GPS or fake_longitude).
+# crossing your local meridian, e.g. "SIRI  1 35". Needs a position (GPS or fake_longitude).
+# The catalogue is loaded from STARS.BIN on the card (~90 naked-eye stars, generate-stars.py);
+# without a card it falls back to a baked ~30-star set.
 MODE_STAR = disabled
+# Trim the transit catalogue to stars brighter than this magnitude (smaller = fewer, more famous;
+# 1.5 ~= the two dozen first-magnitude stars, 2.5 = the whole STARS.BIN). Applied at boot.
+#star_max_mag = 1.5
 
 # Dwell per sub-screen for the paged read-outs (astro + temp comp + ADEV/STAR), in ms
 # (default 5500, min 250). Older firmware called this astro_page_ms.
