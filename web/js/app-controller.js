@@ -100,7 +100,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=96'), import('./charts.js?v=96'), import('./realdev.js?v=106'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=96'), import('./charts.js?v=96'), import('./realdev.js?v=107'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -109,6 +109,8 @@ class Component extends DcLite {
       const probeBridge = () => this.realdev.detectBridge().then((j) => {
         const next = j || null;
         if (JSON.stringify(next) !== JSON.stringify(this.state.bridgeInfo || null)) this.setState({ bridgeInfo: next });
+        // First time we see a bridge this session, check GitHub once for a newer pccd (prompts in UPDATES).
+        if (next && !this._pccdChecked) { this._pccdChecked = true; setTimeout(() => this.checkPccdUpdate(false), 600); }
       }).catch(() => {});
       probeBridge();
       this.bridgeTimer = setInterval(probeBridge, 15000);
@@ -2987,6 +2989,61 @@ class Component extends DcLite {
     };
   }
 
+  // Is a release tag (e.g. "pccd-v0.4") newer than the running pccd version (e.g. "0.3+abc123")?
+  // Compares MAJOR.MINOR, ignoring the "pccd-v" prefix and any "+githash" suffix on either side.
+  verNewer(cur, tag) {
+    const num = (s) => { const m = String(s).match(/(\d+)\.(\d+)/); return m ? [+m[1], +m[2]] : [0, 0]; };
+    const [aM, am] = num(cur), [bM, bm] = num(tag);
+    return bM > aM || (bM === aM && bm > am);
+  }
+
+  // Check GitHub for a newer pccd release and set the panel state. Called once automatically when a
+  // bridge is first detected (manual=false, silent on failure) and by the panel's CHECK button
+  // (manual=true, surfaces failures). Sets this._pccdNewerTag so UPDATE NOW only shows when relevant.
+  checkPccdUpdate(manual) {
+    const bi = this.state.bridgeInfo;
+    if (!bi) return;
+    if (manual) { this._pccdUpd = { s: 'CHECKING GITHUB…', c: 'var(--txt2)' }; this.setState({}); }
+    fetch('https://api.github.com/repos/peterlewis/pcc/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
+      .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then((j) => {
+        const tag = j.tag_name || '';
+        const newer = this.verNewer(bi.version || '', tag);
+        this._pccdNewerTag = newer ? tag : null;
+        this._pccdUpd = !tag ? { s: 'CHECK FAILED — UNEXPECTED RESPONSE', c: 'var(--acq)' }
+          : !newer ? { s: 'UP TO DATE — ' + tag, c: 'var(--lock)' }
+          : bi.updatable ? { s: 'UPDATE AVAILABLE — ' + tag, c: 'var(--acq)' }
+          : { s: 'UPDATE AVAILABLE — ' + tag + ' · UPDATE MANUALLY (THIS pccd IS A DEV / -w BUILD)', c: 'var(--acq)' };
+        this.setState({});
+      })
+      .catch(() => { if (manual) { this._pccdUpd = { s: 'CHECK FAILED — OFFLINE OR RATE-LIMITED', c: 'var(--acq)' }; this.setState({}); } });
+  }
+
+  // Ask the running pccd to download the latest release, verify it, and relaunch itself. Streams the
+  // daemon's progress into the panel, then re-probes /health until the new version answers.
+  runPccdUpdate() {
+    if (!this.realdev) return;
+    this._pccdUpd = { s: 'STARTING UPDATE…', c: 'var(--txt2)' };
+    this.setState({});
+    this.realdev.updateBridge((line) => {
+      this._pccdUpd = { s: line.toUpperCase(), c: line.startsWith('error') ? 'var(--acq)' : 'var(--txt2)' };
+      this.setState({});
+    }).then((res) => {
+      if (!res.ok) { this._pccdUpd = { s: 'UPDATE FAILED — ' + String(res.msg || '').toUpperCase(), c: 'var(--acq)' }; this.setState({}); return; }
+      if (res.msg === 'already up to date') { this._pccdNewerTag = null; this.setState({}); return; }
+      this._pccdUpd = { s: 'UPDATED — RECONNECTING…', c: 'var(--lock)' };
+      this._pccdNewerTag = null; this.setState({});
+      let tries = 0;
+      const rc = setInterval(() => {
+        tries += 1;
+        this.realdev.detectBridge().then((j) => {
+          if (j) { clearInterval(rc); this.setState({ bridgeInfo: j }); this._pccdUpd = { s: 'UPDATED TO v' + (j.version || '?'), c: 'var(--lock)' }; this.setState({}); }
+          else if (tries > 20) { clearInterval(rc); this._pccdUpd = { s: 'UPDATED — REFRESH TO RECONNECT', c: 'var(--acq)' }; this.setState({}); }
+        }).catch(() => {});
+      }, 700);
+    });
+  }
+
   // DEVICE→UPDATES "FIRMWARE & DATA": what firmware the in-app emulator IS (version + exact
   // clock4 commit the WASM was compiled from — build.mjs writes build-info.json), the tz data
   // shipped alongside, and a user-triggered GitHub check of the rollup branch head.
@@ -2995,7 +3052,19 @@ class Component extends DcLite {
     const kb = (b) => (b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB');
     const zone = (() => { try { const z = this.emu && this.emu.tz(); return z && z.zone ? z.zone : null; } catch (e) { return null; } })();
     const upd = this._fwUpd || { s: '', c: 'var(--txt3)' };
+    // pccd bridge self-update block (only meaningful when a bridge is present)
+    const bri = this.state.bridgeInfo;
+    const pu = this._pccdUpd || { s: '', c: 'var(--txt3)' };
+    const plat = (bri && bri.platform) || 'macos-universal';
     return {
+      pccdShown: !!bri,
+      pccdVer: bri ? ('v' + (bri.version || '?') + (bri.platform ? ' · ' + bri.platform.toUpperCase() : '') + (bri.updatable ? '' : ' · SELF-UPDATE OFF (DEV / -w)')) : '—',
+      pccdUpdState: pu.s, pccdUpdC: pu.c,
+      pccdCanUpdate: !!(bri && bri.updatable && this._pccdNewerTag),
+      pccdShowManual: !!(bri && !bri.updatable && this._pccdNewerTag),
+      pccdCmd: 'curl -L https://github.com/peterlewis/pcc/releases/latest/download/pccd-' + plat + '.tar.gz | tar xz && cd pcc && ./pccd',
+      onPccdCheck: () => this.checkPccdUpdate(true),
+      onPccdUpdate: () => this.runPccdUpdate(),
       fwVer: bi ? bi.version + ' — WASM, BUILT FROM SOURCE' + (bi.dateVersion ? ' · DATE BOARD ' + bi.dateVersion.replace(/^Version\s*/i, '').trim() : '') : 'BUILT FROM SOURCE (run build.mjs for provenance)',
       fwSrc: bi ? 'clock4 @ ' + bi.fwSha.slice(0, 7) + ' (' + bi.fwBranch + ')' : 'web/emu/firmware submodule',
       fwBuilt: bi ? bi.builtAt + (bi.emcc ? ' · emcc ' + bi.emcc : '') : '—',

@@ -246,6 +246,33 @@ export class BridgeClock extends EventTarget {
 
     static isSupported() { return typeof WebSocket !== 'undefined'; }
 
+    /// Trigger a pccd self-update over a throwaway socket, independent of any clock connection.
+    /// Sends the `pccd:update` control frame, streams the daemon's `pccd:update <msg>` progress
+    /// lines to onLine(), and settles: { ok:true } when the socket drops (daemon re-exec'd onto the
+    /// new build) or reports already-current, { ok:false, msg } on a reported error / unreachable.
+    static selfUpdate(onLine) {
+        return new Promise((resolve) => {
+            let ws, sent = false, done = false;
+            const finish = (ok, msg) => { if (done) return; done = true; try { ws && ws.close(); } catch { /* ignore */ } resolve({ ok, msg }); };
+            try { ws = new WebSocket(`ws://${BridgeClock.authority()}`); } catch { finish(false, 'bridge not reachable'); return; }
+            const fire = () => { if (!sent) { sent = true; try { ws.send('pccd:update'); } catch { finish(false, 'send failed'); } } };
+            const openTimer = setTimeout(fire, 500);                 // fallback if the daemon sends no hello
+            ws.onopen = () => {};
+            ws.onmessage = (e) => {
+                const t = String(e.data);
+                if (t.startsWith('#PCCD')) { fire(); return; }       // hello — now send the command
+                if (!t.startsWith('pccd:update')) return;
+                const m = t.slice(11).replace(/^\s+/, '');           // strip "pccd:update "
+                onLine(m);
+                if (m.startsWith('error')) finish(false, m);
+                else if (m.startsWith('already-current')) finish(true, 'already up to date');
+                // "done — restarting" is followed by the socket close, which settles via onclose
+            };
+            ws.onerror = () => { clearTimeout(openTimer); finish(false, 'bridge not reachable'); };
+            ws.onclose = () => { clearTimeout(openTimer); finish(true, 'relaunched'); };
+        });
+    }
+
     constructor() { super(); this.ws = null; this.device = ''; this.nmeaConsumers = 0; this._closing = false; }
 
     describe() { return 'PCC BRIDGE · ' + (this.device || BridgeClock.authority()); }

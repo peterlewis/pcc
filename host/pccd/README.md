@@ -40,6 +40,23 @@ bridge/chrony feed and will open the hosted app in a Chromium browser.
 `SHA256SUMS` is attached to each release. Every binary answers `./pccd -t`
 (SHA-1 / RFC 6455 handshake self-test) with `self-test OK`.
 
+## Updating (v0.4+)
+
+Once you're on a release tarball, pccd keeps itself current. The app checks
+GitHub and, when a newer pccd exists, shows **UPDATE NOW** in DEVICE → UPDATES —
+one click and the running daemon downloads the latest release, verifies it, swaps
+itself, and relaunches (the app reconnects on its own). Or from a shell:
+
+    ./pccd --update              # fetch latest, verify, replace, relaunch
+    ./pccd --version             # print the running version
+    ./pccd --self-update-dry     # fetch + verify only; change nothing
+
+Self-update only fires for a real downloaded tarball. The new binary must pass
+its own `-t` self-test *and* be strictly newer, and the tarball is checked
+against `SHA256SUMS`; any failure leaves the install untouched. A source/`-w`
+build won't replace itself — update those with `git pull && make`. Updating from
+v0.3 (which predates this) is a one-time manual `curl | tar` as above.
+
 Note (macOS): release binaries are unsigned. The `curl | tar` pipe avoids the
 browser quarantine flag; if you download with a browser instead, run
 `xattr -dr com.apple.quarantine pcc` once on the extracted folder.
@@ -235,15 +252,19 @@ ships with a `-w` line (adjust the path to your checkout).
 
 ## Releasing (maintainer note)
 
-Binaries are built locally and attached to a GitHub release:
+Push a version tag and CI does the rest — [`.github/workflows/release.yml`](../../.github/workflows/release.yml)
+builds the web app once, then all three tarballs (`dist.sh` per runner) + `SHA256SUMS`,
+and publishes the GitHub release:
 
-    # macOS universal
-    clang -O2 -Wall -Wextra -arch arm64 -arch x86_64 -o dist/pccd-macos-universal pccd.c \
-      -framework IOKit -framework CoreFoundation
-    # Linux static (per arch, via Docker)
-    docker run --rm --platform linux/arm64 -v "$PWD":/src:ro -v "$PWD/dist":/dist alpine:3.20 \
-      sh -c 'apk add -q gcc musl-dev && gcc -O2 -static -o /dist/pccd-linux-aarch64 /src/pccd.c && /dist/pccd-linux-aarch64 -t'
-    docker run --rm --platform linux/amd64 -v "$PWD":/src:ro -v "$PWD/dist":/dist alpine:3.20 \
-      sh -c 'apk add -q gcc musl-dev && gcc -O2 -static -o /dist/pccd-linux-x86_64 /src/pccd.c && /dist/pccd-linux-x86_64 -t'
-    (cd dist && shasum -a 256 pccd-* > SHA256SUMS)
-    gh release create pccd-v0.3 dist/pccd-* dist/SHA256SUMS --title "pccd v0.3" --notes "..."
+    git tag pccd-v0.4 && git push origin pccd-v0.4
+
+Release notes come from `host/pccd/RELEASE_NOTES_<version>.md` when present
+(e.g. `RELEASE_NOTES_v0.4.md`), else the changelog is auto-generated.
+
+To build the tarballs locally (needs macOS for the universal binary + Docker for
+the Linux musl builds), the same recipe runs by hand:
+
+    node web/build.mjs          # docs/ — the app the tarballs bundle
+    bash host/pccd/dist.sh      # → host/pccd/dist/*.tar.gz + SHA256SUMS
+    gh release create pccd-v0.4 host/pccd/dist/*.tar.gz host/pccd/dist/SHA256SUMS \
+      --title "pccd v0.4" --notes-file host/pccd/RELEASE_NOTES_v0.4.md

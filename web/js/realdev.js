@@ -12,7 +12,7 @@
 //
 // Chromium only (Web Serial). Gate the connect button on isSupported().
 
-import { Clock, BridgeClock } from './serial.js?v=16';
+import { Clock, BridgeClock } from './serial.js?v=17';
 import { parseGGA, parseRMC, parseGSA, GSVBuffer } from './nmea.js?v=2';
 import { parsePMTXTS, parsePMTXTC, centrePhase, foldPhase1ms } from './ppsts.js?v=15';
 import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=1';
@@ -442,6 +442,7 @@ export function createRealDevice(session) {
         // Is the pccd daemon running? Resolves its /health JSON ({pccd, version, device, chrony})
         // or null. The app polls this for the Connection room's live BRIDGE row.
         detectBridge() { return BridgeClock.detect(); },
+        updateBridge(onLine) { return BridgeClock.selfUpdate(onLine); },   // pccd self-update (tarball installs)
 
         // RX-staleness watchdog (bridge parity). The direct Web Serial transport detects an unplug
         // two ways (navigator.serial 'disconnect' + readLoop end). The bridge transport only reacts

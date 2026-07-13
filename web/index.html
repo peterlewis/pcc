@@ -546,6 +546,21 @@
               </div>
               <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">THE CLOCK FACES IN THIS APP *ARE* THIS FIRMWARE — THE REAL clock4 C (ROLLUP: ALL DRAFT PRs) COMPILED TO WEBASSEMBLY AT BUILD TIME, DRIVEN BY A VIRTUAL GPS. THE UPDATE CHECK COMPARES THE BUILT-IN COMMIT AGAINST THE rollup BRANCH HEAD ON GITHUB.</div>
             </section>
+            <sc-if value="{{pccdShown}}">
+            <section style="background:var(--panel);border:1px solid var(--line);grid-column:1/-1;max-width:1000px">
+              <div style="display:flex;align-items:center;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">PCC BRIDGE · pccd</span></div>
+              <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:var(--fs-data-sm);color:var(--txt2)">Installed</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt);text-align:right">{{pccdVer}}</span></div>
+              <div style="display:flex;align-items:center;gap:14px;padding:12px;flex-wrap:wrap">
+                <button onClick="{{onPccdCheck}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:7px 16px;background:transparent;border:1px solid var(--line2);color:var(--txt);cursor:pointer" style-hover="border-color:var(--txt3)">CHECK FOR pccd UPDATES</button>
+                <sc-if value="{{pccdCanUpdate}}"><button onClick="{{onPccdUpdate}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:7px 16px;background:transparent;border:1px solid var(--lock);color:var(--lock);cursor:pointer;font-weight:600" style-hover="background:color-mix(in srgb,var(--lock) 12%,transparent)">UPDATE NOW</button></sc-if>
+                <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.04em;color:{{pccdUpdC}}">{{pccdUpdState}}</span>
+              </div>
+              <sc-if value="{{pccdShowManual}}">
+                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.04em;color:var(--txt3);line-height:1.7">THIS pccd RUNS FROM A DEV CHECKOUT (-w), SO IT WON'T REPLACE ITSELF. UPDATE IT BY HAND:<br><code style="color:var(--txt2);word-break:break-all">{{pccdCmd}}</code></div>
+              </sc-if>
+              <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">UPDATE NOW ASKS THE RUNNING pccd TO DOWNLOAD THE LATEST RELEASE, VERIFY IT (SELF-TEST + SHA-256), SWAP ITSELF, AND RELAUNCH — THE APP RECONNECTS AUTOMATICALLY.</div>
+            </section>
+            </sc-if>
           </div>
         </sc-if>
 
@@ -1508,6 +1523,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=225"></script>
+<script type="module" src="js/app-controller.js?v=226"></script>
 </body>
 </html>

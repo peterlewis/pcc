@@ -45,7 +45,9 @@
 #define _GNU_SOURCE                       /* strcasestr on glibc — must precede all includes */
 #endif
 
-#define PCCD_VERSION "0.3"
+#ifndef PCCD_VERSION
+#define PCCD_VERSION "0.4"                 /* overridable (-DPCCD_VERSION=...) so a test build can look older */
+#endif
 #ifdef PCCD_GIT
 #define PCCD_VERSTR PCCD_VERSION "+" PCCD_GIT      /* Makefile stamps the short git hash for traceable /health */
 #else
@@ -94,6 +96,19 @@ static int         opt_dry  = 0;
 static int         opt_verb = 0;
 static int         opt_raw  = 0;
 static const char *opt_webroot = NULL;   // -w: serve the PCC app from this dir (same-origin, no mixed content)
+static int         opt_webroot_flag = 0; // was -w given? (an explicit webroot means a dev build — no self-update)
+
+// ---- self-update ---------------------------------------------------------------------------------
+// A running tarball install can pull a newer release over itself. g_platform is the release-asset tag
+// (baked by dist.sh/CI: "macos-universal" / "linux-x86_64" / "linux-aarch64"); a plain `make` build
+// leaves it NULL so self-update stays off. g_updatable is only set when we're a bundled tarball (not -w).
+#ifdef PCCD_PLATFORM
+static const char *g_platform = PCCD_PLATFORM;
+#else
+static const char *g_platform = NULL;
+#endif
+static int    g_updatable = 0;           // set in main(): platform known AND running a bundled tarball
+static char **g_argv = NULL;             // saved argv for an execv() relaunch after a standalone update
 
 // ---- daemon liveness / health state (file-scope so the /health handler can read it) --------------
 static long   g_nseen=0, g_nsent=0;   // $PMTXTS parsed / usable samples (promoted from main for /health)
@@ -242,7 +257,7 @@ static int  frame_probe(void){ fprintf(stderr,"[pccd] frame probe: no USB frame 
 // ---- serial (read-write: PCC commands flow back through us) --------------------------------------
 static char g_devpath[512];   // matches devbuf; /dev/serial/by-id/ paths can be long
 static int serial_open(const char *path){
-  int fd = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK);
+  int fd = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);   // CLOEXEC: don't leak the tty to curl/tar, or to an execv relaunch
   if (fd < 0) return -1;
   // Exclusive: once we own the port, a second pccd's open() fails instead of both reading the same
   // stream and splitting the bytes (which silently corrupts both). Advisory, but every pccd sets it.
@@ -296,6 +311,7 @@ static void chrony_try_connect(void){
   if (g_chrony >= 0 || opt_dry) return;
   int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
   if (fd < 0) return;
+  fcntl(fd, F_SETFD, FD_CLOEXEC);
   struct sockaddr_un a; memset(&a,0,sizeof a); a.sun_family=AF_UNIX;
   snprintf(a.sun_path,sizeof a.sun_path,"%s",opt_sock);
   if (connect(fd,(struct sockaddr*)&a,sizeof a)==0){ g_chrony=fd; g_chrony_warned=0; fprintf(stderr,"[pccd] chrony SOCK connected: %s\n",opt_sock); }
@@ -533,6 +549,7 @@ static void broadcast_line(const char *line){
 }
 static int listen_open(int port){
   int fd = socket(AF_INET, SOCK_STREAM, 0);
+  fcntl(fd, F_SETFD, FD_CLOEXEC);                       // don't leak the listener to subprocesses or across execv
   int one=1; setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,&one,sizeof one);
   struct sockaddr_in a; memset(&a,0,sizeof a);
   a.sin_family=AF_INET; a.sin_port=htons((uint16_t)port);
@@ -589,6 +606,32 @@ static void serve_file(Client *c, const char *reqpath){
   close(fd); close(c->fd); c->fd=-1;
 }
 
+// A WebSocket handshake is NOT gated by the same-origin policy — any web page can open ws://127.0.0.1,
+// so the loopback bind alone doesn't stop a foreign site from driving the clock or triggering an update.
+// Accept only: no Origin (a non-browser client), a loopback page (us, or a localhost dev server), or the
+// hosted app. `o` is "scheme://host[:port][/...]"; match the host exactly so http://localhost.evil.com fails.
+static int origin_ok(const char *o){
+  if (!*o) return 1;                                     // no Origin header (native/CLI ws client)
+  if (!strcmp(o,"https://peterlewis.github.io")) return 1;
+  const char *h = strstr(o,"://"); if (!h) return 0; h += 3;
+  static const char *loop[] = { "localhost", "127.0.0.1", "[::1]" };
+  for (unsigned i=0;i<sizeof loop/sizeof *loop;i++){ size_t n=strlen(loop[i]);
+    if (!strncmp(h,loop[i],n) && (h[n]==0 || h[n]==':' || h[n]=='/')) return 1; }
+  return 0;
+}
+
+// Quote a string as a single POSIX-sh word ('...', with embedded ' escaped as '\''), so a path or URL
+// containing a quote or shell metacharacter can't break out of the system()/popen() strings in self_update.
+static void shq(char *out, size_t cap, const char *in){
+  size_t o=0; if (o+1<cap) out[o++]='\'';
+  for (; *in; in++){
+    if (*in=='\''){ const char *e="'\\''"; while (*e && o+1<cap) out[o++]=*e++; }
+    else if (o+1<cap) out[o++]=*in;
+  }
+  if (o+1<cap) out[o++]='\'';
+  out[o<cap?o:cap-1]=0;
+}
+
 // One HTTP request per plain connection: /health JSON (CORS-open so the deployed app can probe us),
 // a WebSocket upgrade, an optional served file (-w), or a short status page.
 static void http_or_upgrade(Client *c){
@@ -596,6 +639,17 @@ static void http_or_upgrade(Client *c){
   if (!strstr(c->buf,"\r\n\r\n")) return;               // wait for full headers
   char *key = strcasestr(c->buf,"Sec-WebSocket-Key:");   // header names arrive in any case (undici: lowercase)
   if (key){
+    // CSRF gate: reject a cross-origin browser before completing the upgrade.
+    char *org = strcasestr(c->buf,"Origin:");
+    if (org){
+      org += 7; while (*org==' ') org++;
+      char o[200]; int oi=0; while (*org && *org!='\r' && *org!='\n' && oi<(int)sizeof o-1) o[oi++]=*org++;
+      o[oi]=0;
+      if (!origin_ok(o)){
+        fprintf(stderr,"[pccd] rejected websocket from origin %s\n",o);
+        http_simple(c,"403 Forbidden","text/plain","cross-origin websocket rejected\n"); return;
+      }
+    }
     key += 18; while (*key==' ') key++;
     char k[64]; int i=0; while (*key && *key!='\r' && i<40) k[i++]=*key++;
     k[i]=0;
@@ -634,9 +688,11 @@ static void http_or_upgrade(Client *c){
     } else { snprintf(agebuf,sizeof agebuf,"null"); snprintf(offbuf,sizeof offbuf,"null"); }
     snprintf(json,sizeof json,
       "{\"pccd\":1,\"version\":\"" PCCD_VERSTR "\",\"device\":\"%s\",\"chrony\":%s,"
-      "\"serial_open\":%s,\"last_sample_age_s\":%s,\"last_offset_s\":%s,\"sent\":%ld,\"rejected\":%ld}",
+      "\"serial_open\":%s,\"last_sample_age_s\":%s,\"last_offset_s\":%s,\"sent\":%ld,\"rejected\":%ld,"
+      "\"updatable\":%s,\"platform\":\"%s\"}",
       g_devpath, (g_chrony>=0)?"true":"false",
-      g_serial_open?"true":"false", agebuf, offbuf, g_nsent, g_nseen-g_nsent);
+      g_serial_open?"true":"false", agebuf, offbuf, g_nsent, g_nseen-g_nsent,
+      g_updatable?"true":"false", g_platform?g_platform:"");
     char resp[1024];
     int n=snprintf(resp,sizeof resp,
       "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\n"
@@ -649,6 +705,8 @@ static void http_or_upgrade(Client *c){
   http_simple(c,"200 OK","text/plain",
     "pccd: Precision Clock bridge. WebSocket here; GET /health for status.\n");
 }
+static int  self_update(int dry, Client *cli);   // defined below main's helpers; a "pccd:" control frame calls it
+static void upd_progress(Client *cli, const char *msg);
 // Unmask + deliver client->server text frames: each is a command line for the clock's serial port.
 static void ws_read(Client *c, int serial_fd){
   unsigned char *b=(unsigned char*)c->buf;
@@ -667,13 +725,21 @@ static void ws_read(Client *c, int serial_fd){
       for (int i=0;i<pl;i++) pong[2+i] = masked ? (unsigned char)(b[off+i]^mask[i&3]) : b[off+i];
       if (write(c->fd,pong,2+pl)<0){ close(c->fd); c->fd=-1; return; }
     }
-    if (op==0x1 && serial_fd>=0){                               // text: a command line
+    if (op==0x1){                                              // text: a command line
       char cmd[300]; int n = plen<(int)sizeof cmd-2 ? plen : (int)sizeof cmd-2;
       for (int i=0;i<n;i++) cmd[i] = masked ? (char)(b[off+i]^mask[i&3]) : (char)b[off+i];
       cmd[n]=0;
       // strip any client newline, send with the firmware's expected CRLF
       while (n>0 && (cmd[n-1]=='\n'||cmd[n-1]=='\r')) cmd[--n]=0;
-      if (n>0){ write(serial_fd,cmd,n); write(serial_fd,"\r\n",2); }
+      if (n>0){
+        if (!strncmp(cmd,"pccd:",5)){                          // bridge control, NOT a clock command
+          if      (!strcmp(cmd,"pccd:update"))     self_update(0,c);   // may exec/exit → never returns on success
+          else if (!strcmp(cmd,"pccd:update-dry")) self_update(1,c);
+          else upd_progress(c,"error unknown-control");
+        } else if (serial_fd>=0){
+          write(serial_fd,cmd,n); write(serial_fd,"\r\n",2);
+        }
+      }
     }
     memmove(c->buf, c->buf+off+plen, c->len-(off+plen));
     c->len -= off+plen;
@@ -699,6 +765,20 @@ static int parse_pmtxts(const char *line, Pmtxts *o){
 static volatile sig_atomic_t g_stop=0;
 static void on_sig(int s){ (void)s; g_stop=1; }
 
+// Absolute, symlink-resolved path of THIS executable → out (returns 0 / -1). The self-update swap and
+// the bundled-app lookup both need to know where we actually live on disk.
+static int exe_realpath(char *out, size_t cap){
+  char exe[4096];
+#ifdef __APPLE__
+  uint32_t n=sizeof exe; if (_NSGetExecutablePath(exe,&n)!=0) return -1;
+#else
+  ssize_t k=readlink("/proc/self/exe",exe,sizeof exe-1); if (k<=0) return -1; exe[k]=0;
+#endif
+  char real[4096]; if (!realpath(exe,real)) return -1;
+  if (strlen(real) >= cap) return -1;
+  strcpy(out,real); return 0;
+}
+
 // If -w wasn't given, look for a PCC web app shipped ALONGSIDE the binary — the release tarball lays
 // pccd next to a pcc-web/ dir. Serving it makes localhost:<port> a SAME-ORIGIN home for the app, so
 // the bridge WebSocket works in EVERY browser: Safari/Firefox block a hosted https page from reaching
@@ -706,13 +786,7 @@ static void on_sig(int s){ (void)s; g_stop=1; }
 // Returns a static path buffer or NULL. Checked next to the exe: pcc-web/, then ../share/pcc/web/.
 static const char *find_bundled_app(void){
   static char root[4096];
-  char exe[4096];
-#ifdef __APPLE__
-  uint32_t n=sizeof exe; if (_NSGetExecutablePath(exe,&n)!=0) return NULL;
-#else
-  ssize_t k=readlink("/proc/self/exe",exe,sizeof exe-1); if (k<=0) return NULL; exe[k]=0;
-#endif
-  char real[4096]; if (!realpath(exe,real)) return NULL;
+  char real[4096]; if (exe_realpath(real,sizeof real)!=0) return NULL;
   char *slash=strrchr(real,'/'); if(!slash) return NULL; *slash=0;   // -> the exe's directory
   const char *rel[]={ "/pcc-web", "/../share/pcc/web" };
   for (unsigned i=0;i<sizeof rel/sizeof *rel;i++){
@@ -724,8 +798,124 @@ static const char *find_bundled_app(void){
   return NULL;
 }
 
+// ---- self-update ---------------------------------------------------------------------------------
+// Compare two "MAJOR.MINOR" versions, ignoring a leading "pccd-v"/"v" and any "+githash" suffix.
+// <0 if a<b, 0 equal, >0 if a>b.
+static int ver_cmp(const char *a, const char *b){
+  while (*a && (*a<'0'||*a>'9')) a++;
+  while (*b && (*b<'0'||*b>'9')) b++;
+  int amaj=0,amin=0,bmaj=0,bmin=0;
+  sscanf(a,"%d.%d",&amaj,&amin); sscanf(b,"%d.%d",&bmaj,&bmin);
+  if (amaj!=bmaj) return amaj-bmaj;
+  return amin-bmin;
+}
+// One progress line → the requesting WebSocket client (as "pccd:update <msg>") and the log.
+static void upd_progress(Client *cli, const char *msg){
+  fprintf(stderr,"[pccd] update: %s\n",msg);
+  if (cli && cli->fd>=0){ char f[200]; int n=snprintf(f,sizeof f,"pccd:update %s",msg); ws_send_text(cli,f,n); }
+}
+// Pull the latest release tarball for THIS platform, verify it, atomically swap our own binary + the
+// bundled app, and relaunch. Every fetch/verify step gates BEFORE anything on disk is touched, so a
+// failure leaves the install exactly as it was. `dry` runs the whole pipeline but stops before the
+// swap. Returns 0 = swapped (process re-execs/exits), <0 = error (untouched), >0 = already current.
+// Only shells out to `curl`/`tar`/`shasum` with compile-time-constant and mkdtemp-generated paths —
+// nothing user-derived reaches a shell, so there is no injection surface.
+static int self_update(int dry, Client *cli){
+  if (!g_updatable){
+    upd_progress(cli, g_platform ? "error not-a-tarball-install (run the downloaded pccd, no -w)"
+                                 : "error self-update unavailable in this build");
+    return -1;
+  }
+  char self[4096]; if (exe_realpath(self,sizeof self)!=0){ upd_progress(cli,"error cannot-locate-self"); return -1; }
+  char dir[4096]; snprintf(dir,sizeof dir,"%s",self);
+  char *slash=strrchr(dir,'/'); if(!slash){ upd_progress(cli,"error bad-exe-path"); return -1; } *slash=0;
+
+  // Stage inside the install dir so every rename() below is same-filesystem (atomic, no cross-device copy).
+  char tmp[4096]; snprintf(tmp,sizeof tmp,"%s/.pccd-update-XXXXXX",dir);
+  if (!mkdtemp(tmp)){ upd_progress(cli,"error mkdtemp"); return -1; }
+
+  const char *base=getenv("PCCD_UPDATE_BASE");                          // test seam; unset in production
+  if (!base || !*base) base="https://github.com/peterlewis/pcc/releases/latest/download";
+  // Everything below shells out to curl/tar/shasum. Quote every non-constant path/URL as one sh word (shq)
+  // so an install path or base URL containing a quote/metacharacter can't break out of the command string.
+  char qbase[8300], qtmp[8300];
+  shq(qbase,sizeof qbase,base); shq(qtmp,sizeof qtmp,tmp);
+  char cmd[16384]; int rc=-1; char nver[64]={0};
+  do {
+    upd_progress(cli,"downloading");
+    snprintf(cmd,sizeof cmd,"curl -fsSL %s/pccd-%s.tar.gz -o %s/pcc.tgz",qbase,g_platform,qtmp);
+    if (system(cmd)!=0){ upd_progress(cli,"error download-failed (need curl + network)"); break; }
+    // SHA-256, fail CLOSED: a release always ships SHA256SUMS, so a missing/failed fetch means refuse —
+    // never install unverified. (The -t + strictly-newer gates below are independent belt-and-braces.)
+    snprintf(cmd,sizeof cmd,"curl -fsSL %s/SHA256SUMS -o %s/SHA256SUMS 2>/dev/null",qbase,qtmp);
+    if (system(cmd)!=0){ upd_progress(cli,"error sha256sums-unavailable (refusing unverified install)"); break; }
+    snprintf(cmd,sizeof cmd,
+      "cd %s && H=$(command -v shasum >/dev/null 2>&1 && shasum -a 256 pcc.tgz || sha256sum pcc.tgz) && "
+      "got=${H%%%% *} && want=$(awk '/pccd-%s\\.tar\\.gz/{print $1}' SHA256SUMS) && "
+      "[ -n \"$want\" ] && [ \"$got\" = \"$want\" ]", qtmp, g_platform);
+    if (system(cmd)!=0){ upd_progress(cli,"error sha256-mismatch"); break; }
+    upd_progress(cli,"extracting");
+    snprintf(cmd,sizeof cmd,"tar xzf %s/pcc.tgz -C %s",qtmp,qtmp);
+    if (system(cmd)!=0){ upd_progress(cli,"error extract-failed"); break; }
+    char nbin[4200], qnbin[8300]; struct stat st;
+    snprintf(nbin,sizeof nbin,"%s/pcc/pccd",tmp);
+    if (stat(nbin,&st)!=0){ upd_progress(cli,"error no-binary-in-tarball"); break; }
+    chmod(nbin,0755); shq(qnbin,sizeof qnbin,nbin);
+    upd_progress(cli,"verifying");
+    snprintf(cmd,sizeof cmd,"%s -t >/dev/null 2>&1",qnbin);            // GATE 1: new binary passes its own self-test
+    if (system(cmd)!=0){ upd_progress(cli,"error new-binary-failed-selftest"); break; }
+    snprintf(cmd,sizeof cmd,"%s --version 2>/dev/null",qnbin);         // GATE 2: strictly newer than us
+    FILE *vp=popen(cmd,"r"); if (vp){ if(!fgets(nver,sizeof nver,vp)) nver[0]=0; pclose(vp); }
+    nver[strcspn(nver,"\r\n")]=0;
+    if (ver_cmp(nver,PCCD_VERSTR) <= 0){
+      char m[160]; snprintf(m,sizeof m,"already-current (have %s, latest %s)",PCCD_VERSTR,nver[0]?nver:"?");
+      upd_progress(cli,m); rc=1; break;
+    }
+    if (dry){ char m[160]; snprintf(m,sizeof m,"dry-run OK — would update %s -> %s",PCCD_VERSTR,nver); upd_progress(cli,m); rc=0; break; }
+    // ---- swap ----
+    upd_progress(cli,"installing");
+    // Binary: hard-link the old aside for rollback, then ONE atomic rename replaces `self`. rename() swaps
+    // the directory entry in a single step, so the exec path is never absent — a crash mid-swap still boots.
+    char bak[4200]; snprintf(bak,sizeof bak,"%s.bak",self);
+    unlink(bak); if (link(self,bak)!=0){ /* backup best-effort; the atomic rename below is what matters */ }
+    if (rename(nbin,self)!=0){ upd_progress(cli,"error binary-swap-failed"); break; }   // on failure `self` is untouched
+    chmod(self,0755);
+    // App: swap whatever we actually serve — opt_webroot is <dir>/pcc-web OR the FHS ../share/pcc/web.
+    char nweb[4200]; snprintf(nweb,sizeof nweb,"%s/pcc/pcc-web",tmp);
+    if (opt_webroot && stat(nweb,&st)==0){
+      char webbak[4300], qwebbak[8500]; snprintf(webbak,sizeof webbak,"%s.old",opt_webroot);
+      shq(qwebbak,sizeof qwebbak,webbak);
+      snprintf(cmd,sizeof cmd,"rm -rf %s",qwebbak); if(system(cmd)){}
+      if (rename(opt_webroot,webbak)!=0){                              // couldn't stash current app — install directly
+        if (rename(nweb,opt_webroot)!=0) upd_progress(cli,"warn app-not-swapped (binary updated)");
+      } else if (rename(nweb,opt_webroot)!=0){
+        rename(webbak,opt_webroot);                                    // restore the stash
+        upd_progress(cli,"warn app-not-swapped (binary updated)");
+      } else { snprintf(cmd,sizeof cmd,"rm -rf %s",qwebbak); if(system(cmd)){} }
+    }
+    rc=0;
+  } while(0);
+
+  snprintf(cmd,sizeof cmd,"rm -rf %s",qtmp); if(system(cmd)){}          // clean the staging dir
+  if (rc!=0) return rc;                                                 // error / already-current: keep running
+
+  if (!cli){   // CLI one-shot (`pccd --update`): the on-disk install is updated; there's no running daemon to relaunch here.
+    fprintf(stderr,"[pccd] update complete — installed the new version. Start pccd (or restart its service) to run it.\n");
+    return 0;
+  }
+  upd_progress(cli,"done — restarting on the new version");
+  // Daemon self-relaunch: execv preserves the PID, so a launchd/systemd supervisor keeps tracking this
+  // job (no KeepAlive dependency, no restart gap); g_argv are the daemon's own args, minus any --update.
+  // The long-lived sockets are FD_CLOEXEC, so the fresh image re-binds the port and re-opens the tty cleanly.
+  execv(self,g_argv);
+  upd_progress(cli,"error execv-failed — restart pccd to finish");
+  return -1;
+}
+
 int main(int argc, char **argv){
+  g_argv = argv;                          // saved for an execv() relaunch after a standalone self-update
   char devbuf[512]={0};   // roomy: /dev/serial/by-id/ symlinks can be long
+  int opt_do_update=0, opt_update_dry=0;
   static const char USAGE[] =
     "usage: pccd [-d dev] [-p port] [-s chrony.sock] [-w webroot] [-o trim_s] [-n] [-v] [-r] [-t] [-T] [-h]\n"
     "  -d dev    serial device (default: auto-pick cu.usbmodem* / STM32 by-id / ttyACM*)\n"
@@ -738,10 +928,15 @@ int main(int argc, char **argv){
     "  -r        raw: bypass the sample prefilter\n"
     "  -t        self-test and exit\n"
     "  -T        USB frame-clock probe and exit (macOS)\n"
+    "  --version print the version and exit\n"
+    "  --update  update to the latest release, then relaunch (tarball installs only)\n"
     "  -h        print this help and exit\n";
   for (int i=1;i<argc;i++){
     const char *a=argv[i];
     if (!strcmp(a,"-h") || !strcmp(a,"--help")){ fputs(USAGE,stdout); return 0; }
+    else if (!strcmp(a,"--version")){ puts(PCCD_VERSTR); return 0; }
+    else if (!strcmp(a,"--update")) opt_do_update=1;
+    else if (!strcmp(a,"--self-update-dry")) opt_do_update=opt_update_dry=1;   // fetch+verify, but don't swap
     else if (!strcmp(a,"-n")) opt_dry=1;
     else if (!strcmp(a,"-v")) opt_verb=1;
     else if (!strcmp(a,"-r")) opt_raw=1;
@@ -753,7 +948,7 @@ int main(int argc, char **argv){
       if (!strcmp(a,"-d")) opt_dev=val;
       else if (!strcmp(a,"-s")) opt_sock=val;
       else if (!strcmp(a,"-o")) opt_trim=atof(val);
-      else if (!strcmp(a,"-w")) opt_webroot=val;         // serve the PCC app same-origin (e07d308)
+      else if (!strcmp(a,"-w")){ opt_webroot=val; opt_webroot_flag=1; }   // serve the PCC app same-origin (e07d308)
       else {                                              // -p: reject non-numeric / out-of-range ports
         char *end=NULL; long p=strtol(val,&end,10);
         if (!*val || (end && *end) || p<1 || p>65535){
@@ -764,6 +959,15 @@ int main(int argc, char **argv){
     else { fprintf(stderr,"[pccd] unknown option %s\n%s",a,USAGE); return 2; }
   }
   if (!opt_webroot) opt_webroot = find_bundled_app();   // release tarball ships pccd next to pcc-web/
+  // Self-update is allowed only for a real downloaded tarball: platform baked in, app bundled alongside,
+  // and no explicit -w (which marks a dev checkout). This keeps a developer's -w daemon untouched.
+  g_updatable = (g_platform!=NULL) && !opt_webroot_flag && (opt_webroot!=NULL);
+  if (opt_do_update) return self_update(opt_update_dry,NULL) < 0 ? 1 : 0;
+  // A self-update leaves the previous binary at <self>.bak. Reap it only once THIS image proves it can
+  // run (port bound + a short grace window below) — if a just-installed binary crashes on boot, launchd
+  // never lets it reach that point, so the known-good .bak survives for a manual `mv pccd.bak pccd`.
+  char bakpath[4200]=""; double bak_reap_at=0;
+  { char self[4096]; if (exe_realpath(self,sizeof self)==0) snprintf(bakpath,sizeof bakpath,"%s.bak",self); }
   pf_sink = pf_emit_chrony;
   init_mono();
   signal(SIGINT,on_sig); signal(SIGTERM,on_sig); signal(SIGPIPE,SIG_IGN);
@@ -771,6 +975,7 @@ int main(int argc, char **argv){
 
   g_listen = listen_open(opt_port);
   if (g_listen<0){ fprintf(stderr,"[pccd] cannot listen on 127.0.0.1:%d\n",opt_port); return 1; }
+  if (bakpath[0]) bak_reap_at = now_mono_ns() + 15e9;   // port bound → arm the rollback-copy reap
   fprintf(stderr,"[pccd] v" PCCD_VERSTR " — http/ws on http://127.0.0.1:%d  (health: /health)%s\n",opt_port,opt_dry?"  [DRY RUN]":"");
   if (opt_webroot) fprintf(stderr,"[pccd] serving the PCC app from %s\n[pccd]   -> open http://localhost:%d in ANY browser, then CONNECT DEVICE\n",opt_webroot,opt_port);
   else fprintf(stderr,"[pccd] no bundled app found next to this binary — open the hosted app in a Chromium\n[pccd]   browser (it will use this bridge), or pass -w <web-dir> to serve the app same-origin\n");
@@ -782,6 +987,7 @@ int main(int argc, char **argv){
   while (!g_stop){
     double t_iter = now_mono_ns();   // spin-guard: iteration start; did_serial gates the floor sleep
     int did_serial = 0;
+    if (bakpath[0] && t_iter > bak_reap_at){ unlink(bakpath); bakpath[0]=0; }   // update proven healthy → drop rollback copy
     // (re)open serial + USB interface — the clock re-enumerates on config edits and firmware flashes,
     // so treat disconnection as routine and retry quietly.
     if (sfd<0 && now_mono_ns()>next_retry){
@@ -827,6 +1033,7 @@ int main(int argc, char **argv){
     if (pf[iLis].revents & POLLIN){
       int fd=accept(g_listen,NULL,NULL);
       if (fd>=0){
+        fcntl(fd, F_SETFD, FD_CLOEXEC);
         int placed=0;
         for (int i=0;i<MAXCLI;i++) if (g_cli[i].fd<0){ memset(&g_cli[i],0,sizeof(Client)); g_cli[i].fd=fd; placed=1; break; }
         if (!placed) close(fd);
