@@ -79,19 +79,19 @@
    protocol (tap = step, hold single = repeat, hold 1+2 = open/select). Big numeral, small label. */
 .pcc-mbtn {
   display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
-  font-family: var(--mono); font-size: var(--fs-title); font-weight: 600; line-height: 1;
-  color: var(--txt); background: #14161a; border: 1px solid var(--line2); border-radius: var(--r-2);
-  min-width: 112px; padding: 11px 18px 12px; cursor: pointer;
+  font-family: var(--mono); font-size: var(--fs-data); font-weight: 600; line-height: 1.05;
+  color: var(--txt); background: #14161a; border: 1px solid var(--line2); border-radius: var(--r-1);
+  min-width: 62px; padding: 5px 10px 6px; cursor: pointer;
   user-select: none; -webkit-user-select: none; touch-action: none;   /* pointer events own the gesture */
-  box-shadow: 0 2px 0 rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.03);
+  box-shadow: 0 1px 0 rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.03);
   transition: background var(--t-ui), border-color var(--t-ui), transform 60ms, box-shadow 60ms;
 }
 .pcc-mbtn:hover { border-color: #3a3f4a; background: #171a1f; }
 .pcc-mbtn:active {
-  background: #1f0d0a; border-color: var(--none); color: #ffd9cc; transform: translateY(2px);
-  box-shadow: inset 0 2px 6px rgba(0,0,0,.6), 0 0 15px -4px var(--none);
+  background: #1f0d0a; border-color: var(--none); color: #ffd9cc; transform: translateY(1px);
+  box-shadow: inset 0 2px 5px rgba(0,0,0,.6), 0 0 12px -4px var(--none);
 }
 .pcc-mbtn:focus-visible { outline: 2px solid var(--none); outline-offset: 2px; }
-.pcc-mbtn--chord { min-width: 140px; border-color: #39323f; background: #16151b; }
+.pcc-mbtn--chord { min-width: 78px; border-color: #39323f; background: #16151b; }
 .pcc-mbtn--chord:hover { border-color: #4a4052; background: #191820; }
 @media (prefers-reduced-motion: reduce) { .pcc-mbtn { transition: none; } .pcc-mbtn:active { transform: none; } }
