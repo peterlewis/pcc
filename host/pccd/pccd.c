@@ -750,6 +750,8 @@ int main(int argc, char **argv){
   double f_dwt=80e6; int haveRate=0; uint32_t prevDwt=0; int havePrev=0;
 
   while (!g_stop){
+    double t_iter = now_mono_ns();   // spin-guard: iteration start; did_serial gates the floor sleep
+    int did_serial = 0;
     // (re)open serial + USB interface — the clock re-enumerates on config edits and firmware flashes,
     // so treat disconnection as routine and retry quietly.
     if (sfd<0 && now_mono_ns()>next_retry){
@@ -809,12 +811,16 @@ int main(int argc, char **argv){
       c->len+=r;
       if (c->ws) ws_read(c,sfd); else http_or_upgrade(c);
     }
-    // serial
-    if (iSer>=0 && (pf[iSer].revents & (POLLIN|POLLHUP|POLLERR))){
+    // serial — POLLNVAL matters: a USB-serial node that vanishes oddly on re-enumeration (a flash /
+    // replug, routine here) can leave an fd that poll() reports as INVALID rather than HUP. Without
+    // POLLNVAL in the mask that fd is never drained or closed, so poll returns it ready every
+    // iteration and the loop pegs a core. Treating it like any other loss closes + backs off cleanly.
+    if (iSer>=0 && (pf[iSer].revents & (POLLIN|POLLHUP|POLLERR|POLLNVAL))){
       double rx_mono = now_mono_ns();                    // arrival stamp for the frame-clock fallback
       char chunk[256];
       int r=(int)read(sfd,chunk,sizeof chunk);
       if (r<=0){ fprintf(stderr,"[pccd] serial lost — will retry\n"); close(sfd); sfd=-1; g_serial_open=0; usb_close(); li=0; overrun=0; next_retry=now_mono_ns()+2e9; continue; }
+      did_serial=1;
       for (int i=0;i<r;i++){
         char ch=chunk[i];
         if (ch=='\n'){
@@ -883,6 +889,12 @@ int main(int argc, char **argv){
         } else if (ch!='\r'){ line[li++]=ch; }
       }
     }
+    // Spin guard (defence in depth): if an iteration did no serial work in under 1 ms, poll() is
+    // returning a persistently-ready-but-unproductive fd — an un-drainable serial node, or a
+    // half-dead ws client — so sleep 5 ms to cap the loop at ~200 Hz instead of pegging a core. A
+    // 500 ms poll timeout (idle) or any serial byte (live data) makes the iteration longer / sets
+    // did_serial, so this never throttles real traffic or adds latency to a flowing clock.
+    if (!did_serial && now_mono_ns()-t_iter < 1.0e6){ struct timespec ts={0,5*1000*1000}; nanosleep(&ts,NULL); }
   }
   fprintf(stderr,"[pccd] exiting — %ld PPS samples processed, %ld usable, %ld sent as avg%d groups, %ld outliers rejected\n",g_nseen,g_nsent,pf_groups,PF_AGG,pf_rejects);
   if (reg_dn>0){ double m=reg_dsum/reg_dn, v=reg_dsq/reg_dn-m*m; if(v<0)v=0;
