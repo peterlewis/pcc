@@ -492,6 +492,70 @@ export function drawStair(canvas, tok, samples, spanSec, now, tempNow) {
   xTimeTicks(ctx, tok, fr, h, spanSec);
 }
 
+// ---------------------------------------------------------------- Allan deviation σ_y(τ)
+// The classic log-log stability ladder ($PMADEV octave taus, plus the drift-immune Hadamard twin
+// when present). Points are the firmware's own reductions — real device over serial, or the
+// emulator's identical accumulator in simulation; nothing is synthesised here.
+export function drawAdev(canvas, tok, stab) {
+  const { ctx, w, h } = c2d(canvas);
+  clear(ctx, w, h, tok);
+  const fr = frame(ctx, w, h, tok, { ml: 46, mb: 22 });
+  const series = [];
+  if (stab && stab.adev) series.push({ r: stab.adev, color: tok.led, label: 'ADEV', wide: true });
+  if (stab && stab.hdev) series.push({ r: stab.hdev, color: tok.acq, label: 'HDEV', wide: false });
+  // keep only published octaves (σ>0); the firmware emits 0 for octaves not yet reduced
+  const pts = series.map((s) => ({ ...s, p: s.r.taus.map((t, i) => ({ t, s: s.r.sigmas[i] })).filter((q) => q.s > 0) }))
+    .filter((s) => s.p.length);
+  if (!pts.length) {
+    ctx.font = F9; ctx.fillStyle = tok.txt3; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('NO σ_y(τ) LADDER YET — ACCUMULATES FROM PPS (τ=1 s NEEDS ~5 EDGES; EACH OCTAVE DOUBLES)', w / 2, h / 2);
+    return;
+  }
+  // log-log range: x across the emitted octaves, y snapped to whole decades around the data
+  const allT = pts.flatMap((s) => s.p.map((q) => q.t)), allS = pts.flatMap((s) => s.p.map((q) => q.s));
+  const lx0 = Math.log2(Math.min(...allT)), lx1 = Math.max(Math.log2(Math.max(...allT)), lx0 + 1);
+  const ly0 = Math.floor(Math.log10(Math.min(...allS))), ly1 = Math.max(Math.ceil(Math.log10(Math.max(...allS))), ly0 + 1);
+  const X = (t) => fr.X((Math.log2(t) - lx0) / (lx1 - lx0));
+  const Y = (s) => fr.Y((Math.log10(s) - ly0) / (ly1 - ly0));
+  // decade gridlines + engineering labels (1E-6 …)
+  yTicks(ctx, tok, fr, Array.from({ length: ly1 - ly0 + 1 }, (_, i) => ({ v: ly0 + i, f: i / (ly1 - ly0) })), (v) => '1E' + v);
+  ctx.font = F9; ctx.fillStyle = tok.txt3; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (let k = Math.ceil(lx0); k <= lx1; k += 2) {   // τ ticks every other octave: 1,4,16,64,256,1024 s
+    const t = 2 ** k, x = X(t);
+    ctx.globalAlpha = 0.4; ctx.strokeStyle = tok.lineSoft || tok.line;
+    ctx.beginPath(); ctx.moveTo(x, fr.m.t + 1); ctx.lineTo(x, fr.m.t + fr.ih - 1); ctx.stroke(); ctx.globalAlpha = 1;
+    ctx.fillText(t >= 60 && t % 60 === 0 ? (t / 60) + 'm' : t + 's', x, fr.m.t + fr.ih + 5);
+  }
+  ctx.textAlign = 'left'; ctx.fillText('σ_y(τ)', fr.m.l + 4, fr.m.t + 3);
+  // τ^-1/2 white-FM reference slope, anchored on the first point — a guide, not data
+  const a0 = pts[0].p[0], tEnd = 2 ** lx1;
+  ctx.setLineDash([3, 4]); ctx.strokeStyle = tok.txt3; ctx.globalAlpha = 0.5; ctx.beginPath();
+  ctx.moveTo(X(a0.t), Y(a0.s)); ctx.lineTo(X(tEnd), Y(a0.s * Math.sqrt(a0.t / tEnd)));
+  ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+  ctx.fillStyle = tok.txt3; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+  ctx.fillText('τ^-½', fr.m.l + fr.iw - 4, Y(a0.s * Math.sqrt(a0.t / tEnd)) - 2);
+  // the ladders: line + dots, clipped to the frame
+  ctx.save(); ctx.beginPath(); ctx.rect(fr.m.l, fr.m.t, fr.iw, fr.ih); ctx.clip();
+  for (const s of pts) {
+    ctx.strokeStyle = s.color; ctx.lineWidth = s.wide ? 1.5 : 1; ctx.globalAlpha = s.wide ? 1 : 0.85;
+    ctx.beginPath();
+    s.p.forEach((q, i) => { const x = X(q.t), y = Y(q.s); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+    ctx.fillStyle = s.color;
+    for (const q of s.p) { ctx.beginPath(); ctx.arc(X(q.t), Y(q.s), s.wide ? 2.6 : 2, 0, 7); ctx.fill(); }
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+  // legend, top-right inside the frame
+  ctx.font = F9; ctx.textBaseline = 'top';
+  let lx = fr.m.l + fr.iw - 6;
+  for (const s of [...pts].reverse()) {
+    ctx.textAlign = 'right'; ctx.fillStyle = s.color;
+    ctx.fillText(s.label + ' · ' + s.p.length + ' τ', lx, fr.m.t + 3);
+    lx -= ctx.measureText(s.label + ' · ' + s.p.length + ' τ').width + 14;
+  }
+}
+
 // ---------------------------------------------------------------- ppm vs temp + fit
 export function drawPpmTemp(canvas, tok, samples, fit) {
   const { ctx, w, h } = c2d(canvas);

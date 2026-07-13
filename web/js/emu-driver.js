@@ -67,6 +67,8 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     menuLayer: w('emu_menu_layer','number'), menuSection: w('emu_menu_section','number'),
     menuIdx: w('emu_menu_idx','number'), menuDirty: w('emu_menu_dirty','number'),
     starLine: w('emu_star_line','string'),   // firmware $PMSTAR for the sim observer (SIMULATED TRANSITS)
+    adevLine: w('emu_adev_line','string'), hdevLine: w('emu_hdev_line','string'),   // firmware $PMADEV/$PMHDEV — its own live sigma_y(tau) ladder
+    adevPush: w('emu_adev_push','void',['number']),   // feed one phase sample (DWT ticks) straight into the accumulator
     segBalance: w('emu_seg_balance','number'), colonBalance: w('emu_colon_balance','number'),
     colonPreview: w('emu_colon_preview','number'),   // §3.5 preview (0xFF = none)
     hadPps: w('emu_had_pps','number'), sincePps: w('emu_since_pps','number'),
@@ -302,6 +304,16 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     // The firmware's own $PMSTAR meridian-transit sentence for the current (simulated) observer —
     // the same MODE_STAR predictor a real clock emits. '' if no catalogue / no fix.
     starLine() { return E.starLine ? E.starLine() : ''; },
+    // The firmware's own Allan/Hadamard-deviation sentences ($PMADEV/$PMHDEV) — the REAL sigma_y(tau)
+    // ladder the ADEV feature computes from its free-running-oscillator phase samples. '' until the
+    // accumulator has enough octaves published (same gate a real clock applies before emitting).
+    adevLine() { return E.adevLine ? E.adevLine() : ''; },
+    hdevLine() { return E.hdevLine ? E.hdevLine() : ''; },
+    // Push one phase sample (cumulative error, DWT ticks @80 MHz) into the firmware's ADEV ring.
+    // The WASM shim has no live DWT cycle counter, so the PPS path can't self-feed; in SIMULATION
+    // the app pushes the sim's openly-synthetic $PMTXTS phase here — the REAL reduction (overlap,
+    // maturity gates, octave cache, $PMADEV format) then runs on it, same as SAT RAIN uses sim sats.
+    adevPush(xTicks) { if (E.adevPush) E.adevPush(xTicks); },
     // LED per-segment / colon brightness balance calibration read-back (applied blind until now).
     // 0 = off (stock), 1 = AUTO (the calibrated rail curve), 2..300 = fixed manual strength.
     balanceState() {

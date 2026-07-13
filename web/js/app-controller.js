@@ -8,7 +8,7 @@ import * as DS from './datasources.js?v=90';
 import { TelemetryLog } from './telemetrylog.js?v=4';
 import { prepReview, drawReview, sampleAt, tAtX } from './review.js?v=1';
 import { subSatellitePoint } from './satpass.js?v=1';
-import { parsePMSTAR } from './pmext.mjs?v=1';
+import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=1';
 import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=4';
 
 // config.txt is the single source of truth: the clock-behaviour defaults (enabled modes, colon,
@@ -100,7 +100,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=106'), import('./emu-driver.js?v=35'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=96'), import('./charts.js?v=96'), import('./realdev.js?v=106'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -277,7 +277,7 @@ class Component extends DcLite {
     if (name === 'globe') { this.bindGlobe(el); this.drawChart('globe'); return; }
     if (name === 'dacCurve') { this.bindDacCurve(el); this.drawChart('dacCurve'); return; }
     if (name === 'monLog') { this.scrollLog(true); return; }
-    if (['sky', 'cn0elev', 'cn0time', 'posScatter', 'dop', 'cont', 'phase', 'stair', 'ppmtemp', 'gammaCurve', 'map'].includes(name)) this.drawChart(name);
+    if (['sky', 'cn0elev', 'cn0time', 'posScatter', 'dop', 'cont', 'phase', 'stair', 'ppmtemp', 'adev', 'gammaCurve', 'map'].includes(name)) this.drawChart(name);
   }
 
   dropEl(name) {
@@ -676,6 +676,27 @@ class Component extends DcLite {
     } else {   // NOT connected → the virtual GPS owns the firmware. Unconditional (same self-healing
       // rationale as the standby branch): setLive(false) is a boolean store, free at frame rate.
       this.emu.setLive(false); this._emuLive = false;
+      // SIMULATION: feed the sim's $PMTXTS phase (the same openly-synthetic samples the PHASE chart
+      // plots) into the firmware's OWN ADEV accumulator via emu_adev_push — the WASM shim has no
+      // live DWT cycle counter, so the firmware's internal PPS path can't self-feed (its gap detector
+      // resets on every edge). The real reduction pipeline — overlapping ADEV, 4m maturity gates,
+      // octave cache, $PMADEV formatting — then runs on the sim's phase. A connected clock never
+      // takes this path: its ladder arrives ready-made in its own $PMADEV stream (S.stab).
+      if (this.emu.adevPush && this.PT && this.PT.parsePMTXTS) {
+        const log = this.session.S.nmeaLog || [];
+        if (!this._adevFed) this._adevFed = new WeakSet();   // object-identity dedupe (survives the log's front-trim)
+        for (let i = 0; i < log.length; i++) {
+          const it = log[i];
+          if (!it || typeof it !== 'object' || this._adevFed.has(it)) continue;
+          this._adevFed.add(it);
+          if (it.dir !== 'rx' || typeof it.text !== 'string' || !it.text.startsWith('$PMTXTS,')) continue;
+          const r = this.PT.parsePMTXTS(it.text);
+          if (r && isFinite(r.phaseMs)) {
+            const us = (r.phaseMs > 500 ? r.phaseMs - 1000 : r.phaseMs) * 1000;  // centre across the boundary (like centrePhase)
+            this.emu.adevPush(us * 80);                                          // µs → DWT ticks @ 80 MHz
+          }
+        }
+      }
     }
     const t = performance.now();
     this.emu.tick(t - (this._emuLast || t));
@@ -1380,7 +1401,7 @@ class Component extends DcLite {
     else if (s === 'satellites') this.drawChart('sky');
     else if (s === 'signal') { this.drawChart('cn0elev'); this.drawChart('cn0time'); }
     else if (s === 'position') { this.drawChart('posScatter'); this.drawChart('dop'); this.drawChart('cont'); }
-    else if (s === 'timing') { this.drawChart('phase'); this.drawChart('stair'); this.drawChart('ppmtemp'); }
+    else if (s === 'timing') { this.drawChart('phase'); this.drawChart('stair'); this.drawChart('ppmtemp'); this.drawChart('adev'); }
     else if (s === 'globe' && !this.state.globeRotate) this.drawChart('globe');
     else if (s === 'map') this.drawChart('map');
   }
@@ -1426,6 +1447,7 @@ class Component extends DcLite {
     if (name === 'phase') return CH.drawPhase(el, T, S.pps.list, 1800, nowS, (S.pps.flags & 2) ? 0 : (S.pps.lastEdge || 0));
     if (name === 'stair') return CH.drawStair(el, T, S.pps.samples, 1800, nowS, S.pps.temp);
     if (name === 'ppmtemp') return CH.drawPpmTemp(el, T, S.pps.samples, this._timing && this._timing.fit);
+    if (name === 'adev') return CH.drawAdev(el, T, this.adevData());
     // Ground tracks carry no timestamps (gtrails = plain points at ~45 s cadence), so the TRAIL
     // length control maps to a tail slice: 45 s per point, full buffer (40 pts) at MAX.
     const gcut = (g) => {
@@ -1843,6 +1865,24 @@ class Component extends DcLite {
     }
     return this._fwModeKey.get(modeInt) || null;
   }
+  // σ_y(τ) ladder for the TIMING chart. A connected clock's $PMADEV/$PMHDEV stream (S.stab, parsed
+  // in realdev) is the primary source; otherwise the EMULATOR's own accumulator — the same firmware
+  // adev code fed by the virtual GPS's PPS edges — is asked for its byte-faithful sentences and run
+  // through the same parser. Standby (no PPS source at all) simply has no ladder: honest absence.
+  adevData() {
+    const S = this.session && this.session.S;
+    if (S && S.real && S.stab) return S.stab;
+    if (S && S.real) return null;                       // connected but no $PMADEV yet (mode off / stock fw)
+    if (!this.emu || !this.emu.adevLine || this.appMode() !== 'simulation') return null;
+    const now = Date.now();
+    if (!this._adevEmu || now - this._adevEmu.t > 1000) {   // 1 Hz cache — same cadence a real clock emits
+      const a = parsePMADEV(this.emu.adevLine() || '');
+      const h = parsePMADEV(this.emu.hdevLine() || '');
+      this._adevEmu = { t: now, stab: (a || h) ? { adev: a, hdev: h, at: Math.floor(now / 1000) } : null };
+    }
+    return this._adevEmu.stab;
+  }
+
   // Ordinal → 'MODE_XXX' enum-name lookup for the SETTINGS.BIN override decoder. Built by resolving
   // settings-bin's name list through the emulator's modeId export (the emu IS the firmware), so the
   // mapping tracks the compiled enum and can never drift. Returns a lookup fn for winningOverrides.
@@ -2165,7 +2205,7 @@ class Component extends DcLite {
         + ';border:0;box-shadow:' + (on ? 'inset 0 -2px 0 var(--led)' : 'none')
         + ';color:' + (on ? 'var(--txt-hi)' : 'var(--txt2)') + ';cursor:pointer;white-space:nowrap';
     }
-    for (const r of ['EntryBg', 'FoldStage', 'TimeHalf', 'DateHalf', 'LinkWrap', 'LinkPlate', 'PinTop', 'PinBot', 'EntryTime', 'EntryDate', 'Hint', 'EntryCap', 'FloorShadow', 'DockSlot', 'HdrDate', 'HdrTime', 'Main', 'Drawer', 'DispWrap', 'DispBar', 'DispDateHalf', 'DispTimeHalf', 'DispDate', 'DispTime', 'DispLink', 'DispPinA', 'DispPinB', 'GammaCurve', 'TextInput', 'CdInput', 'LatIn', 'LonIn', 'EmuLat', 'EmuLon', 'EmuCfg', 'EmuCfgFile', 'Sky', 'Cn0elev', 'Cn0time', 'PosScatter', 'Dop', 'Cont', 'Phase', 'Stair', 'Ppmtemp', 'Globe', 'Map', 'MonLog', 'Cmd', 'ReviewCanvas', 'Datalink', 'Tol1In', 'Tol10In', 'Tol100In']) {
+    for (const r of ['EntryBg', 'FoldStage', 'TimeHalf', 'DateHalf', 'LinkWrap', 'LinkPlate', 'PinTop', 'PinBot', 'EntryTime', 'EntryDate', 'Hint', 'EntryCap', 'FloorShadow', 'DockSlot', 'HdrDate', 'HdrTime', 'Main', 'Drawer', 'DispWrap', 'DispBar', 'DispDateHalf', 'DispTimeHalf', 'DispDate', 'DispTime', 'DispLink', 'DispPinA', 'DispPinB', 'GammaCurve', 'TextInput', 'CdInput', 'LatIn', 'LonIn', 'EmuLat', 'EmuLon', 'EmuCfg', 'EmuCfgFile', 'Sky', 'Cn0elev', 'Cn0time', 'PosScatter', 'Dop', 'Cont', 'Phase', 'Stair', 'Ppmtemp', 'Adev', 'Globe', 'Map', 'MonLog', 'Cmd', 'ReviewCanvas', 'Datalink', 'Tol1In', 'Tol10In', 'Tol100In']) {
       out['ref' + r] = this.ref(r[0].toLowerCase() + r.slice(1));
     }
     return out;

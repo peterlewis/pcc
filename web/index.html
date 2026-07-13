@@ -1167,6 +1167,16 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 </div>
                 <div style="padding:0 12px 10px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">THE 32 kHz TUNING FORK'S PARABOLA — FITTED CURVE IN AMBER.</div>
               </section>
+              <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
+                  <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">ALLAN DEVIATION — FREE-RUNNING OSCILLATOR</span>
+                  <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">σ_y(τ) · OCTAVE TAUS · LOG-LOG</span>
+                </div>
+                <div style="padding:12px;flex:1">
+                  <canvas ref="{{refAdev}}" style="width:100%;height:250px;display:block"></canvas>
+                </div>
+                <div style="padding:0 12px 10px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">THE FIRMWARE'S OWN LADDER (MODE_ADEV / $PMADEV) — HADAMARD TWIN IN AMBER WHEN PRESENT; DASHED τ^-½ = WHITE-FM REFERENCE.</div>
+              </section>
               <section style="background:var(--panel);border:1px solid var(--line)">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
                   <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">TEMP COMPENSATION — FIRMWARE LEARNED MODEL</span>
@@ -1485,6 +1495,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=222"></script>
+<script type="module" src="js/app-controller.js?v=224"></script>
 </body>
 </html>
