@@ -7,7 +7,7 @@
 <title>Precision Clock Companion</title>
 <meta name="description" content="Precision Clock Mk IV companion — emulator, GNSS sky, and GPS timing analytics. Static, offline-capable.">
 <link rel="stylesheet" href="css/base.css?v=96">
-<link rel="stylesheet" href="css/pcc-tokens.css?v=4">
+<link rel="stylesheet" href="css/pcc-tokens.css?v=5">
 </head>
 <body>
 <div id="root">
@@ -588,8 +588,8 @@
                      stand in for the two physical switches: drive the real firmware menu (compiled to
                      WASM) exactly as the hardware does. Tap = step; hold a single button to repeat;
                      hold 1+2 to open/page the menu and release to select. -->
-                <div style="margin-top:12px;display:flex;flex-direction:column;align-items:flex-start;gap:8px">
-                  <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-start;max-width:100%">
+                <div style="margin-top:12px;display:flex;flex-direction:column;align-items:center;gap:8px">
+                  <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:100%">
                     <button class="pcc-mbtn" onPointerDown="{{onB1Down}}" onPointerUp="{{onB1Up}}" onPointerCancel="{{onB1Up}}"><span style="font-size:var(--fs-pico);letter-spacing:.1em;color:var(--txt3);display:block;margin-bottom:0">BTN</span>1</button>
                     <button class="pcc-mbtn" onPointerDown="{{onB2Down}}" onPointerUp="{{onB2Up}}" onPointerCancel="{{onB2Up}}"><span style="font-size:var(--fs-pico);letter-spacing:.1em;color:var(--txt3);display:block;margin-bottom:0">BTN</span>2</button>
                     <button class="pcc-mbtn pcc-mbtn--chord" onPointerDown="{{onBBothDown}}" onPointerUp="{{onBBothUp}}" onPointerCancel="{{onBBothUp}}"><span style="font-size:var(--fs-pico);letter-spacing:.1em;color:var(--txt3);display:block;margin-bottom:0">BTN</span>1 + 2</button>
@@ -1468,6 +1468,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=220"></script>
+<script type="module" src="js/app-controller.js?v=221"></script>
 </body>
 </html>
