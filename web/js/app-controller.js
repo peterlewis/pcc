@@ -100,8 +100,8 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=105'), import('./emu-driver.js?v=35'), import('./ppsts.js?v=15'), import('./demo7.js?v=4')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7]) => {
-      this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7;
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=96'), import('./charts.js?v=95'), import('./realdev.js?v=106'), import('./emu-driver.js?v=35'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
+      this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
       // pccd bridge presence: probed at boot and refreshed every 15 s. Drives the Connection
@@ -1843,6 +1843,20 @@ class Component extends DcLite {
     }
     return this._fwModeKey.get(modeInt) || null;
   }
+  // Ordinal → 'MODE_XXX' enum-name lookup for the SETTINGS.BIN override decoder. Built by resolving
+  // settings-bin's name list through the emulator's modeId export (the emu IS the firmware), so the
+  // mapping tracks the compiled enum and can never drift. Returns a lookup fn for winningOverrides.
+  fwModeName() {
+    if (!this.emu || !this.emu.modeId || !this.SB) return null;
+    if (!this._fwModeName) {
+      this._fwModeName = new Map();
+      for (const n of this.SB.MODE_NAMES) {
+        const id = this.emu.modeId(n);
+        if (id >= 0) this._fwModeName.set(id, n);
+      }
+    }
+    return (ord) => this._fwModeName.get(ord) || null;
+  }
   // The two tactile buttons on the switch cover (clicked on the on-screen board). Like the real
   // clock, they step through the enabled display modes — forward on 1, back on 2. The button id
   // arrives as the furniture-item string ('d-btn-2') OR a raw number; the back button is #2, so
@@ -2546,12 +2560,31 @@ class Component extends DcLite {
       onReadConfig: async () => {
         if (!this.realdev) return;
         try {
-          const r = await this.realdev.readConfigFile();
+          const r = this.realdev.readClockVolume ? await this.realdev.readClockVolume() : await this.realdev.readConfigFile();
+          // ≥v0.0.5 clocks persist on-device MENU edits into SETTINGS.BIN, so the EFFECTIVE config is
+          // config.txt ⊕ those overrides (merged with the firmware's mtime-stamped precedence rule).
+          // Reconstruct that merge here so the app reflects what the clock is actually doing.
+          let ovr = null;
+          if (r.settings && this.SB) {
+            const parsed = this.SB.parseSettingsBin(r.settings);
+            ovr = this.SB.winningOverrides(parsed, r.text, r.mtime, this.fwModeName());
+            if (ovr) {
+              const f = parsed.fields;
+              const wins = (id) => { const e = ovr.entries.find((x) => x.id === id); return !!(e && e.wins); };
+              if (wins('colon') && this.SB.COLON_NAMES[f.colon]) r.cfg.colon = this.SB.COLON_NAMES[f.colon];
+              if (wins('brightness') && f.brightness >= 0) r.cfg.brightness = 1 - f.brightness / 4095; // raw inverted-DAC → fraction; <0 = sensor AUTO (leave as-is)
+              if (wins('matrixFreq')) r.cfg.matrixHz = f.matrixFreq;
+              if (wins('pageMs')) r.cfg.astroPageMs = f.pageMs;
+              for (const m of ovr.modes) if (m.wins && m.name.startsWith('MODE_')) (r.cfg.modes = r.cfg.modes || {})[m.name] = m.on;
+            }
+          }
           this.applyDeviceConfig(r.cfg);
+          this._menuOvr = ovr;                                // panel model (not serialisable state)
           this.cfgHandle = r.fh; this._cfgOriginal = r.text; // handle/original are not serialisable state
           if (this.els.cfgEditor) this.els.cfgEditor.value = r.text;
           const en = Object.values(r.cfg.modes || {}).filter(Boolean).length;
-          if (this.session.log) this.session.log('rx', `[config] ${r.name}: colon=${r.cfg.colon || '?'} · ${en} modes enabled — applied to face`);
+          const ovrN = ovr ? ovr.entries.length + ovr.modes.length : 0;
+          if (this.session.log) this.session.log('rx', `[config] ${r.name}: colon=${r.cfg.colon || '?'} · ${en} modes enabled${ovrN ? ` · ${ovrN} menu override${ovrN === 1 ? '' : 's'} merged (SETTINGS.BIN gen ${ovr.gen})` : (r.settings ? ' · SETTINGS.BIN: no menu edits stored' : '')} — applied to face`);
           this.setState({ cfgName: r.name, cfgDirty: false });
         } catch (e) {
           if (e && e.name === 'AbortError') return; // user dismissed the picker
@@ -2576,10 +2609,28 @@ class Component extends DcLite {
       },
       cbCfgWrite: this.cb(st.cfgWrite),
       cfgHasFile: !!this.cfgHandle,
+      // MENU OVERRIDES — the on-device menu edits recovered from SETTINGS.BIN (≥v0.0.5), with the
+      // firmware's own precedence verdict per key. Rendered only after a volume read that found them.
+      menuOvrOn: !!(this._menuOvr && (this._menuOvr.entries.length || this._menuOvr.modes.length)),
+      menuOvrRows: this._menuOvr ? [
+        ...this._menuOvr.entries.map((e) => ({
+          k: 'e' + e.id, label: e.label, value: e.value,
+          tag: e.wins ? (e.cfgHasIt ? 'OVERRIDES config.txt' : 'MENU-OWNED') : 'SUPERSEDED BY config.txt',
+          tagColor: e.wins ? 'var(--lock)' : 'var(--txt3)',
+        })),
+        ...this._menuOvr.modes.map((m) => ({
+          k: 'm' + m.ordinal, label: m.name.replace(/^MODE_/, '').replace(/_/g, ' '), value: m.on ? 'ENABLED' : 'DISABLED',
+          tag: m.wins ? (m.cfgHasIt ? 'OVERRIDES config.txt' : 'MENU-OWNED') : 'SUPERSEDED BY config.txt',
+          tagColor: m.wins ? 'var(--lock)' : 'var(--txt3)',
+        })),
+      ] : [],
+      menuOvrNote: this._menuOvr ? (this._menuOvr.stampOk
+        ? `config.txt unchanged since the menu edit (stamp match) — menu values stand, even for keys config.txt defines · store gen ${this._menuOvr.gen}`
+        : `config.txt was re-saved after the menu edit — config.txt wins wherever both define a key · store gen ${this._menuOvr.gen}`) : '',
       cfgSaveDisabled: !(st.cfgDirty && st.cfgWrite && this.cfgHandle),
       cfgSaveStyle: this.btn(false, !(st.cfgDirty && st.cfgWrite && this.cfgHandle)),
-      readCfgDisabled: this.appMode() === 'standby' || !(typeof window !== 'undefined' && 'showOpenFilePicker' in window),
-      readCfgStyle: this.btn(false, this.appMode() === 'standby' || !(typeof window !== 'undefined' && 'showOpenFilePicker' in window)),
+      readCfgDisabled: this.appMode() === 'standby' || !(typeof window !== 'undefined' && ('showDirectoryPicker' in window || 'showOpenFilePicker' in window)),
+      readCfgStyle: this.btn(false, this.appMode() === 'standby' || !(typeof window !== 'undefined' && ('showDirectoryPicker' in window || 'showOpenFilePicker' in window))),
       // SIMULATE is a toggle, never greyed by history — only blocked while a real device is live.
       // CONNECT DEVICE needs A transport: Web Serial or a detected pccd bridge (any browser).
       realDisabled: conn || !(serialOk || bridgeOk), connectDisabled: !!(S && S.real), discDisabled: !conn,

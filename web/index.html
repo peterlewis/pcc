@@ -403,7 +403,7 @@
               </div>
               <div style="padding:14px var(--pad-panel-x) var(--pad-panel-x);display:flex;flex-direction:column;gap:10px">
                 <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-                  <button onClick="{{onReadConfig}}" disabled="{{readCfgDisabled}}" style="{{readCfgStyle}}">READ config.txt</button>
+                  <button onClick="{{onReadConfig}}" disabled="{{readCfgDisabled}}" style="{{readCfgStyle}}">READ CLOCK DRIVE</button>
                   <button onClick="{{onCfgWriteToggle}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbCfgWrite}}"></span>ALLOW WRITE-BACK</button>
                   <span style="flex:1"></span>
                   <sc-if value="{{cfgDirty}}" hint-placeholder-val="{{false}}"><span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.1em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:var(--r-1);padding:2px 7px">UNSAVED CHANGES</span></sc-if>
@@ -412,8 +412,25 @@
                 <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                   <button onClick="{{onCfgSave}}" disabled="{{cfgSaveDisabled}}" style="{{cfgSaveStyle}}">SAVE TO CLOCK</button>
                   <button onClick="{{onCfgRevert}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="border-color:var(--txt3);color:var(--txt)">REVERT</button>
-                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body)">Serial config is write-only — the file is read/written via the mounted clock USB volume (Chromium only). Write-back is gated off by default; re-plug or reboot the clock to reload it.</span>
+                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body)">Serial config is write-only — pick the CLOCK drive to read config.txt <b style="font-weight:600">and SETTINGS.BIN</b> (the on-device menu-edit store) together (Chromium only). Write-back is gated off by default; re-plug or reboot the clock to reload it.</span>
                 </div>
+                <sc-if value="{{menuOvrOn}}" hint-placeholder-val="{{false}}">
+                  <div style="border:1px solid var(--line2);background:var(--well)">
+                    <div style="display:flex;align-items:center;justify-content:space-between;height:24px;padding:0 10px;border-bottom:1px solid var(--line)">
+                      <span style="font-family:var(--mono);font-size:var(--fs-micro);letter-spacing:var(--ls-micro);color:var(--txt2)">MENU OVERRIDES — SETTINGS.BIN (ON-DEVICE EDITS)</span>
+                    </div>
+                    <div style="padding:8px 10px;display:flex;flex-direction:column;gap:2px">
+                      <sc-for list="{{menuOvrRows}}" as="o">
+                        <div style="display:grid;grid-template-columns:118px 1fr auto;gap:10px;align-items:baseline;font-family:var(--mono);font-size:var(--fs-data-sm);padding:2px 0">
+                          <span style="color:var(--txt3);font-size:var(--fs-micro);letter-spacing:.08em">{{o.label}}</span>
+                          <span style="color:var(--txt)">{{o.value}}</span>
+                          <span style="font-size:var(--fs-meta);letter-spacing:.08em;color:{{o.tagColor}}">{{o.tag}}</span>
+                        </div>
+                      </sc-for>
+                      <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body);margin-top:6px">{{menuOvrNote}}</span>
+                    </div>
+                  </div>
+                </sc-if>
               </div>
             </section>
 
@@ -806,7 +823,7 @@
                 <button onClick="{{onDisconnect}}" disabled="{{discDisabled}}" style="{{btnDiscStyle}}">DISCONNECT</button>
               </div>
               <div style="display:flex;gap:8px;padding:0 12px 12px">
-                <button onClick="{{onReadConfig}}" disabled="{{readCfgDisabled}}" style="{{readCfgStyle}}">READ config.txt FROM DRIVE</button>
+                <button onClick="{{onReadConfig}}" disabled="{{readCfgDisabled}}" style="{{readCfgStyle}}">READ CLOCK DRIVE</button>
               </div>
               <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3)">CONNECT DEVICE OPENS A REAL MK IV — VIA THE PCC BRIDGE WHEN pccd IS RUNNING (ANY BROWSER), OTHERWISE WEB SERIAL. SIMULATE RUNS A CLEARLY-LABELLED DEMO FOR EXPLORING WITHOUT HARDWARE (ALWAYS AVAILABLE; ONLY PAUSED WHILE A REAL CLOCK IS LIVE, SINCE SIM AND REAL DATA NEVER MIX). READ config.txt PULLS THE DEVICE'S REAL SETTINGS FROM ITS USB DRIVE (SERIAL CAN'T READ CONFIG BACK).</div>
             </section>
@@ -1468,6 +1485,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=221"></script>
+<script type="module" src="js/app-controller.js?v=222"></script>
 </body>
 </html>

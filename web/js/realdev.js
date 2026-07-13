@@ -570,6 +570,36 @@ export function createRealDevice(session) {
             return { name: file.name, cfg: parseDeviceConfig(text), text, fh };
         },
 
+        /// Read the WHOLE CLOCK volume in one gesture: pick the drive root, get config.txt (text +
+        /// mtime + writable handle) AND SETTINGS.BIN (the ≥v0.0.5 on-device menu-override store, if
+        /// present) so the caller can reconstruct the clock's EFFECTIVE config, not just the
+        /// baseline. Falls back to the single-file picker where showDirectoryPicker is missing —
+        /// the result then simply carries no settings bytes.
+        async readClockVolume() {
+            if (typeof window !== 'undefined' && window.showDirectoryPicker) {
+                const dir = await window.showDirectoryPicker({ id: 'pcc-clock' });
+                let fh = null, file = null;
+                for await (const [name, h] of dir.entries()) {
+                    if (h.kind === 'file' && /^config\.txt$/i.test(name)) { fh = h; break; }
+                }
+                if (!fh) throw new Error('No config.txt in that folder — pick the CLOCK drive root');
+                file = await fh.getFile();
+                const text = await file.text();
+                let settings = null;
+                try {
+                    for await (const [name, h] of dir.entries()) {
+                        if (h.kind === 'file' && /^settings\.bin$/i.test(name)) {
+                            settings = new Uint8Array(await (await h.getFile()).arrayBuffer());
+                            break;
+                        }
+                    }
+                } catch (e) { /* stock firmware / older image: no SETTINGS.BIN — baseline only */ }
+                return { name: file.name, cfg: parseDeviceConfig(text), text, fh, mtime: file.lastModified, settings };
+            }
+            const r = await this.readConfigFile();
+            return { ...r, mtime: null, settings: null };
+        },
+
         /// Write edited text back to a config.txt file handle (from readConfigFile). Re-checks
         /// readwrite permission (may re-prompt), then truncates + writes. User-gesture + gated.
         async writeConfigFile(fh, text) {
