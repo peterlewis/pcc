@@ -73,6 +73,9 @@
 #include <stdint.h>
 #include <math.h>
 #include <time.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>                   /* _NSGetExecutablePath — locate a co-located bundled app */
+#endif
 
 #ifdef __APPLE__
 #include <IOKit/IOKitLib.h>
@@ -696,6 +699,31 @@ static int parse_pmtxts(const char *line, Pmtxts *o){
 static volatile sig_atomic_t g_stop=0;
 static void on_sig(int s){ (void)s; g_stop=1; }
 
+// If -w wasn't given, look for a PCC web app shipped ALONGSIDE the binary — the release tarball lays
+// pccd next to a pcc-web/ dir. Serving it makes localhost:<port> a SAME-ORIGIN home for the app, so
+// the bridge WebSocket works in EVERY browser: Safari/Firefox block a hosted https page from reaching
+// a ws://127.0.0.1 loopback (mixed content), but a same-origin page dodges that wall entirely.
+// Returns a static path buffer or NULL. Checked next to the exe: pcc-web/, then ../share/pcc/web/.
+static const char *find_bundled_app(void){
+  static char root[4096];
+  char exe[4096];
+#ifdef __APPLE__
+  uint32_t n=sizeof exe; if (_NSGetExecutablePath(exe,&n)!=0) return NULL;
+#else
+  ssize_t k=readlink("/proc/self/exe",exe,sizeof exe-1); if (k<=0) return NULL; exe[k]=0;
+#endif
+  char real[4096]; if (!realpath(exe,real)) return NULL;
+  char *slash=strrchr(real,'/'); if(!slash) return NULL; *slash=0;   // -> the exe's directory
+  const char *rel[]={ "/pcc-web", "/../share/pcc/web" };
+  for (unsigned i=0;i<sizeof rel/sizeof *rel;i++){
+    char idx[4300]; struct stat st;
+    snprintf(root,sizeof root,"%s%s",real,rel[i]);
+    snprintf(idx,sizeof idx,"%s/index.html",root);
+    if (stat(idx,&st)==0 && S_ISREG(st.st_mode)) return root;
+  }
+  return NULL;
+}
+
 int main(int argc, char **argv){
   char devbuf[512]={0};   // roomy: /dev/serial/by-id/ symlinks can be long
   static const char USAGE[] =
@@ -735,6 +763,7 @@ int main(int argc, char **argv){
     }
     else { fprintf(stderr,"[pccd] unknown option %s\n%s",a,USAGE); return 2; }
   }
+  if (!opt_webroot) opt_webroot = find_bundled_app();   // release tarball ships pccd next to pcc-web/
   pf_sink = pf_emit_chrony;
   init_mono();
   signal(SIGINT,on_sig); signal(SIGTERM,on_sig); signal(SIGPIPE,SIG_IGN);
@@ -743,7 +772,8 @@ int main(int argc, char **argv){
   g_listen = listen_open(opt_port);
   if (g_listen<0){ fprintf(stderr,"[pccd] cannot listen on 127.0.0.1:%d\n",opt_port); return 1; }
   fprintf(stderr,"[pccd] v" PCCD_VERSTR " — http/ws on http://127.0.0.1:%d  (health: /health)%s\n",opt_port,opt_dry?"  [DRY RUN]":"");
-  if (opt_webroot) fprintf(stderr,"[pccd] serving PCC app from %s  —  open http://localhost:%d\n",opt_webroot,opt_port);
+  if (opt_webroot) fprintf(stderr,"[pccd] serving the PCC app from %s\n[pccd]   -> open http://localhost:%d in ANY browser, then CONNECT DEVICE\n",opt_webroot,opt_port);
+  else fprintf(stderr,"[pccd] no bundled app found next to this binary — open the hosted app in a Chromium\n[pccd]   browser (it will use this bridge), or pass -w <web-dir> to serve the app same-origin\n");
 
   int sfd=-1; double next_retry=0;
   char line[512]; int li=0, overrun=0;
