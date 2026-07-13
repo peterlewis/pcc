@@ -62,7 +62,7 @@ class Component extends DcLite {
     // TERMINATOR gives the map the day/night control the globe already had.
     mapTerm: true, mapTrails: true, mapLabels: false, mapGrat: true,
     wxOffline: false, wxInterval: 'off',
-    monPaused: false, monAutoscroll: true,
+    monPaused: false, monAutoscroll: true, monFilter: '',
     hdrBar: false, rebootArm: false,
     hdrPop: false,   // header connection/status popover (H2 — collapses the dense readout columns)
     // The three-state model (see [[pcc-web-three-state-model]]). One renderer (clock4 firmware),
@@ -2205,7 +2205,7 @@ class Component extends DcLite {
         + ';border:0;box-shadow:' + (on ? 'inset 0 -2px 0 var(--led)' : 'none')
         + ';color:' + (on ? 'var(--txt-hi)' : 'var(--txt2)') + ';cursor:pointer;white-space:nowrap';
     }
-    for (const r of ['EntryBg', 'FoldStage', 'TimeHalf', 'DateHalf', 'LinkWrap', 'LinkPlate', 'PinTop', 'PinBot', 'EntryTime', 'EntryDate', 'Hint', 'EntryCap', 'FloorShadow', 'DockSlot', 'HdrDate', 'HdrTime', 'Main', 'Drawer', 'DispWrap', 'DispBar', 'DispDateHalf', 'DispTimeHalf', 'DispDate', 'DispTime', 'DispLink', 'DispPinA', 'DispPinB', 'GammaCurve', 'TextInput', 'CdInput', 'LatIn', 'LonIn', 'EmuLat', 'EmuLon', 'EmuCfg', 'EmuCfgFile', 'Sky', 'Cn0elev', 'Cn0time', 'PosScatter', 'Dop', 'Cont', 'Phase', 'Stair', 'Ppmtemp', 'Adev', 'Globe', 'Map', 'MonLog', 'Cmd', 'ReviewCanvas', 'Datalink', 'Tol1In', 'Tol10In', 'Tol100In']) {
+    for (const r of ['EntryBg', 'FoldStage', 'TimeHalf', 'DateHalf', 'LinkWrap', 'LinkPlate', 'PinTop', 'PinBot', 'EntryTime', 'EntryDate', 'Hint', 'EntryCap', 'FloorShadow', 'DockSlot', 'HdrDate', 'HdrTime', 'Main', 'Drawer', 'DispWrap', 'DispBar', 'DispDateHalf', 'DispTimeHalf', 'DispDate', 'DispTime', 'DispLink', 'DispPinA', 'DispPinB', 'GammaCurve', 'TextInput', 'CdInput', 'LatIn', 'LonIn', 'EmuLat', 'EmuLon', 'EmuCfg', 'EmuCfgFile', 'Sky', 'Cn0elev', 'Cn0time', 'PosScatter', 'Dop', 'Cont', 'Phase', 'Stair', 'Ppmtemp', 'Adev', 'Globe', 'Map', 'MonLog', 'MonFilter', 'Cmd', 'ReviewCanvas', 'Datalink', 'Tol1In', 'Tol10In', 'Tol100In']) {
       out['ref' + r] = this.ref(r[0].toLowerCase() + r.slice(1));
     }
     return out;
@@ -2932,9 +2932,32 @@ class Component extends DcLite {
     };
   }
 
+  // Serial-monitor line filter. Space/comma-separated tokens, case-insensitive:
+  //   plain token  → keep lines CONTAINING it (multiple = OR: "GGA RMC" shows either)
+  //   -token / !token → HIDE lines containing it (exclude wins over include)
+  // Empty filter keeps everything. Cheap substring match over the ~420-line capped log.
+  monFilterPred(filter) {
+    const q = (filter || '').trim();
+    if (!q) return null;
+    const inc = [], exc = [];
+    for (const t of q.split(/[\s,]+/)) {
+      if (!t) continue;
+      if ((t[0] === '-' || t[0] === '!') && t.length > 1) exc.push(t.slice(1).toLowerCase());
+      else inc.push(t.toLowerCase());
+    }
+    if (!inc.length && !exc.length) return null;
+    return (text) => {
+      const T = String(text || '').toLowerCase();
+      if (exc.some((e) => T.includes(e))) return false;
+      return !inc.length || inc.some((i) => T.includes(i));
+    };
+  }
+
   rvMonitor() {
     const st = this.state, S = this.session && this.session.S;
-    const src = st.monPaused ? (this._monFrozen || []) : (S ? S.nmeaLog : []);
+    const full = st.monPaused ? (this._monFrozen || []) : (S ? S.nmeaLog : []);
+    const pred = this.monFilterPred(st.monFilter);
+    const src = pred ? full.filter((l) => pred(l.text)) : full;
     return {
       monRows: src.slice(-240).map((l) => {
         if (l._id == null) l._id = (this._monN = (this._monN || 0) + 1); // stable id → row-node reuse
@@ -2951,6 +2974,13 @@ class Component extends DcLite {
       cbPaused: this.cb(st.monPaused),
       oPaused: () => { if (!st.monPaused && S) this._monFrozen = S.nmeaLog.slice(); this.setState({ monPaused: !st.monPaused }); },
       cbAuto: this.cb(st.monAutoscroll), oAuto: () => this.setState({ monAutoscroll: !st.monAutoscroll }),
+      // FILTER: uncontrolled input (like the command line) — read on input, re-render the rows. The
+      // count shows "shown / total" only while a filter is active, so it's clear it's doing something.
+      refMonFilter: this.ref('monFilter'),
+      onMonFilterInput: () => this.setState({ monFilter: this.els.monFilter ? this.els.monFilter.value : '' }, () => this.scrollLog(true)),
+      monFilterActive: !!(pred),
+      monShown: pred ? (src.length + ' / ' + full.length + ' SHOWN') : '',
+      onClearFilter: () => { if (this.els.monFilter) this.els.monFilter.value = ''; this.setState({ monFilter: '' }); },
       onClear: () => { if (S) { S.nmeaLog.length = 0; this._monFrozen = []; this.setState({}); } },
       onSendCmd: () => this.sendCmd(),
       onCmdKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); this.sendCmd(); } },

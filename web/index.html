@@ -1347,8 +1347,12 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 <button onClick="{{oPaused}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbPaused}}"></span>PAUSE VIEW</button>
                 <button onClick="{{oAuto}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbAuto}}"></span>AUTOSCROLL</button>
                 <button onClick="{{onClear}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;padding:4px 10px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">CLEAR</button>
-                <span style="flex:1"></span>
-                <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.1em;color:var(--txt3)">RX <span style="color:var(--txt)">TEXT</span> · TX <span style="color:var(--led)">RED</span> · ERR <span style="color:var(--none)">ORANGE</span></span>
+                <div style="display:flex;align-items:center;gap:7px;flex:1;min-width:150px">
+                  <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3);flex:none">FILTER</span>
+                  <input ref="{{refMonFilter}}" onInput="{{onMonFilterInput}}" placeholder="GGA RMC · -GSV to hide · $PMTXTS" spellCheck="false" style="flex:1;min-width:0;max-width:280px;font-family:var(--mono);font-size:var(--fs-data-sm);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:4px 7px">
+                  <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--acq);flex:none;white-space:nowrap">{{monShown}}</span>
+                </div>
+                <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.1em;color:var(--txt3);flex:none">RX <span style="color:var(--txt)">TEXT</span> · TX <span style="color:var(--led)">RED</span> · ERR <span style="color:var(--none)">ORANGE</span></span>
               </div>
               <div style="display:flex;gap:8px;padding:0 12px 12px">
                 <span style="display:flex;align-items:center;padding:0 8px;background:var(--well);border:1px solid var(--line2);border-right:0;font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--led)">$</span>
@@ -1495,6 +1499,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=224"></script>
+<script type="module" src="js/app-controller.js?v=225"></script>
 </body>
 </html>
