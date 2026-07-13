@@ -11,7 +11,12 @@ A browser app for the [Precision Clock Mk IV](https://mitxela.com/projects/preci
 
 ## The clock face is the real firmware
 
-The C source that flashes to the physical clock is compiled to WASM at build time (from the [`clock4`](https://github.com/mitxela/clock4) submodule) and runs in the page — real NMEA parsing, real PPS discipline, real display latching. The build is **v0.0.5**: mitxela's released 0.0.4 plus five draft PRs — [#5 $PMTXTS timing telemetry](https://github.com/mitxela/clock4/pull/5), [#6 astro display modes](https://github.com/mitxela/clock4/pull/6), [#7 hardening fixes](https://github.com/mitxela/clock4/pull/7), [#8 sidereal & solar time](https://github.com/mitxela/clock4/pull/8), [#9 self-learning temperature compensation](https://github.com/mitxela/clock4/pull/9). Draft firmware: it runs happily on my own clock, but it isn't upstream yet.
+The C source that flashes to the physical clock is compiled to WASM at build time (from the [`clock4`](https://github.com/mitxela/clock4) submodule) and runs in the page — real NMEA parsing, real PPS discipline, real display latching. The build is the [`rollup`](https://github.com/peterlewis/clock4/tree/rollup) branch (0.0.5+): mitxela's released 0.0.4 plus a nine-PR draft stack, each opened against upstream —
+
+- [#5 $PMTXTS timing telemetry](https://github.com/mitxela/clock4/pull/5) · [#6 astro display modes](https://github.com/mitxela/clock4/pull/6) · [#7 hardening fixes](https://github.com/mitxela/clock4/pull/7) · [#8 sidereal & solar time](https://github.com/mitxela/clock4/pull/8) · [#9 self-learning temperature compensation](https://github.com/mitxela/clock4/pull/9)
+- [#10 per-segment brightness equalisation](https://github.com/mitxela/clock4/pull/10) · [#11 live Allan deviation](https://github.com/mitxela/clock4/pull/11) · [#12 bright-star transit predictor](https://github.com/mitxela/clock4/pull/12) · [#13 on-device two-button menu](https://github.com/mitxela/clock4/pull/13)
+
+Draft firmware: it runs happily on my own clock, but it isn't upstream yet.
 
 It's verified rather than assumed: 4,511 display checks against independently computed astronomical truth, plus a replay anchor against a physical Mk IV on real GPS data. The DEVICE → UPDATES panel shows the exact commit the running WASM was built from and can check it against GitHub.
 
@@ -30,7 +35,7 @@ It's verified rather than assumed: 4,511 display checks against independently co
 
 ## Run it
 
-- **Hosted:** <https://peterlewis.github.io/pcc/> — Chromium browser (Chrome / Edge / Arc / Brave) over HTTPS. Safari and Firefox can look around (no Web Serial, so no hardware connection).
+- **Hosted:** <https://peterlewis.github.io/pcc/> — open it in any browser. Everything but a live hardware connection works everywhere; to drive a real clock, see [**Connect a real clock**](#connect-a-real-clock).
 - **Local dev** — live source, no build step:
   ```bash
   git clone https://github.com/peterlewis/pcc.git
@@ -40,6 +45,18 @@ It's verified rather than assumed: 4,511 display checks against independently co
   ```bash
   cd web && npm install && node build.mjs   # → ../docs/
   ```
+
+## Connect a real clock
+
+Two ways — pick one:
+
+1. **Web Serial** — a Chromium browser (Chrome / Edge / Arc / Brave). Open the hosted app, click **CONNECT DEVICE**, choose the port. No install.
+2. **PCC Bridge (`pccd`)** — works in **any** browser (Safari and Firefox included), and shares the port so the clock can simultaneously feed **chrony** as a stratum-1 source. One line:
+   ```bash
+   curl -L https://github.com/peterlewis/pcc/releases/latest/download/pccd-macos-universal.tar.gz | tar xz && cd pcc && ./pccd
+   # Linux: swap in pccd-linux-$(uname -m).tar.gz
+   ```
+   Then open <http://localhost:4192> and click **CONNECT DEVICE**. `pccd` serves its own copy of the app, so the bridge WebSocket is same-origin and works in every browser. Full guide: [`host/pccd/README.md`](host/pccd/README.md).
 
 ## Repository layout
 
