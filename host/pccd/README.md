@@ -18,22 +18,31 @@ and multiplex the browser on top.
 
 ## Install (prebuilt, from GitHub Releases)
 
+Each release is a tarball: `pccd` next to a copy of the PCC web app (`pcc-web/`).
+Run it and open the local address it prints — the app is served **same-origin**,
+so the bridge WebSocket works in **every browser** (Safari and Firefox too), not
+just Chromium.
+
 macOS (universal — Apple Silicon + Intel):
 
-    curl -L -o pccd https://github.com/peterlewis/pcc/releases/latest/download/pccd-macos-universal
-    chmod +x pccd
+    curl -L https://github.com/peterlewis/pcc/releases/latest/download/pccd-macos-universal.tar.gz | tar xz && cd pcc && ./pccd
 
 Linux (static musl — runs on any distro; x86_64 and aarch64):
 
-    curl -L -o pccd https://github.com/peterlewis/pcc/releases/latest/download/pccd-linux-$(uname -m)
-    chmod +x pccd
+    curl -L https://github.com/peterlewis/pcc/releases/latest/download/pccd-linux-$(uname -m).tar.gz | tar xz && cd pcc && ./pccd
+
+Then open **http://localhost:4192** and click CONNECT DEVICE.
+
+`pccd` auto-serves the co-located `pcc-web/`. Pass `-w <dir>` to serve a
+different app copy, or run the bare binary (no bundle) if you only want the
+bridge/chrony feed and will open the hosted app in a Chromium browser.
 
 `SHA256SUMS` is attached to each release. Every binary answers `./pccd -t`
 (SHA-1 / RFC 6455 handshake self-test) with `self-test OK`.
 
-Note (macOS): release binaries are unsigned. Fetching with `curl` avoids the
-browser quarantine flag; if downloaded with a browser instead, run
-`xattr -d com.apple.quarantine pccd` once.
+Note (macOS): release binaries are unsigned. The `curl | tar` pipe avoids the
+browser quarantine flag; if you download with a browser instead, run
+`xattr -dr com.apple.quarantine pcc` once on the extracted folder.
 
 Note (Linux): reading the serial device usually needs membership of the
 `dialout` (Debian/Ubuntu) or `uucp` (Arch) group, or a udev rule.
