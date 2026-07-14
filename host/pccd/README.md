@@ -74,7 +74,7 @@ feed chrony as a stratum-1 source:
     cd pcc && sudo ./install-service.sh          # Linux: pccd-linux-$(uname -m).tar.gz
 
 It copies the bundle to `/usr/local/pcc` (a stable, root-owned prefix) and installs
-a LaunchDaemon (`io.github.peterlewis.pccd`, logs `/var/log/pccd.log`) or a systemd
+a LaunchDaemon (`is.peterlew.pcc.d`, logs `/var/log/pccd.log`) or a systemd
 unit (`pccd.service`, `journalctl -u pccd -f`). Because the install prefix is fixed
 and has no `-w`, the service **updates itself** — UPDATE NOW / `pccd --update` swap
 the binary in place and the supervisor keeps the same PID. Re-run the installer to
