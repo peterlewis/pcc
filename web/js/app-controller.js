@@ -100,7 +100,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=96'), import('./charts.js?v=96'), import('./realdev.js?v=107'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=96'), import('./charts.js?v=96'), import('./realdev.js?v=108'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -1446,9 +1446,12 @@ class Component extends DcLite {
     if (name === 'posScatter') return CH.drawPosScatter(el, T, this._pos.pts, this._pos, nowS);
     if (name === 'dop') return CH.drawDop(el, T, S.dopHist, st.posWindow, nowS);
     if (name === 'cont') return CH.drawContinuity(el, T, S.fixHist, 1800, nowS, S.ttff, S.t0);
-    if (name === 'phase') return CH.drawPhase(el, T, S.pps.list, 1800, nowS, (S.pps.flags & 2) ? 0 : (S.pps.lastEdge || 0));
-    if (name === 'stair') return CH.drawStair(el, T, S.pps.samples, 1800, nowS, S.pps.temp);
-    if (name === 'ppmtemp') return CH.drawPpmTemp(el, T, S.pps.samples, this._timing && this._timing.fit);
+    // Standby draws the ABSENT state, never a leftover buffer — same rule (and reason) as rvTiming's
+    // `standby` gate. adevData() already gates itself on appMode; these three read S.pps directly.
+    const sby = this.appMode() === 'standby';
+    if (name === 'phase') return CH.drawPhase(el, T, sby ? [] : S.pps.list, 1800, nowS, sby ? 0 : ((S.pps.flags & 2) ? 0 : (S.pps.lastEdge || 0)));
+    if (name === 'stair') return CH.drawStair(el, T, sby ? [] : S.pps.samples, 1800, nowS, sby ? 0 : S.pps.temp);
+    if (name === 'ppmtemp') return CH.drawPpmTemp(el, T, sby ? [] : S.pps.samples, sby ? null : (this._timing && this._timing.fit));
     if (name === 'adev') return CH.drawAdev(el, T, this.adevData());
     // Ground tracks carry no timestamps (gtrails = plain points at ~45 s cadence), so the TRAIL
     // length control maps to a tail slice: 45 s per point, full buffer (40 pts) at MAX.
@@ -2804,11 +2807,17 @@ class Component extends DcLite {
 
   rvTiming() {
     const T = this._timing || {};
-    const fit = T.fit;
     const S = this.session && this.session.S;
+    // STANDBY has no clock and no simulation, so it has no PPS, no die, and nothing "GPS disciplined".
+    // Gate on the app MODE — not merely on "does S.pps hold data": a leftover buffer (a stale-dropped
+    // device, a stopped sim) would otherwise render as live telemetry in the one state whose whole
+    // invariant is that it shows none. driveEmu doesn't recompute _timing in standby either, so T is
+    // stale there too — dashing on mode covers both the buffer and the derived scalars.
+    const standby = this.appMode() === 'standby';
+    const fit = standby ? null : T.fit;
     // $PMTXTS is implemented in DRAFT firmware PRs (gated by `pps = on`) — not yet
     // merged upstream. The banner reflects where the stream is coming from right now.
-    const streaming = !!(S && S.pps && S.pps.list && S.pps.list.length);
+    const streaming = !standby && !!(S && S.pps && S.pps.list && S.pps.list.length);
     const noPps = !!(S && S.real && !streaming); // real hardware, no PPS stream yet → dash the timing KPIs
     const noData = !streaming;                   // NO live PPS at all (standby, or real-without-stream) → nothing honest to show
     // msFolds: samples where the firmware's subms raced its SysTick cascade and reported the same

@@ -72,6 +72,7 @@ export function createRealDevice(session) {
 
     const gtrailLast = new Map(); // sat.key → last wall-clock ms a ground-trail point was appended
     const trailLast = new Map();  // sat.key → last wall-clock ms a polar az/el trail point was appended
+    let ingesting = false;        // are we CONSUMING this transport? (set on connect, cleared on every leave)
     let obsSeeded = false;        // adopt the device's own fix as the observer once per connection
     let obsAtConnect = null;      // pre-connect observer, restored on disconnect
     let lastHistT = 0;            // last whole-second we sampled POSITION/DOP/continuity history
@@ -93,6 +94,7 @@ export function createRealDevice(session) {
     /// clean simulation) with no lingering real data. Shared by the explicit
     /// disconnect() and the physical-unplug status edge.
     function clearRealBuffers() {
+        ingesting = false;   // stop consuming: no leave-path may keep refilling telemetry behind our back
         S.real = false;
         S.connected = false;
         S.fix.valid = false;
@@ -104,10 +106,10 @@ export function createRealDevice(session) {
         if (Array.isArray(S.dopHist)) S.dopHist.length = 0;
         if (Array.isArray(S.fixHist)) S.fixHist.length = 0;
         if (S.pps && Array.isArray(S.pps.list)) S.pps.list.length = 0;   // TIMING KPIs go honest (no stale stream)
-        // The drift-vs-temp scatter + OSC DRIFT staircase read S.pps.samples with
-        // NO appMode gate, so leaving these behind shows a vanished device's
-        // oscillator data in Standby and contaminates a later sim fit. connect()
-        // already clears both; every leave-path must mirror it.
+        // Clear the oscillator samples too: they feed the drift-vs-temp scatter and the OSC DRIFT
+        // staircase, so a vanished device's curve would otherwise linger and contaminate a later sim
+        // fit. The TIMING room now ALSO gates its render on appMode (rvTiming/renderChart), so Standby
+        // is honest even if a buffer somehow survives — but clearing on every leave is still the rule.
         if (S.pps && Array.isArray(S.pps.samples)) S.pps.samples.length = 0;
         ppsLastCalerr = null;
         S.star = null;   // $PMSTAR transit list — real-device data, leaves with the device
@@ -261,7 +263,12 @@ export function createRealDevice(session) {
     function ingestLine(line) {
         const text = String(line).trim();
         if (!text) return;
-        log(text, false);
+        log(text, false);   // the monitor always shows raw traffic — that part is honest either way
+        // Telemetry only flows while we are actually CONSUMING a real device. The bridge WebSocket can
+        // outlive real-device mode (checkRxStale drops us to Standby while pccd keeps its socket up), and
+        // an unguarded ingest would then refill S.pps / S.fix / S.sats the moment the stream resumed —
+        // behind a STANDBY chip. That is precisely the fake-data-in-Standby the three-state model forbids.
+        if (!ingesting) return;
         // RX-staleness watchdog: over the pccd bridge an unplug on the daemon HOST
         // does NOT close the browser WebSocket (pccd just retries the serial port),
         // so ws.onclose never fires and the app stays CONNECTED on frozen telemetry.
@@ -458,6 +465,13 @@ export function createRealDevice(session) {
             log('[serial] no data for 8 s — clock lost at the pccd host; dropping to Standby', true);
             S.real = false; S.rebooting = false;
             clearRealBuffers();
+            // Let the TRANSPORT go too. This path exists because the bridge socket does NOT close when
+            // the clock unplugs at the daemon host (pccd just retries the port) — so leaving it attached
+            // means the instant that stream resumes it quietly refills the rooms while the app still says
+            // STANDBY. Mirror a physical unplug all the way: drop the socket, and let the user reconnect
+            // deliberately when the clock is back (the bridge is still detected, so CONNECT stays live).
+            try { clock?.disconnect(); } catch { /* the clock is already gone — nothing to be polite to */ }
+            clock = null;
             return true;
         },
 
@@ -469,6 +483,7 @@ export function createRealDevice(session) {
             if (!bridge && !Clock.isSupported())
                 throw new Error('No transport: this browser lacks Web Serial and the pccd bridge is not running. Start pccd, or use Chrome/Edge.');
             clock = bridge ? new BridgeClock() : new Clock();
+            ingesting = true;   // consume from the first sentence (S.real is only set at the end of connect())
             clock.addEventListener('line', (e) => this.ingestLine(e.detail));
             clock.addEventListener('status', (e) => {
                 const d = e.detail || {};
