@@ -2998,12 +2998,16 @@ class Component extends DcLite {
     };
   }
 
-  // Is a release tag (e.g. "pccd-v0.4") newer than the running pccd version (e.g. "0.3+abc123")?
-  // Compares MAJOR.MINOR, ignoring the "pccd-v" prefix and any "+githash" suffix on either side.
+  // Is a release tag (e.g. "pccd-v0.4.1") newer than the running pccd version (e.g. "0.4+abc123")?
+  // Compares MAJOR.MINOR.PATCH, ignoring the "pccd-v" prefix and any "+githash" suffix on either side.
+  // The patch field is REQUIRED: on major.minor alone, 0.4.1 read as equal to 0.4, so a patch release
+  // never surfaced an UPDATE NOW button (and pccd's own ver_cmp refused it as "already current").
+  // A missing field is 0, so "0.4" === "0.4.0" and 0.4.1 correctly beats it.
   verNewer(cur, tag) {
-    const num = (s) => { const m = String(s).match(/(\d+)\.(\d+)/); return m ? [+m[1], +m[2]] : [0, 0]; };
-    const [aM, am] = num(cur), [bM, bm] = num(tag);
-    return bM > aM || (bM === aM && bm > am);
+    const num = (s) => { const m = String(s).match(/(\d+)\.(\d+)(?:\.(\d+))?/); return m ? [+m[1], +m[2], +(m[3] || 0)] : [0, 0, 0]; };
+    const a = num(cur), b = num(tag);
+    for (let i = 0; i < 3; i++) if (b[i] !== a[i]) return b[i] > a[i];
+    return false;
   }
 
   // Check GitHub for a newer pccd release and set the panel state. Called once automatically when a

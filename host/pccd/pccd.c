@@ -46,7 +46,7 @@
 #endif
 
 #ifndef PCCD_VERSION
-#define PCCD_VERSION "0.4"                 /* overridable (-DPCCD_VERSION=...) so a test build can look older */
+#define PCCD_VERSION "0.4.1"               /* overridable (-DPCCD_VERSION=...) so a test build can look older */
 #endif
 #ifdef PCCD_GIT
 #define PCCD_VERSTR PCCD_VERSION "+" PCCD_GIT      /* Makefile stamps the short git hash for traceable /health */
@@ -822,10 +822,14 @@ static const char *find_bundled_app(void){
 static int ver_cmp(const char *a, const char *b){
   while (*a && (*a<'0'||*a>'9')) a++;
   while (*b && (*b<'0'||*b>'9')) b++;
-  int amaj=0,amin=0,bmaj=0,bmin=0;
-  sscanf(a,"%d.%d",&amaj,&amin); sscanf(b,"%d.%d",&bmaj,&bmin);
-  if (amaj!=bmaj) return amaj-bmaj;
-  return amin-bmin;
+  // MAJOR.MINOR.PATCH — the patch field is REQUIRED: comparing only major.minor made 0.4.1 equal to
+  // 0.4, so a patch release read as "already current" and self-update refused to install it.
+  // Absent fields stay 0, so "0.4" == "0.4.0" and 0.4.1 > 0.4 as it must.
+  int am=0,an=0,ap=0, bm=0,bn=0,bp=0;
+  sscanf(a,"%d.%d.%d",&am,&an,&ap); sscanf(b,"%d.%d.%d",&bm,&bn,&bp);
+  if (am!=bm) return am-bm;
+  if (an!=bn) return an-bn;
+  return ap-bp;
 }
 // One progress line → the requesting WebSocket client (as "pccd:update <msg>") and the log.
 static void upd_progress(Client *cli, const char *msg){
