@@ -110,6 +110,14 @@ static const char *g_platform = NULL;
 static int    g_updatable = 0;           // set in main(): platform known AND running a bundled tarball
 static char **g_argv = NULL;             // saved argv for an execv() relaunch after a standalone update
 
+// ---- the $PMTXTS stream is OURS to switch on -------------------------------------------------------
+// chrony gets nothing unless the clock is emitting $PMTXTS, and the firmware only does that when
+// `pps = on`. The config default is `pps = off`, so a freshly-booted clock streams NOTHING — and a
+// browser app that politely sends `pps = off` when it disconnects would silently kill our chrony feed
+// (it did: a closed tab cost 7 h of stratum-1). We own the port, so we own the switch: assert it on
+// every serial open, and re-assert if the stream ever goes quiet while the port is up.
+static double g_last_ppson = 0;          // when we last wrote `pps = on` (monotonic ns); pps_assert() below
+
 // ---- daemon liveness / health state (file-scope so the /health handler can read it) --------------
 static long   g_nseen=0, g_nsent=0;   // $PMTXTS parsed / usable samples (promoted from main for /health)
 static double g_last_sample_mono=0;   // now_mono_ns() of the last accepted PPS sample (0 = none yet)
@@ -299,6 +307,16 @@ static int serial_autopick(char *out, size_t n){
   closedir(d); return ok;
 }
 #endif
+
+// Assert `pps = on` on the clock's serial port. See g_last_ppson above: the firmware only emits the
+// $PMTXTS we feed chrony with when this is on, the config default is off, and any app that sends
+// `pps = off` on disconnect would otherwise silently end our stratum-1 feed. Idempotent + cheap.
+static void pps_assert(int sfd){
+  if (sfd < 0) return;
+  static const char cmd[] = "pps = on\r\n";
+  ssize_t w = write(sfd, cmd, sizeof cmd - 1); (void)w;
+  g_last_ppson = now_mono_ns();
+}
 
 // ---- chrony SOCK refclock client ------------------------------------------------------------------
 // chrony's refclock SOCK datagram (refclock_sock.c). Compiled on the same platform as chronyd, so
@@ -988,6 +1006,11 @@ int main(int argc, char **argv){
     double t_iter = now_mono_ns();   // spin-guard: iteration start; did_serial gates the floor sleep
     int did_serial = 0;
     if (bakpath[0] && t_iter > bak_reap_at){ unlink(bakpath); bakpath[0]=0; }   // update proven healthy → drop rollback copy
+    // Self-heal the $PMTXTS stream: port open but nothing landing for 60 s → re-assert `pps = on`.
+    // Covers a clock reboot (back to the pps=off config default), a reflash, and any app that switched
+    // it off behind our back. Costs one 10-byte write a minute in the worst case (no GPS lock).
+    if (sfd>=0 && t_iter - g_last_ppson > 60e9 &&
+        (g_last_sample_mono==0 || t_iter - g_last_sample_mono > 60e9)) pps_assert(sfd);
     // (re)open serial + USB interface — the clock re-enumerates on config edits and firmware flashes,
     // so treat disconnection as routine and retry quietly.
     if (sfd<0 && now_mono_ns()>next_retry){
@@ -996,6 +1019,7 @@ int main(int argc, char **argv){
       if (dev && (sfd=serial_open(dev))>=0){
         if (g_nodev_warned){ fprintf(stderr,"[pccd] clock reappeared: %s\n",dev); g_nodev_warned=0; }
         g_serial_open=1;
+        pps_assert(sfd);                               // our feed, our switch — the clock boots with pps=off
         usb_close(); usb_open(0x0483,-1);               // STM32 VID; frame clock rides the same bus
 #ifdef __APPLE__
         fprintf(stderr,"[pccd] serial open: %s%s\n",dev,g_usb?"":"  (no USB frame clock — arrival timestamps, ~ms accuracy)");

@@ -542,7 +542,11 @@ export function createRealDevice(session) {
         },
 
         async disconnect() {
-            try { clock && clock.send('pps = off'); } catch { /* ignore */ }
+            // Deliberately do NOT send `pps = off`. The $PMTXTS stream is not ours alone: when we reach
+            // the clock through the pccd bridge, the DAEMON is feeding chrony from that same stream, and
+            // switching it off on our way out silently ends the machine's stratum-1 source (it did —
+            // a closed browser tab cost 7 h of it). Leaving it on costs one sentence a second; pccd also
+            // asserts `pps = on` itself now, so the feed no longer depends on any browser being open.
             try { clock && clock.releaseNMEA?.(); } catch { /* ignore */ }
             try { await clock?.disconnect(); } catch { /* ignore */ }
             clock = null;
