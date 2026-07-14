@@ -29,6 +29,7 @@ pack () {  # $1=asset-name  $2=path-to-built-binary
   local name=$1 bin=$2 stage="$OUT/stage-$1"
   rm -rf "$stage"; mkdir -p "$stage/pcc/pcc-web"
   cp "$bin" "$stage/pcc/pccd"; chmod +x "$stage/pcc/pccd"
+  cp "$ROOT/host/pccd/install-service.sh" "$stage/pcc/"; chmod +x "$stage/pcc/install-service.sh"
   cp -R "$WEB/." "$stage/pcc/pcc-web/"
   ( cd "$stage" && COPYFILE_DISABLE=1 tar --no-xattrs -czf "$OUT/$name.tar.gz" pcc )
   rm -rf "$stage"

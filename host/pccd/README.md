@@ -64,6 +64,25 @@ browser quarantine flag; if you download with a browser instead, run
 Note (Linux): reading the serial device usually needs membership of the
 `dialout` (Debian/Ubuntu) or `uucp` (Arch) group, or a udev rule.
 
+## Run it always-on (macOS LaunchDaemon / Linux systemd)
+
+Each tarball ships an installer that turns pccd into a boot-time service — it
+restarts if it dies, serves the app at `http://localhost:4192`, and is ready to
+feed chrony as a stratum-1 source:
+
+    curl -L https://github.com/peterlewis/pcc/releases/latest/download/pccd-macos-universal.tar.gz | tar xz
+    cd pcc && sudo ./install-service.sh          # Linux: pccd-linux-$(uname -m).tar.gz
+
+It copies the bundle to `/usr/local/pcc` (a stable, root-owned prefix) and installs
+a LaunchDaemon (`io.github.peterlewis.pccd`, logs `/var/log/pccd.log`) or a systemd
+unit (`pccd.service`, `journalctl -u pccd -f`). Because the install prefix is fixed
+and has no `-w`, the service **updates itself** — UPDATE NOW / `pccd --update` swap
+the binary in place and the supervisor keeps the same PID. Re-run the installer to
+upgrade; `sudo ./install-service.sh --uninstall` removes it.
+
+Then wire chrony (below) for the stratum-1 feed. On macOS also turn off
+**System Settings → General → Date & Time → Set time automatically**.
+
 ## Build from source
 
     make            # clang/gcc; IOKit+CoreFoundation on macOS, no deps on Linux

@@ -15,6 +15,13 @@ Prefer to do it by hand, or updating from v0.3? The one-liner still works:
 curl -L <asset-url> | tar xz && cd pcc && ./pccd
 ```
 
+## Also in v0.4 — run it always-on
+Each tarball now ships `install-service.sh`. One command turns pccd into a boot-time service that restarts if it dies, serves the app at `http://localhost:4192`, and is ready to feed chrony as a stratum-1 source:
+```
+cd pcc && sudo ./install-service.sh          # macOS LaunchDaemon or Linux systemd
+```
+It installs to a fixed `/usr/local/pcc` with no `-w`, so the **service updates itself** — UPDATE NOW / `pccd --update` swap the binary in place and launchd/systemd keep the same PID. `sudo ./install-service.sh --uninstall` removes it.
+
 ## Also in v0.4
 - **`FD_CLOEXEC` on the long-lived sockets** — the listener, serial tty, chrony socket, and client connections no longer leak into the `curl`/`tar` helpers or across the self-update relaunch.
 - `/health` now reports `updatable` and `platform`; releases are cut by CI on a version tag.
