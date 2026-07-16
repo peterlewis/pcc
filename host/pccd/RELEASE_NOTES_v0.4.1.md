@@ -17,5 +17,16 @@ STANDBY means no clock and no simulation — but the TIMING room rendered whatev
 ## Also
 The service installer uses the project's real LaunchDaemon label, `is.peterlew.pcc.d`.
 
+## Installing this one
+
+**Coming from v0.4?** You must update by hand this once — v0.4's version check compared only major.minor, so it sees `0.4.1` as equal to `0.4` and refuses it as "already-current" (that check is fixed *in* this release). Plain run: re-run the `curl … | tar xz` one-liner; service install: `sudo ./install-service.sh` from a fresh tarball:
+
+```
+curl -L https://github.com/peterlewis/pcc/releases/latest/download/pccd-macos-universal.tar.gz | tar xz && cd pcc && sudo ./install-service.sh
+# Linux: pccd-linux-$(uname -m).tar.gz
+```
+
+**From v0.4.1 onward, self-update works** — DEVICE → UPDATES → **UPDATE NOW**, or `./pccd --update`.
+
 ---
-`SHA256SUMS` is attached. Every binary answers `./pccd -t`. Already on a release tarball? **DEVICE → UPDATES → UPDATE NOW**, or `./pccd --update`.
+`SHA256SUMS` is attached. Every binary answers `./pccd -t`.

@@ -20,6 +20,9 @@ ROOT=$(cd ../.. && pwd)
 WEB="$ROOT/docs"
 OUT="$ROOT/host/pccd/dist"
 GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo nogit)
+# Mark a dirty tree so /health's +hash never claims a clean commit a binary wasn't built from.
+# diff-index ignores untracked clutter (backups/ etc.); the `if` keeps `set -e` happy on a clean tree.
+if [ "$GIT_HASH" != nogit ] && ! git diff-index --quiet HEAD -- 2>/dev/null; then GIT_HASH="$GIT_HASH-dirty"; fi
 mkdir -p "$OUT"
 
 need_web () { [ -f "$WEB/index.html" ] || { echo "no built app at $WEB — run: node web/build.mjs"; exit 1; }; }

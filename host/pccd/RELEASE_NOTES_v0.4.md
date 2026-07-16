@@ -12,7 +12,7 @@ You can also run it from the shell: `pccd --update` (and `pccd --version`, `pccd
 
 Prefer to do it by hand, or updating from v0.3? The one-liner still works:
 ```
-curl -L <asset-url> | tar xz && cd pcc && ./pccd
+curl -L https://github.com/peterlewis/pcc/releases/latest/download/pccd-macos-universal.tar.gz | tar xz && cd pcc && ./pccd
 ```
 
 ## Also in v0.4 — run it always-on

@@ -848,6 +848,10 @@ static int self_update(int dry, Client *cli){
                                  : "error self-update unavailable in this build");
     return -1;
   }
+  // We are (typically) root and about to shell out to curl/tar/shasum/awk/rm via /bin/sh. Pin a trusted
+  // PATH so none of those resolve to an attacker-planted binary in a writable early-PATH dir — the shell-
+  // out helpers must come from the system, not from wherever the daemon happened to inherit PATH from.
+  setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin", 1);
   char self[4096]; if (exe_realpath(self,sizeof self)!=0){ upd_progress(cli,"error cannot-locate-self"); return -1; }
   char dir[4096]; snprintf(dir,sizeof dir,"%s",self);
   char *slash=strrchr(dir,'/'); if(!slash){ upd_progress(cli,"error bad-exe-path"); return -1; } *slash=0;
@@ -865,11 +869,11 @@ static int self_update(int dry, Client *cli){
   char cmd[16384]; int rc=-1; char nver[64]={0};
   do {
     upd_progress(cli,"downloading");
-    snprintf(cmd,sizeof cmd,"curl -fsSL %s/pccd-%s.tar.gz -o %s/pcc.tgz",qbase,g_platform,qtmp);
+    snprintf(cmd,sizeof cmd,"curl -fsSL --connect-timeout 10 --max-time 300 %s/pccd-%s.tar.gz -o %s/pcc.tgz",qbase,g_platform,qtmp);
     if (system(cmd)!=0){ upd_progress(cli,"error download-failed (need curl + network)"); break; }
     // SHA-256, fail CLOSED: a release always ships SHA256SUMS, so a missing/failed fetch means refuse —
     // never install unverified. (The -t + strictly-newer gates below are independent belt-and-braces.)
-    snprintf(cmd,sizeof cmd,"curl -fsSL %s/SHA256SUMS -o %s/SHA256SUMS 2>/dev/null",qbase,qtmp);
+    snprintf(cmd,sizeof cmd,"curl -fsSL --connect-timeout 10 --max-time 30 %s/SHA256SUMS -o %s/SHA256SUMS 2>/dev/null",qbase,qtmp);
     if (system(cmd)!=0){ upd_progress(cli,"error sha256sums-unavailable (refusing unverified install)"); break; }
     snprintf(cmd,sizeof cmd,
       "cd %s && H=$(command -v shasum >/dev/null 2>&1 && shasum -a 256 pcc.tgz || sha256sum pcc.tgz) && "
@@ -915,6 +919,13 @@ static int self_update(int dry, Client *cli){
         upd_progress(cli,"warn app-not-swapped (binary updated)");
       } else { snprintf(cmd,sizeof cmd,"rm -rf %s",qwebbak); if(system(cmd)){} }
     }
+    // Installer: refresh the exe-adjacent copy so the planted repair/upgrade/uninstall script tracks the
+    // release (it is the sole writer of the LaunchDaemon plist / systemd unit, so re-running it after this
+    // brings those up to date too). Same-dir atomic rename; best-effort like the app swap. `dir` is the
+    // exe's directory — $PREFIX for a service install, the extracted pcc/ for a plain tarball run.
+    { char nins[4300], ins[4300]; snprintf(nins,sizeof nins,"%s/pcc/install-service.sh",tmp);
+      snprintf(ins,sizeof ins,"%s/install-service.sh",dir);
+      if (stat(nins,&st)==0 && rename(nins,ins)==0) chmod(ins,0755); }
     rc=0;
   } while(0);
 

@@ -12,7 +12,7 @@
 //
 // Chromium only (Web Serial). Gate the connect button on isSupported().
 
-import { Clock, BridgeClock } from './serial.js?v=17';
+import { Clock, BridgeClock } from './serial.js?v=18';
 import { parseGGA, parseRMC, parseGSA, GSVBuffer } from './nmea.js?v=2';
 import { parsePMTXTS, parsePMTXTC, centrePhase, foldPhase1ms } from './ppsts.js?v=15';
 import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=1';
@@ -505,7 +505,15 @@ export function createRealDevice(session) {
                 log(`[serial error] ${msg}`, true);
             });
 
-            await clock.connect();     // user-gesture required (button handler)
+            try {
+                await clock.connect();     // user-gesture required (button handler)
+            } catch (e) {
+                // Picker cancelled / bridge unreachable: `ingesting` was armed before the await, so undo it
+                // (else a later stray line from a half-open transport would ingest into a non-connected app),
+                // drop the transport, and rethrow for the caller's error handling.
+                ingesting = false; try { clock?.disconnect(); } catch { /* nothing to close */ } clock = null;
+                throw e;
+            }
             clock.requestNMEA();       // ref-counted: turn the firehose on
             clock.send('pps = on');    // ask the firmware to stream $PMTXTS per PPS edge
             clock.send('tc_dump = on'); // read back the learned tempcomp model → $PMTXTC → S.tc
@@ -570,6 +578,7 @@ export function createRealDevice(session) {
         },
 
         ingestLine,
+        beginIngest() { ingesting = true; },   // arm consumption without a transport (selfTest; mirrors connect())
 
         send(cmd) { clock && clock.send(cmd); },
 
@@ -650,8 +659,11 @@ export function createRealDevice(session) {
             //   GNGSA: 3D, PRNs 02/05/12, PDOP 2.10, HDOP 0.98, VDOP 1.85
             const GSA = '$GNGSA,A,3,02,05,12,,,,,,,,,,2.10,0.98,1.85*00';
 
-            const fake = { S: { nmeaLog: [], fix: {}, sats: [], obs: { lat: 52.2053, lon: 0.1218, alt: 21.0 }, gtrails: new Map(), trails: new Map(), cn0Hist: new Map(), posHist: [], dopHist: [], fixHist: [] } };
+            // A CONNECTED device: real+connected (mergeSats and the other writers gate on these) and
+            // ingesting armed (ingestLine's guard). selfTest exercises the exact consume-a-real-device path.
+            const fake = { S: { real: true, connected: true, nmeaLog: [], fix: {}, sats: [], obs: { lat: 52.2053, lon: 0.1218, alt: 21.0 }, gtrails: new Map(), trails: new Map(), cn0Hist: new Map(), posHist: [], dopHist: [], fixHist: [] } };
             const rd = createRealDevice(fake); // isolated instance → its own GSVBuffer
+            rd.beginIngest();                   // ingestLine now no-ops unless consuming (the connect guard) — arm it
 
             const checks = [];
             const near = (a, b, tol) => Number.isFinite(a) && Math.abs(a - b) <= tol;
@@ -703,7 +715,7 @@ export function createRealDevice(session) {
             checks.push({ name: 'cn0Hist sampled for G02', ok: ch0.length === 1 && ch0[0].v === 44, detail: `cn0Hist(G02)=${JSON.stringify(ch0)}` });
 
             //   PMSTAR: two transits (VEGA 754 s → 63° S, M31 space-padded 3541 s → 12° N)
-            const STAR = '$PMSTAR,2,VEGA,754,63,S,M31 ,3541,12,N*2C';
+            const STAR = '$PMSTAR,2,VEGA,754,63,S,M31 ,3541,12,N*43';   // XOR checksum (was *2C — wrong, so parsePMSTAR rejected it)
             //   PMADEV/PMHDEV: 3 octaves at tau0=1 → taus [1,2,4]
             const ADEV = '$PMADEV,1767225600,1,512,3,3.2e-11,2.1e-11,1.5e-11*77';
             const HDEV = '$PMHDEV,1767225600,1,512,3,3.0e-11,2.0e-11,1.4e-11*7C';

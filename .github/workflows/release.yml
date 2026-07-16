@@ -28,6 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.inputs.tag || github.ref }}   # build the TAG's code, not branch HEAD (dispatch could differ)
           lfs: true              # the real 12 MB tzmap.bin, not the LFS pointer
           submodules: recursive  # web/emu/firmware = clock4 source → WASM at build time
       - uses: actions/setup-node@v4
@@ -52,6 +53,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with: { ref: '${{ github.event.inputs.tag || github.ref }}' }
       - uses: actions/download-artifact@v4
         with: { name: pcc-web, path: docs }
       - run: bash host/pccd/dist.sh macos
@@ -63,6 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: { ref: '${{ github.event.inputs.tag || github.ref }}' }
       - uses: actions/download-artifact@v4
         with: { name: pcc-web, path: docs }
       - uses: docker/setup-qemu-action@v3   # so the arm64 Alpine container can run on an x86_64 runner
@@ -76,6 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: { ref: '${{ github.event.inputs.tag || github.ref }}' }   # notes-file must come from the tag, not HEAD
       - uses: actions/download-artifact@v4
         with: { pattern: tar-*, path: assets, merge-multiple: true }
       - name: SHA256SUMS
@@ -90,5 +94,5 @@ jobs:
           # otherwise auto-generate the changelog from commits/PRs.
           NOTES="host/pccd/RELEASE_NOTES_${TAG#pccd-}.md"
           if [ -f "$NOTES" ]; then NOTE_ARGS=(--notes-file "$NOTES"); else NOTE_ARGS=(--generate-notes); fi
-          gh release create "$TAG" assets/*.tar.gz assets/SHA256SUMS \
+          gh release create "$TAG" --verify-tag assets/*.tar.gz assets/SHA256SUMS \
             --title "pccd ${TAG#pccd-}" "${NOTE_ARGS[@]}"

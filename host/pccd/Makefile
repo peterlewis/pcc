@@ -2,7 +2,8 @@
 CFLAGS ?= -O2 -Wall -Wextra
 UNAME  := $(shell uname -s)
 # Stamp the build with the short git hash (when in a repo) for a traceable /health version.
-GIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null)
+# A "-dirty" suffix on uncommitted tracked changes keeps /health honest (untracked clutter is ignored).
+GIT_HASH := $(shell H=$$(git rev-parse --short HEAD 2>/dev/null) && { git diff-index --quiet HEAD -- 2>/dev/null || H=$$H-dirty; }; echo $$H)
 ifneq ($(GIT_HASH),)
 CFLAGS += -DPCCD_GIT=\"$(GIT_HASH)\"
 endif

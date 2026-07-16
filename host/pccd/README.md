@@ -40,9 +40,9 @@ bridge/chrony feed and will open the hosted app in a Chromium browser.
 `SHA256SUMS` is attached to each release. Every binary answers `./pccd -t`
 (SHA-1 / RFC 6455 handshake self-test) with `self-test OK`.
 
-## Updating (v0.4+)
+## Updating (v0.4.1+)
 
-Once you're on a release tarball, pccd keeps itself current. The app checks
+Once you're on **v0.4.1 or later**, pccd keeps itself current. The app checks
 GitHub and, when a newer pccd exists, shows **UPDATE NOW** in DEVICE → UPDATES —
 one click and the running daemon downloads the latest release, verifies it, swaps
 itself, and relaunches (the app reconnects on its own). Or from a shell:
@@ -54,8 +54,13 @@ itself, and relaunches (the app reconnects on its own). Or from a shell:
 Self-update only fires for a real downloaded tarball. The new binary must pass
 its own `-t` self-test *and* be strictly newer, and the tarball is checked
 against `SHA256SUMS`; any failure leaves the install untouched. A source/`-w`
-build won't replace itself — update those with `git pull && make`. Updating from
-v0.3 (which predates this) is a one-time manual `curl | tar` as above.
+build won't replace itself — update those with `git pull && make`.
+
+**One-time manual step for v0.3 and v0.4.** Those predate a working update path
+(v0.3 has no self-update; v0.4's version check couldn't see a `.patch` bump, so it
+reports "already-current" for v0.4.1 and refuses it). Install once by hand — plain
+run: re-run the `curl … | tar xz` one-liner above; service install: re-run
+`sudo ./install-service.sh` from a fresh tarball. Self-update works from v0.4.1 on.
 
 Note (macOS): release binaries are unsigned. The `curl | tar` pipe avoids the
 browser quarantine flag; if you download with a browser instead, run

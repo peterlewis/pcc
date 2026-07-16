@@ -100,18 +100,21 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=96'), import('./charts.js?v=96'), import('./realdev.js?v=108'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=96'), import('./charts.js?v=96'), import('./realdev.js?v=109'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
       // pccd bridge presence: probed at boot and refreshed every 15 s. Drives the Connection
       // room's live BRIDGE row and un-gates CONNECT DEVICE in browsers without Web Serial.
-      const probeBridge = () => this.realdev.detectBridge().then((j) => {
+      const probeBridge = () => {
+        if (this._pccdUpdating) return;   // don't null bridgeInfo mid-update — it would unmount the panel + its live progress
+        return this.realdev.detectBridge().then((j) => {
         const next = j || null;
         if (JSON.stringify(next) !== JSON.stringify(this.state.bridgeInfo || null)) this.setState({ bridgeInfo: next });
         // First time we see a bridge this session, check GitHub once for a newer pccd (prompts in UPDATES).
         if (next && !this._pccdChecked) { this._pccdChecked = true; setTimeout(() => this.checkPccdUpdate(false), 600); }
       }).catch(() => {});
+      };
       probeBridge();
       this.bridgeTimer = setInterval(probeBridge, 15000);
       // The WASM firmware emulator drives the display faces (the emulator IS the clock). Async
@@ -1322,7 +1325,7 @@ class Component extends DcLite {
     // Bridge RX-staleness watchdog: a host-side unplug over the pccd bridge leaves the WebSocket
     // open, so without this the app stays CONNECTED on a frozen stream. Drops to Standby after 8 s
     // of silence (self-guarded; a no-op in Standby/Simulation and on a healthy stream).
-    if (this.realdev && this.realdev.checkRxStale) this.realdev.checkRxStale();
+    if (this.realdev && this.realdev.checkRxStale && !this._pccdUpdating) this.realdev.checkRxStale();   // a self-update drops the bridge briefly — not a "clock lost"
     // Telemetry logging — CONNECTED real data only, and ONLY when the user has opted in. The
     // opt-in gate must sit on beginSession/record too, not just the UI: the logger's contract is
     // "no silent persistence", so nothing (not even the sessions row with the observer's home
@@ -1448,7 +1451,9 @@ class Component extends DcLite {
     if (name === 'cont') return CH.drawContinuity(el, T, S.fixHist, 1800, nowS, S.ttff, S.t0);
     // Standby draws the ABSENT state, never a leftover buffer — same rule (and reason) as rvTiming's
     // `standby` gate. adevData() already gates itself on appMode; these three read S.pps directly.
-    const sby = this.appMode() === 'standby';
+    // REVIEW is the one legitimate "data with no live state": reconstructReview rebuilds S.pps from the
+    // recording for the scrubber, so it must NOT be blanked (appMode is 'standby' throughout playback).
+    const sby = this.appMode() === 'standby' && !this._reviewing;
     if (name === 'phase') return CH.drawPhase(el, T, sby ? [] : S.pps.list, 1800, nowS, sby ? 0 : ((S.pps.flags & 2) ? 0 : (S.pps.lastEdge || 0)));
     if (name === 'stair') return CH.drawStair(el, T, sby ? [] : S.pps.samples, 1800, nowS, sby ? 0 : S.pps.temp);
     if (name === 'ppmtemp') return CH.drawPpmTemp(el, T, sby ? [] : S.pps.samples, sby ? null : (this._timing && this._timing.fit));
@@ -2813,7 +2818,7 @@ class Component extends DcLite {
     // device, a stopped sim) would otherwise render as live telemetry in the one state whose whole
     // invariant is that it shows none. driveEmu doesn't recompute _timing in standby either, so T is
     // stale there too — dashing on mode covers both the buffer and the derived scalars.
-    const standby = this.appMode() === 'standby';
+    const standby = this.appMode() === 'standby' && !this._reviewing;   // REVIEW rebuilds S.pps for the scrubber — don't dash it
     const fit = standby ? null : T.fit;
     // $PMTXTS is implemented in DRAFT firmware PRs (gated by `pps = on`) — not yet
     // merged upstream. The banner reflects where the stream is coming from right now.
@@ -3035,23 +3040,42 @@ class Component extends DcLite {
   // Ask the running pccd to download the latest release, verify it, and relaunch itself. Streams the
   // daemon's progress into the panel, then re-probes /health until the new version answers.
   runPccdUpdate() {
-    if (!this.realdev) return;
+    if (!this.realdev || this._pccdUpdating) return;   // in-flight guard: no double-start, no queued 2nd download
+    this._pccdUpdating = true;                          // also: freezes probeBridge + suppresses the RX watchdog
+    const oldV = (this.state.bridgeInfo || {}).version || '';
+    const want = this._pccdNewerTag;
+    const wasLive = !!(this.session && this.session.S.real && this.session.S.connected);   // a live clock session to restore?
     this._pccdUpd = { s: 'STARTING UPDATE…', c: 'var(--txt2)' };
     this.setState({});
     this.realdev.updateBridge((line) => {
       this._pccdUpd = { s: line.toUpperCase(), c: line.startsWith('error') ? 'var(--acq)' : 'var(--txt2)' };
       this.setState({});
     }).then((res) => {
-      if (!res.ok) { this._pccdUpd = { s: 'UPDATE FAILED — ' + String(res.msg || '').toUpperCase(), c: 'var(--acq)' }; this.setState({}); return; }
-      if (res.msg === 'already up to date') { this._pccdNewerTag = null; this.setState({}); return; }
+      if (!res.ok) { this._pccdUpdating = false; this._pccdUpd = { s: 'UPDATE FAILED — ' + String(res.msg || '').toUpperCase(), c: 'var(--acq)' }; this.setState({}); return; }
+      if (res.msg === 'already up to date') { this._pccdUpdating = false; this._pccdNewerTag = null; this.setState({}); return; }
       this._pccdUpd = { s: 'UPDATED — RECONNECTING…', c: 'var(--lock)' };
-      this._pccdNewerTag = null; this.setState({});
+      this.setState({});
       let tries = 0;
       const rc = setInterval(() => {
         tries += 1;
         this.realdev.detectBridge().then((j) => {
-          if (j) { clearInterval(rc); this.setState({ bridgeInfo: j }); this._pccdUpd = { s: 'UPDATED TO v' + (j.version || '?'), c: 'var(--lock)' }; this.setState({}); }
-          else if (tries > 20) { clearInterval(rc); this._pccdUpd = { s: 'UPDATED — REFRESH TO RECONNECT', c: 'var(--acq)' }; this.setState({}); }
+          if (j) {
+            clearInterval(rc); this._pccdUpdating = false; this.setState({ bridgeInfo: j });
+            // Only claim success if the version ACTUALLY bumped — a mid-download daemon crash relaunches the
+            // SAME old binary, and reporting "updated" then would be a lie (the serial.js sawDone gate makes
+            // this rare, but /health is the ground truth).
+            if (this.verNewer(oldV, j.version || '')) {
+              this._pccdNewerTag = null;
+              this._pccdUpd = { s: 'UPDATED TO v' + (j.version || '?'), c: 'var(--lock)' };
+              // The bridge transport needs no user gesture, so make "reconnects automatically" true for a
+              // clock session too: re-establish it if the user was watching a live clock before the update.
+              if (wasLive && this.session && !this.session.S.connected) this.connectRealDevice();
+            } else {
+              this._pccdNewerTag = want;   // still stale → keep offering UPDATE NOW
+              this._pccdUpd = { s: 'UPDATE DID NOT TAKE — STILL v' + (j.version || '?'), c: 'var(--acq)' };
+            }
+            this.setState({});
+          } else if (tries > 20) { clearInterval(rc); this._pccdUpdating = false; this._pccdUpd = { s: 'UPDATED — REFRESH TO RECONNECT', c: 'var(--acq)' }; this.setState({}); }
         }).catch(() => {});
       }, 700);
     });
@@ -3068,14 +3092,17 @@ class Component extends DcLite {
     // pccd bridge self-update block (only meaningful when a bridge is present)
     const bri = this.state.bridgeInfo;
     const pu = this._pccdUpd || { s: '', c: 'var(--txt3)' };
-    const plat = (bri && bri.platform) || 'macos-universal';
+    // The manual command runs ON the daemon's own host — but this branch only shows when the daemon
+    // reports NO platform (a dev build), so hard-guessing macOS would hand a Linux dev the wrong tarball.
+    // Let the user's shell derive the asset with uname (exact, and the same trick the Connection room uses).
+    const asset = (bri && bri.platform) || '$(uname -s | grep -qi darwin && echo macos-universal || echo linux-$(uname -m))';
     return {
       pccdShown: !!bri,
       pccdVer: bri ? ('v' + (bri.version || '?') + (bri.platform ? ' · ' + bri.platform.toUpperCase() : '') + (bri.updatable ? '' : ' · SELF-UPDATE OFF (DEV / -w)')) : '—',
       pccdUpdState: pu.s, pccdUpdC: pu.c,
-      pccdCanUpdate: !!(bri && bri.updatable && this._pccdNewerTag),
+      pccdCanUpdate: !!(bri && bri.updatable && this._pccdNewerTag && !this._pccdUpdating),   // hide UPDATE NOW while one is in flight
       pccdShowManual: !!(bri && !bri.updatable && this._pccdNewerTag),
-      pccdCmd: 'curl -L https://github.com/peterlewis/pcc/releases/latest/download/pccd-' + plat + '.tar.gz | tar xz && cd pcc && ./pccd',
+      pccdCmd: 'curl -L https://github.com/peterlewis/pcc/releases/latest/download/pccd-' + asset + '.tar.gz | tar xz && cd pcc && ./pccd',
       onPccdCheck: () => this.checkPccdUpdate(true),
       onPccdUpdate: () => this.runPccdUpdate(),
       fwVer: bi ? bi.version + ' — WASM, BUILT FROM SOURCE' + (bi.dateVersion ? ' · DATE BOARD ' + bi.dateVersion.replace(/^Version\s*/i, '').trim() : '') : 'BUILT FROM SOURCE (run build.mjs for provenance)',

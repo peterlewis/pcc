@@ -252,10 +252,18 @@ export class BridgeClock extends EventTarget {
     /// new build) or reports already-current, { ok:false, msg } on a reported error / unreachable.
     static selfUpdate(onLine) {
         return new Promise((resolve) => {
-            let ws, sent = false, done = false;
-            const finish = (ok, msg) => { if (done) return; done = true; try { ws && ws.close(); } catch { /* ignore */ } resolve({ ok, msg }); };
-            try { ws = new WebSocket(`ws://${BridgeClock.authority()}`); } catch { finish(false, 'bridge not reachable'); return; }
-            const fire = () => { if (!sent) { sent = true; try { ws.send('pccd:update'); } catch { finish(false, 'send failed'); } } };
+            let ws, sent = false, done = false, sawDone = false, wd;
+            const finish = (ok, msg) => {
+                if (done) return; done = true;
+                clearTimeout(openTimer); clearTimeout(wd);
+                try { ws && ws.close(); } catch { /* ignore */ }
+                resolve({ ok, msg });
+            };
+            // Per-phase watchdog: re-armed on every progress line, so download/verify/install each get a
+            // fresh 3-min window. A wedged daemon then settles the promise instead of hanging the panel.
+            const arm = () => { clearTimeout(wd); wd = setTimeout(() => finish(false, 'timed out — check pccd logs'), 180000); };
+            try { ws = new WebSocket(`ws://${BridgeClock.authority()}`); } catch { resolve({ ok: false, msg: 'bridge not reachable' }); return; }
+            const fire = () => { if (!sent) { sent = true; try { ws.send('pccd:update'); arm(); } catch { finish(false, 'send failed'); } } };
             const openTimer = setTimeout(fire, 500);                 // fallback if the daemon sends no hello
             ws.onopen = () => {};
             ws.onmessage = (e) => {
@@ -263,13 +271,16 @@ export class BridgeClock extends EventTarget {
                 if (t.startsWith('#PCCD')) { fire(); return; }       // hello — now send the command
                 if (!t.startsWith('pccd:update')) return;
                 const m = t.slice(11).replace(/^\s+/, '');           // strip "pccd:update "
-                onLine(m);
+                arm(); onLine(m);
                 if (m.startsWith('error')) finish(false, m);
                 else if (m.startsWith('already-current')) finish(true, 'already up to date');
-                // "done — restarting" is followed by the socket close, which settles via onclose
+                else if (m.startsWith('done')) sawDone = true;       // relaunch imminent; onclose confirms it
             };
-            ws.onerror = () => { clearTimeout(openTimer); finish(false, 'bridge not reachable'); };
-            ws.onclose = () => { clearTimeout(openTimer); finish(true, 'relaunched'); };
+            ws.onerror = () => finish(false, 'bridge not reachable');
+            // A close is success ONLY if we saw the daemon's "done" frame (it execs right after). A close
+            // WITHOUT it — the daemon crashed / was killed mid-download — must NOT report success, or the
+            // panel would claim an update that didn't happen (launchd relaunches the SAME old binary).
+            ws.onclose = () => finish(sawDone, sawDone ? 'relaunched' : 'connection lost before the update completed');
         });
     }
 

@@ -45,3 +45,6 @@ web/build-info.json
 
 # pccd release build output (dist.sh regenerates it)
 host/pccd/dist/
+
+# local backups (firmware images, per-unit configs) — never commit
+backups/

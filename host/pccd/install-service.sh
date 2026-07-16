@@ -42,14 +42,22 @@ fi
 
 [ -x "$SRC/pccd" ] || { echo "run this from the extracted tarball dir ($SRC/pccd not found)"; exit 1; }
 
+[ "$SRC" = "$PREFIX" ] && echo "[pccd] repairing/upgrading the install in place ($PREFIX)"
 echo "[pccd] installing the bundle to $PREFIX"
 mkdir -p "$PREFIX"
+# Stage into .new siblings FIRST, from SRC while it is still intact. SRC may BE $PREFIX (a user re-running
+# the copy this script plants at line ~72), so nothing destructive may happen until every copy has landed;
+# with `set -e` a failed copy here aborts BEFORE stop_existing, leaving the running service untouched.
+rm -rf "$PREFIX/.pcc-web.new"
 cp "$SRC/pccd" "$PREFIX/.pccd.new" && chmod 755 "$PREFIX/.pccd.new"
-stop_existing                             # free the exclusive serial port + the old binary before replacing
+cp -R "$SRC/pcc-web" "$PREFIX/.pcc-web.new"
+cp "$SRC/install-service.sh" "$PREFIX/.install-service.sh.new" 2>/dev/null || true
+# Everything is staged — now stop the service (frees the exclusive serial port + old binary) and swap.
+stop_existing
 mv -f "$PREFIX/.pccd.new" "$PREFIX/pccd"
 rm -rf "$PREFIX/pcc-web.old"; [ -d "$PREFIX/pcc-web" ] && mv "$PREFIX/pcc-web" "$PREFIX/pcc-web.old" || true
-cp -R "$SRC/pcc-web" "$PREFIX/pcc-web"; rm -rf "$PREFIX/pcc-web.old"
-cp "$SRC/install-service.sh" "$PREFIX/install-service.sh" 2>/dev/null || true
+mv "$PREFIX/.pcc-web.new" "$PREFIX/pcc-web"; rm -rf "$PREFIX/pcc-web.old"
+[ -f "$PREFIX/.install-service.sh.new" ] && { mv "$PREFIX/.install-service.sh.new" "$PREFIX/install-service.sh"; chmod 755 "$PREFIX/install-service.sh"; }
 
 if [ "$OS" = Darwin ]; then
   cat > "$PLIST" <<EOF
