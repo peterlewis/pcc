@@ -100,7 +100,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=96'), import('./charts.js?v=96'), import('./realdev.js?v=109'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=97'), import('./charts.js?v=97'), import('./realdev.js?v=110'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -478,7 +478,7 @@ class Component extends DcLite {
       : (!p.hadPps ? 100 : Math.min(100, Math.round(100 * p.since / p.t100)));
     const cn = this.emu.colonName();
     const colon = cn === 'heartbeat' ? 'colon HEARTBEAT — PPS-disciplined (locked)'
-      : cn === 'alt_sawtooth' ? 'colon ALT — sidereal/solar, not civil'
+      : cn === 'alt_sawtooth' ? 'colon ALT — sidereal/solar time'
       : cn === 'solid' ? 'colon SOLID — free-running / holdover' : 'colon ' + cn.toUpperCase();
     return {
       level: RES[p.level] || p.level,
@@ -492,7 +492,7 @@ class Component extends DcLite {
 
   emuSourceTag() {
     const mode = this.appMode();
-    if (mode === 'connected') return 'LIVE · YOUR MK IV';
+    if (mode === 'connected') return 'LIVE · MK IV';
     if (mode === 'standby') return 'SYSTEM TIME · NO CLOCK CONNECTED';
     // simulation — always say so, never let it read as a real clock
     if (!this.emu) return 'SIMULATION · MK IV FIRMWARE (WASM) — BOOTING';
@@ -1695,7 +1695,7 @@ class Component extends DcLite {
     const host = this.els.datalink;   // populated once the section's sc-if renders the mount div
     if (!host) { setTimeout(() => this.mountDatalink(), 60); return; }
     this._dlMounted = true;
-    import('./datalink/datalink-ui.js?v=4').then((m) => m.mountDatalink(host));
+    import('./datalink/datalink-ui.js?v=5').then((m) => m.mountDatalink(host));
   }
   // The redesign collapses the ten sections into four rooms; each room routes to one or more
   // existing sections, surfaced as a sub-tab bar. Content is unchanged — this is IA only.
@@ -1748,7 +1748,7 @@ class Component extends DcLite {
       const waiting = S.realConnectedAt && Date.now() - S.realConnectedAt < 6000;
       return waiting
         ? { led: 'var(--acq)', glow: 'rgba(245,181,61,.5)', state: 'CONNECTING', sub: 'WAITING FOR NMEA…' }
-        : { led: 'var(--none)', glow: 'rgba(255,106,61,.55)', state: 'NO SIGNAL', sub: 'NO NMEA — NOT A PRECISION CLOCK?' };
+        : { led: 'var(--none)', glow: 'rgba(255,106,61,.55)', state: 'NO SIGNAL', sub: 'NO NMEA ON THIS PORT' };
     }
     // Simulation (connected, but not a real device): every readout says SIMULATION, never a bare lock.
     if (S.scenario === 'locked') return { led: 'var(--lock)', glow: 'rgba(54,201,139,.55)', state: 'LOCKED', sub: 'SIMULATION · 3D FIX' };
@@ -2379,8 +2379,8 @@ class Component extends DcLite {
           tolRowStyle: fadeOn ? 'opacity:.38;pointer-events:none' : '',
           tolApplyStyle: 'font-family:var(--sans);font-size:12px;padding:5px 14px;background:transparent;border:1px solid var(--led);color:var(--txt);cursor:' + (fadeOn ? 'not-allowed' : 'pointer'),
           tolNote: fadeOn
-            ? 'OVERRIDDEN — Significance Fade is on: digits are dashed by the measured 3σ holdover uncertainty, not these timers. Turn the fade off to use the fixed ladder again.'
-            : 'Seconds of holdover before each digit is dashed (config.txt Tolerance_time_*). Resolution is earned from GPS discipline, not set — these only decide when the clock stops claiming digits. Significance Fade supersedes this ladder while enabled.',
+            ? 'OVERRIDDEN: SIGNIFICANCE FADE is on. Digits are dashed by the measured 3σ holdover uncertainty. Turn the fade off to use these timers.'
+            : 'Holdover seconds before each digit is dashed (Tolerance_time_* in config.txt). Ignored while SIGNIFICANCE FADE is on.',
         };
       })(),
       onTolApply: () => {
@@ -2464,8 +2464,8 @@ class Component extends DcLite {
         if (this._emuCfgNote) return this._emuCfgNote;
         const S = this.session && this.session.S;
         return (S && S.real && this.realdev)
-          ? 'MK IV CONNECTED — APPLY ALSO MIRRORS THESE SETTINGS TO THE CLOCK LIVE OVER SERIAL (RUNTIME-ONLY; THE CLOCK’S config.txt FILE IS UNCHANGED — EXPORT + DROP ON THE DRIVE TO PERSIST).'
-          : 'EMULATOR ONLY — CONNECT A MK IV IN THE DEVICE ROOM TO ALSO MIRROR APPLY ONTO THE PHYSICAL CLOCK.';
+          ? 'MK IV CONNECTED. APPLY ALSO MIRRORS THESE SETTINGS TO THE CLOCK OVER SERIAL (RUNTIME ONLY). THE CLOCK’S config.txt IS UNCHANGED. EXPORT AND DROP ON THE DRIVE TO PERSIST.'
+          : 'EMULATOR ONLY. CONNECT A MK IV TO MIRROR APPLY ONTO THE PHYSICAL CLOCK.';
       })(),
       onEmuCfgApply: () => {
         if (!this.emu || !this.els.emuCfg) return;
@@ -2477,7 +2477,7 @@ class Component extends DcLite {
         this.setState(configToState(txt), () => this.syncFaces());
         const n = this.mirrorConfigToDevice(txt);     // 0 if no clock attached
         this._emuCfgNote = n
-          ? ('✓ MIRRORED ' + n + ' SETTINGS TO THE CONNECTED CLOCK (LIVE / RUNTIME). EXPORT config.txt TO PERSIST ACROSS A POWER-CYCLE.')
+          ? ('✓ SENT ' + n + ' SETTINGS TO THE CLOCK (RUNTIME-ONLY). EXPORT config.txt TO PERSIST ACROSS A POWER-CYCLE.')
           : '';
         this.setState({ tick: this.state.tick });     // re-render the sync note
       },
@@ -2675,8 +2675,8 @@ class Component extends DcLite {
         })),
       ] : [],
       menuOvrNote: this._menuOvr ? (this._menuOvr.stampOk
-        ? `config.txt unchanged since the menu edit (stamp match) — menu values stand, even for keys config.txt defines · store gen ${this._menuOvr.gen}`
-        : `config.txt was re-saved after the menu edit — config.txt wins wherever both define a key · store gen ${this._menuOvr.gen}`) : '',
+        ? `config.txt unchanged since the menu edit (stamp match). Menu values take precedence, including keys config.txt defines · store gen ${this._menuOvr.gen}`
+        : `config.txt was re-saved after the menu edit. config.txt takes precedence wherever both define a key · store gen ${this._menuOvr.gen}`) : '',
       cfgSaveDisabled: !(st.cfgDirty && st.cfgWrite && this.cfgHandle),
       cfgSaveStyle: this.btn(false, !(st.cfgDirty && st.cfgWrite && this.cfgHandle)),
       readCfgDisabled: this.appMode() === 'standby' || !(typeof window !== 'undefined' && ('showDirectoryPicker' in window || 'showOpenFilePicker' in window)),

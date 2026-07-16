@@ -12,7 +12,7 @@
 //
 // Chromium only (Web Serial). Gate the connect button on isSupported().
 
-import { Clock, BridgeClock } from './serial.js?v=18';
+import { Clock, BridgeClock } from './serial.js?v=19';
 import { parseGGA, parseRMC, parseGSA, GSVBuffer } from './nmea.js?v=2';
 import { parsePMTXTS, parsePMTXTC, centrePhase, foldPhase1ms } from './ppsts.js?v=15';
 import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=1';
@@ -462,7 +462,7 @@ export function createRealDevice(session) {
         checkRxStale(nowMs = Date.now()) {
             if (!S.real || !S.connected || !lastRxT) return false;
             if (nowMs - lastRxT <= 8000) return false;
-            log('[serial] no data for 8 s — clock lost at the pccd host; dropping to Standby', true);
+            log('[serial] no data for 8 s. Clock lost at the pccd host. Dropping to Standby.', true);
             S.real = false; S.rebooting = false;
             clearRealBuffers();
             // Let the TRANSPORT go too. This path exists because the bridge socket does NOT close when
@@ -611,7 +611,7 @@ export function createRealDevice(session) {
                 for await (const [name, h] of dir.entries()) {
                     if (h.kind === 'file' && /^config\.txt$/i.test(name)) { fh = h; break; }
                 }
-                if (!fh) throw new Error('No config.txt in that folder — pick the CLOCK drive root');
+                if (!fh) throw new Error('No config.txt in that folder. Pick the CLOCK drive root.');
                 file = await fh.getFile();
                 const text = await file.text();
                 let settings = null;
@@ -632,7 +632,7 @@ export function createRealDevice(session) {
         /// Write edited text back to a config.txt file handle (from readConfigFile). Re-checks
         /// readwrite permission (may re-prompt), then truncates + writes. User-gesture + gated.
         async writeConfigFile(fh, text) {
-            if (!fh || !fh.createWritable) throw new Error('No writable file handle — read config.txt first');
+            if (!fh || !fh.createWritable) throw new Error('No writable file handle. Read config.txt first.');
             const opt = { mode: 'readwrite' };
             let perm = await fh.queryPermission(opt);
             if (perm !== 'granted') perm = await fh.requestPermission(opt);

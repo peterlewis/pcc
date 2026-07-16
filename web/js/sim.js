@@ -474,7 +474,7 @@ export function createSession(opts = {}) {
     send(cmd) {
       const body = cmd.replace(/^\$/, '').replace(/\*[0-9A-Fa-f]{2}$/, '');
       log('tx', wrap(body));
-      if (!S.connected) { setTimeout(() => log('rx', 'ERR: port closed — command not delivered', true), 160); return; }
+      if (!S.connected) { setTimeout(() => log('rx', 'ERR: port closed. Command not delivered.', true), 160); return; }
       setTimeout(() => log('rx', wrap('PMTX,ACK,' + body.split(',')[0])), 240 + rng() * 200);
     },
     log,

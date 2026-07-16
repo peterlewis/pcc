@@ -508,7 +508,7 @@ export function drawAdev(canvas, tok, stab) {
     .filter((s) => s.p.length);
   if (!pts.length) {
     ctx.font = F9; ctx.fillStyle = tok.txt3; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('NO σ_y(τ) LADDER YET — ACCUMULATES FROM PPS (τ=1 s NEEDS ~5 EDGES; EACH OCTAVE DOUBLES)', w / 2, h / 2);
+    ctx.fillText('NO σ_y(τ) DATA. τ=1 s NEEDS ~5 PPS EDGES. EACH OCTAVE DOUBLES.', w / 2, h / 2);
     return;
   }
   // log-log range: x across the emitted octaves, y snapped to whole decades around the data

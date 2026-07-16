@@ -38,7 +38,7 @@
       </div>
       <div ref="{{refEntryCap}}" style="position:absolute;left:0;right:0;bottom:18px;display:flex;justify-content:space-between;padding:0 22px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.16em;color:var(--txt3)">
         <span style="display:inline-flex;align-items:center;gap:9px">PRECISION CLOCK COMPANION <span style="font-family:var(--mono);font-size:var(--fs-pico);font-weight:700;letter-spacing:.16em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:var(--r-1);padding:3px 5px;line-height:1">BETA</span></span>
-        <span>MK IV FIRMWARE — WEBASSEMBLY · SYSTEM TIME — SIMULATE OR CONNECT INSIDE</span>
+        <span>MK IV FIRMWARE · WEBASSEMBLY · SYSTEM TIME · SIMULATE OR CONNECT INSIDE</span>
       </div>
     </div>
   </sc-if>
@@ -65,7 +65,7 @@
               <span ref="{{refHdrPinB}}" style="position:absolute;border-radius:50%;background:radial-gradient(circle at 50% 44%,#25282f 0 34%,#3e434d 34% 52%,#15171b 52%);box-shadow:0 0 0 .5px #2b2f38"></span>
             </div>
           </div>
-          <button onClick="{{onCloseHdrClock}}" title="Collapse the clock — free up the menu bar" style="align-self:center;width:20px;height:46px;display:flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--line);color:var(--txt3);cursor:pointer;padding:0" style-hover="color:var(--txt);border-color:var(--line2)"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 2l6 6M8 2l-6 6"></path></svg></button>
+          <button onClick="{{onCloseHdrClock}}" title="Collapse the docked clock" style="align-self:center;width:20px;height:46px;display:flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--line);color:var(--txt3);cursor:pointer;padding:0" style-hover="color:var(--txt);border-color:var(--line2)"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 2l6 6M8 2l-6 6"></path></svg></button>
           </div>
         </sc-if>
         <sc-if value="{{hdrClockClosed}}" hint-placeholder-val="{{false}}">
@@ -129,7 +129,7 @@
         <span style="width:8px;height:8px;flex:none;border-radius:50%;background:var(--beta);box-shadow:0 0 8px var(--beta)"></span>
         <span style="font-family:var(--mono);font-size:var(--fs-label);font-weight:700;letter-spacing:.1em;color:var(--beta)">REVIEWING HISTORY</span>
         <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.06em;color:var(--txt2)">{{reviewBannerTime}}</span>
-        <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3)">— every room shows this moment, not live</span>
+        <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3)">— every room shows this moment</span>
         <span style="flex:1"></span>
         <button onClick="{{onExitReview}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.08em;color:var(--beta);background:transparent;border:1px solid var(--beta);border-radius:var(--r-1);padding:5px 12px;cursor:pointer">EXIT TO LIVE</button>
       </div>
@@ -239,7 +239,7 @@
                   </div>
                   </sc-if>
                   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-bottom:2px;border-bottom:1px solid var(--line)">
-                    <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2)">Tick every mode you want — the buttons cycle them.</span>
+                    <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2)">Tick the modes to enable; the buttons cycle through them.</span>
                     <span style="flex:1"></span>
                     <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.1em;color:var(--txt3)">ON FACE</span>
                     <div style="display:flex;border:1px solid var(--line)">
@@ -302,7 +302,7 @@
                     <div style="display:flex;gap:8px;align-items:center">
                       <input ref="{{refAstroDwellIn}}" type="number" min="250" max="65535" defaultValue="{{astroDwellVal}}" style="width:104px;min-width:0;font-family:var(--mono);font-size:var(--fs-data-sm);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:5px 8px">
                       <button onClick="{{onAstroDwell}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:5px 14px;background:transparent;border:1px solid var(--led);color:var(--txt);cursor:pointer" style-hover="background:var(--led-fill)">APPLY</button>
-                      <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.05em;color:var(--txt3)">MS — SUN &amp; LAT/LON PAGE THROUGH THEIR SUB-SCREENS AT THIS RATE (MIN 250)</span>
+                      <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.05em;color:var(--txt3)">MS · SUN &amp; LAT/LON SUB-SCREENS PAGE AT THIS RATE (MIN 250)</span>
                     </div>
                   </div>
                 </div>
@@ -408,11 +408,11 @@
                   <span style="flex:1"></span>
                   <sc-if value="{{cfgDirty}}" hint-placeholder-val="{{false}}"><span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.1em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:var(--r-1);padding:2px 7px">UNSAVED CHANGES</span></sc-if>
                 </div>
-                <textarea ref="{{refCfgEditor}}" onInput="{{onCfgInput}}" spellCheck="false" placeholder="Click READ config.txt and pick the file on the mounted CLOCK drive to edit it here…" style="width:100%;height:320px;resize:vertical;font-family:var(--mono);font-size:var(--fs-data-sm);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:10px;line-height:1.55;white-space:pre;overflow:auto"></textarea>
+                <textarea ref="{{refCfgEditor}}" onInput="{{onCfgInput}}" spellCheck="false" placeholder="Click READ CLOCK DRIVE and pick config.txt on the mounted CLOCK drive to edit it here…" style="width:100%;height:320px;resize:vertical;font-family:var(--mono);font-size:var(--fs-data-sm);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:10px;line-height:1.55;white-space:pre;overflow:auto"></textarea>
                 <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                   <button onClick="{{onCfgSave}}" disabled="{{cfgSaveDisabled}}" style="{{cfgSaveStyle}}">SAVE TO CLOCK</button>
                   <button onClick="{{onCfgRevert}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="border-color:var(--txt3);color:var(--txt)">REVERT</button>
-                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body)">Serial config is write-only — pick the CLOCK drive to read config.txt <b style="font-weight:600">and SETTINGS.BIN</b> (the on-device menu-edit store) together (Chromium only). Write-back is gated off by default; re-plug or reboot the clock to reload it.</span>
+                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body)">Serial config is write-only. Read config.txt <b style="font-weight:600">and SETTINGS.BIN</b> (the on-device menu-edit store) via the CLOCK drive (Chromium only). Write-back is off by default; re-plug or reboot the clock to reload it.</span>
                 </div>
                 <sc-if value="{{menuOvrOn}}" hint-placeholder-val="{{false}}">
                   <div style="border:1px solid var(--line2);background:var(--well)">
@@ -447,7 +447,7 @@
                   <input ref="{{refEmuCfgFile}}" type="file" accept=".txt,text/plain" style="display:none">
                 </div>
                 <textarea ref="{{refEmuCfg}}" spellCheck="false" style="width:100%;height:240px;resize:vertical;font-family:var(--mono);font-size:var(--fs-data-sm);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:10px;line-height:1.55;white-space:pre;overflow:auto"></textarea>
-                <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3);line-height:1.6">APPLY feeds each line through the REAL firmware parser (parseConfigString + postConfigCleanup) and reboots the emulator — exactly as a config.txt does on the device. IMPORT a clock's config.txt to align the emulator to it.</span>
+                <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3);line-height:1.6">APPLY runs each line through the firmware parser and reboots the emulator. IMPORT aligns the emulator to a clock's config.txt.</span>
                 <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt2);line-height:1.6;border-left:2px solid var(--face-led,#ff3b2e);padding-left:9px">{{emuCfgSync}}</span>
               </div>
             </section>
@@ -538,13 +538,13 @@
               <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:var(--fs-data-sm);color:var(--txt2)">Emulator firmware</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt)">{{fwVer}}</span></div>
               <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:var(--fs-data-sm);color:var(--txt2)">Source</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt)">{{fwSrc}}</span></div>
               <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:var(--fs-data-sm);color:var(--txt2)">Built</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt)">{{fwBuilt}}</span></div>
-              <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:var(--fs-data-sm);color:var(--txt2)">Provenance</span><span style="font-family:var(--mono);font-size:var(--fs-label);color:var(--txt);text-align:right">BYTE-FAITHFUL — 4363/4363 VS INDEPENDENT TRUTH · ANCHORED TO A PHYSICAL MK IV ON REAL GPS</span></div>
+              <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:var(--fs-data-sm);color:var(--txt2)">Provenance</span><span style="font-family:var(--mono);font-size:var(--fs-label);color:var(--txt);text-align:right">BYTE-FAITHFUL · 4363/4363 VS AN INDEPENDENT REFERENCE · VERIFIED AGAINST A PHYSICAL MK IV ON GPS</span></div>
               <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="font-size:var(--fs-data-sm);color:var(--txt2)">Timezone data</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt);text-align:right">{{fwTz}}</span></div>
               <div style="display:flex;align-items:center;gap:14px;padding:12px;flex-wrap:wrap">
                 <button onClick="{{onFwCheck}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:7px 16px;background:transparent;border:1px solid var(--line2);color:var(--txt);cursor:pointer" style-hover="border-color:var(--txt3)">CHECK GITHUB FOR FIRMWARE UPDATES</button>
                 <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.04em;color:{{fwUpdC}}">{{fwUpdState}}</span>
               </div>
-              <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">THE CLOCK FACES IN THIS APP *ARE* THIS FIRMWARE — THE REAL clock4 C (ROLLUP: ALL DRAFT PRs) COMPILED TO WEBASSEMBLY AT BUILD TIME, DRIVEN BY A VIRTUAL GPS. THE UPDATE CHECK COMPARES THE BUILT-IN COMMIT AGAINST THE rollup BRANCH HEAD ON GITHUB.</div>
+              <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">THE CLOCK FACES RUN clock4 C COMPILED TO WEBASSEMBLY AT BUILD TIME, DRIVEN BY A VIRTUAL GPS. THE UPDATE CHECK COMPARES THE BUILT-IN COMMIT TO THE rollup HEAD ON GITHUB.</div>
             </section>
             <sc-if value="{{pccdShown}}">
             <section style="background:var(--panel);border:1px solid var(--line);grid-column:1/-1;max-width:1000px">
@@ -556,9 +556,9 @@
                 <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.04em;color:{{pccdUpdC}}">{{pccdUpdState}}</span>
               </div>
               <sc-if value="{{pccdShowManual}}">
-                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.04em;color:var(--txt3);line-height:1.7">THIS pccd RUNS FROM A DEV CHECKOUT (-w), SO IT WON'T REPLACE ITSELF. UPDATE IT BY HAND:<br><code style="color:var(--txt2);word-break:break-all">{{pccdCmd}}</code></div>
+                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.04em;color:var(--txt3);line-height:1.7">THIS pccd RUNS FROM A DEV CHECKOUT (-w). SELF-UPDATE IS DISABLED. UPDATE BY HAND:<br><code style="color:var(--txt2);word-break:break-all">{{pccdCmd}}</code></div>
               </sc-if>
-              <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">UPDATE NOW ASKS THE RUNNING pccd TO DOWNLOAD THE LATEST RELEASE, VERIFY IT (SELF-TEST + SHA-256), SWAP ITSELF, AND RELAUNCH — THE APP RECONNECTS AUTOMATICALLY.</div>
+              <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">UPDATE NOW: pccd DOWNLOADS AND VERIFIES THE LATEST RELEASE (SHA-256 + SELF-TEST), SWAPS ITSELF, AND RELAUNCHES. THE APP RECONNECTS.</div>
             </section>
             </sc-if>
           </div>
@@ -573,7 +573,7 @@
                   <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.16em;color:var(--txt3)">STANDBY — NO CLOCK CONNECTED</span>
                 </div>
                 <div style="padding:18px 16px;display:flex;flex-direction:column;gap:15px">
-                  <div style="font-family:var(--sans);font-size:var(--fs-lead);color:var(--txt);line-height:1.55;max-width:600px">You're seeing your computer's system time. Connect your <strong>Precision Clock Mk IV</strong> for its live, GPS-disciplined data — or explore a simulation if you don't have one to hand.</div>
+                  <div style="font-family:var(--sans);font-size:var(--fs-lead);color:var(--txt);line-height:1.55;max-width:600px">This is your computer's system time. Connect a <strong>Precision Clock Mk IV</strong> for live GPS-disciplined data, or run a simulation.</div>
                   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                     <button onClick="{{onStandbyConnect}}" style="display:inline-flex;align-items:center;gap:9px;font-family:var(--mono);font-size:var(--fs-data-sm);font-weight:700;letter-spacing:.06em;color:var(--led);background:var(--led-fill);border:1px solid var(--led);border-radius:var(--r-1);padding:12px 20px;cursor:pointer" style-hover="background:rgba(255,59,46,.16)">
                       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="1.5" width="9" height="11" rx="1.2"></rect><path d="M5 4.5h4M5 7h4M7 9.7v.01"></path></svg>
@@ -599,7 +599,7 @@
                 <span style="font-family:var(--mono);font-size:var(--fs-micro);letter-spacing:var(--ls-micro);color:var(--txt3)">DATE ROW SOURCE</span>
                 <div style="{{modeSelWrapStyle}}"><button onClick="{{onModeTime}}" disabled="{{modeSelDisabled}}" style="{{ssModeTime}}">MODES</button><button onClick="{{onModeText}}" disabled="{{modeSelDisabled}}" style="{{ssModeText}}">TEXT</button><button onClick="{{onModeCd}}" disabled="{{modeSelDisabled}}" style="{{ssModeCd}}">COUNTDOWN</button></div>
                 <span style="flex:1"></span>
-                <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2)">Send / set below hands the date row to that source.</span>
+                <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2)">Send / set below switches the date row to that source.</span>
               </div>
               <div style="padding:18px 14px 8px">
                 <div ref="{{refDispWrap}}" style="position:relative;display:flex;justify-content:center">
@@ -637,7 +637,7 @@
                   <div style="margin-top:8px;border:1px solid var(--beta);background:var(--beta-fill);padding:10px 12px">
                     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
                       <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--beta);font-weight:700">HARDWARE CALIBRATION</span>
-                      <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2)">drag furniture on the board, or edit the JSON — changes apply to the clock live</span>
+                      <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2)">Drag furniture on the board or edit the JSON. Changes apply to the clock live.</span>
                       <span style="flex:1"></span>
                       <button onClick="{{onHwCopy}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.06em;color:var(--txt);background:var(--well);border:1px solid var(--line2);border-radius:var(--r-1);padding:5px 11px;cursor:pointer">COPY JSON</button>
                       <button onClick="{{onHwReset}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.06em;color:var(--none);background:transparent;border:1px solid var(--none);border-radius:var(--r-1);padding:5px 11px;cursor:pointer">RESET</button>
@@ -672,7 +672,7 @@
                   <button onClick="{{onShowcase}}" style="{{scBtnStyle}}" style-hover="color:var(--txt2);border-color:var(--txt3)">{{scLabel}}</button>
                   <button onClick="{{onDrillTog}}" style="display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.12em;color:var(--txt3);background:transparent;border:1px solid var(--line2);border-radius:var(--r-1);padding:6px 11px;cursor:pointer" style-hover="color:var(--txt2);border-color:var(--txt3)"><span>{{drillChev}}</span>DRILL</button>
                   <span style="flex:1;min-width:80px"></span>
-                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body);max-width:300px">Turn on Significance Fade, drop GPS, and run time-lapse to watch the sub-second digits fade out as they lose significance.</span>
+                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body);max-width:300px">Turn on Significance Fade, drop GPS, and run time-lapse. Sub-second digits fade as uncertainty grows.</span>
                 </div>
                 <div class="pcc-acc-body" data-open="{{drillOpenStr}}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
                   <span style="font-family:var(--mono);font-size:var(--fs-micro);font-weight:700;letter-spacing:.14em;color:var(--beta)">SIMULATION ONLY</span>
@@ -708,12 +708,12 @@
                 </div>
                 <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.04em;color:var(--txt2)">{{emuTzTag}}</span>
                 <span style="flex:1;min-width:60px"></span>
-                <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:1.5;max-width:300px">The real Mk IV auto-detects the zone from its GPS fix; here it follows your browser’s zone (DST-aware). No fix + no filesystem ⇒ a bare device shows UTC.</span>
+                <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:1.5;max-width:300px">The real Mk IV derives the zone from its GPS fix; the emulator follows the browser zone (DST-aware). With no fix and no config file, a bare device shows UTC.</span>
               </div>
             </section>
 
             <div style="margin-top:var(--gap-room);padding-top:var(--sp-3);border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:10px">
-              <span style="font-family:var(--mono);font-size:var(--fs-micro);letter-spacing:var(--ls-micro);color:var(--txt3)">ACCESSORIES — FOLD OPEN ON APPROACH</span>
+              <span style="font-family:var(--mono);font-size:var(--fs-micro);letter-spacing:var(--ls-micro);color:var(--txt3)">ACCESSORIES</span>
             </div>
             <div class="pcc-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:var(--gap-grid);grid-auto-rows:auto;align-items:start;margin-top:var(--sp-3)">
               <section style="background:var(--panel);border:1px solid var(--line)">
@@ -780,7 +780,7 @@
                     <input ref="{{refDsPath}}" placeholder="{{dsPathPlaceholder}}" style="font-family:var(--mono);font-size:var(--fs-label);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:5px 7px">
                     <div style="display:flex;gap:6px"><input ref="{{refDsFormat}}" defaultValue="{v}" style="width:40%;min-width:0;font-family:var(--mono);font-size:var(--fs-label);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:5px 7px" title="Display format — {v} is the value"><input ref="{{refDsInterval}}" type="number" min="5" defaultValue="60" style="width:64px;font-family:var(--mono);font-size:var(--fs-label);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:5px 7px" title="Poll interval (s)"><button onClick="{{onDsAdd}}" style="flex:1;font-family:var(--sans);font-size:var(--fs-data-sm);padding:5px 0;background:transparent;border:1px solid var(--led);color:var(--txt);cursor:pointer" style-hover="background:var(--led-fill)">ADD</button></div>
                   </div>
-                  <sc-if value="{{dsEmpty}}" hint-placeholder-val="{{false}}"><div style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:1.7;padding:4px 0">No sources yet — add a REST feed (JSON path, regex, or first line of text) and it polls, then push its value to the date row.</div></sc-if>
+                  <sc-if value="{{dsEmpty}}" hint-placeholder-val="{{false}}"><div style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:1.7;padding:4px 0">No sources yet. Add a REST feed (JSON path, regex, or first line of text); it polls, and PUSH sends its value to the date row.</div></sc-if>
                   <sc-for list="{{dsList}}" as="d">
                     <div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--line);padding-top:7px">
                       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px"><span style="font-family:var(--mono);font-size:var(--fs-label);color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{d.name}}</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--led);white-space:nowrap">{{d.val}}</span></div>
@@ -793,7 +793,7 @@
                       </div>
                     </div>
                   </sc-for>
-                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body);margin-top:auto">Stored in this browser (localStorage) — header tokens are saved in the clear. Auto-pushes each new value (won't stomp countdown / diagnostics).</span>
+                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body);margin-top:auto">Stored in this browser (localStorage); header tokens are saved in the clear. AUTO pushes each new value but does not override countdown or diagnostics.</span>
                 </div>
               </section>
               <section style="background:var(--panel);border:1px solid var(--line)">
@@ -804,7 +804,7 @@
                   <span style="flex:1"></span>
                 </button>
                 <div class="pcc-acc-body" data-open="{{accOpenWx}}" style="padding:2px var(--pad-panel-x) var(--pad-panel-x)">
-                  <div style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt3);line-height:var(--lh-body)">Weather is coming soon (hopefully).</div>
+                  <div style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt3);line-height:var(--lh-body)">Not implemented yet.</div>
                 </div>
               </section>
             </div>
@@ -840,7 +840,7 @@
               <div style="display:flex;gap:8px;padding:0 12px 12px">
                 <button onClick="{{onReadConfig}}" disabled="{{readCfgDisabled}}" style="{{readCfgStyle}}">READ CLOCK DRIVE</button>
               </div>
-              <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3)">CONNECT DEVICE OPENS A REAL MK IV — VIA THE PCC BRIDGE IF pccd IS RUNNING, ELSE WEB SERIAL (CHROMIUM). SEE "CONNECTING A REAL CLOCK" BELOW FOR BOTH PATHS. SIMULATE RUNS A CLEARLY-LABELLED DEMO FOR EXPLORING WITHOUT HARDWARE (ALWAYS AVAILABLE; ONLY PAUSED WHILE A REAL CLOCK IS LIVE, SINCE SIM AND REAL DATA NEVER MIX). READ config.txt PULLS THE DEVICE'S REAL SETTINGS FROM ITS USB DRIVE (SERIAL CAN'T READ CONFIG BACK).</div>
+              <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3)">CONNECT DEVICE OPENS A REAL MK IV: PCC BRIDGE IF pccd IS RUNNING, ELSE WEB SERIAL (CHROMIUM). SEE "CONNECTING A REAL CLOCK" BELOW. SIMULATE RUNS A LABELLED DEMO; IT PAUSES WHILE A REAL CLOCK IS CONNECTED. READ CLOCK DRIVE READS config.txt FROM THE DEVICE'S USB DRIVE (SERIAL CONFIG IS WRITE-ONLY).</div>
             </section>
             <div style="display:flex;flex-direction:column;gap:14px">
               <section style="background:var(--panel);border:1px solid var(--line)">
@@ -855,7 +855,7 @@
                 <sc-if value="{{gateVisible}}" hint-placeholder-val="{{false}}">
                   <div style="margin:0 12px 12px;padding:10px;background:var(--well);border:1px solid var(--line2)">
                     <div style="font-family:var(--mono);font-size:var(--fs-label);font-weight:700;letter-spacing:.08em;color:var(--none);margin-bottom:5px">THIS CONTEXT CANNOT REACH THE CLOCK</div>
-                    <div style="font-size:var(--fs-data-sm);color:var(--txt2);line-height:1.5">Web Serial needs a Chromium browser on <span style="font-family:var(--mono)">https</span> or <span style="font-family:var(--mono)">localhost</span> — or run the PCC BRIDGE below and any browser connects. The emulator and simulated session still run.</div>
+                    <div style="font-size:var(--fs-data-sm);color:var(--txt2);line-height:1.5">Web Serial needs Chromium on <span style="font-family:var(--mono)">https or localhost</span>. The PCC BRIDGE below works in any browser.</div>
                   </div>
                 </sc-if>
 
@@ -866,38 +866,38 @@
                   <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">CONNECTING A REAL CLOCK</span>
                   <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">TWO WAYS · PICK ONE</span>
                 </div>
-                <div style="padding:10px 12px 6px;font-size:var(--fs-data-sm);color:var(--txt2);line-height:1.55">The app always runs — Standby and Simulation need no hardware. To show your <em>real</em> clock, it reads the clock's USB serial stream one of two ways. You only need one.</div>
+                <div style="padding:10px 12px 6px;font-size:var(--fs-data-sm);color:var(--txt2);line-height:1.55">Standby and Simulation need no hardware. To display a <em>real</em> clock, the app reads its USB serial stream one of two ways. Pick one.</div>
                 <div style="margin:2px 12px 0;padding:9px 11px;background:var(--well);border:1px solid var(--line2)">
                   <div style="font-family:var(--mono);font-size:var(--fs-label);font-weight:700;letter-spacing:.05em;color:var(--txt)">1 · WEB SERIAL — nothing to install</div>
-                  <div style="font-size:var(--fs-data-sm);color:var(--txt2);line-height:1.5;margin-top:3px">The browser opens the USB port directly. Just click <span style="font-family:var(--mono)">CONNECT DEVICE</span>. Needs a <b style="font-weight:600">Chromium</b> browser (Chrome / Edge / Brave / Arc) on <span style="font-family:var(--mono)">https</span> or <span style="font-family:var(--mono)">localhost</span>; shows a port picker, one tab at a time.</div>
+                  <div style="font-size:var(--fs-data-sm);color:var(--txt2);line-height:1.5;margin-top:3px">The browser opens the USB port directly. Click <span style="font-family:var(--mono)">CONNECT DEVICE</span>. Needs a <b style="font-weight:600">Chromium</b> browser (Chrome / Edge / Brave / Arc) on <span style="font-family:var(--mono)">https</span> or <span style="font-family:var(--mono)">localhost</span>; shows a port picker, one tab at a time.</div>
                 </div>
                 <div style="margin:8px 12px 0;padding:9px 11px;background:var(--well);border:1px solid var(--line2)">
                   <div style="font-family:var(--mono);font-size:var(--fs-label);font-weight:700;letter-spacing:.05em;color:var(--txt)">2 · PCC BRIDGE — any browser <span style="color:var(--txt3);font-weight:400">(+ optional stratum-1 clock)</span></div>
-                  <div style="font-size:var(--fs-data-sm);color:var(--txt2);line-height:1.5;margin-top:3px">A tiny helper that grabs the port once and <b style="font-weight:600">serves this app itself</b> — so Safari and Firefox work too, with no picker and no contention. Download, run, then open the local address it prints:</div>
+                  <div style="font-size:var(--fs-data-sm);color:var(--txt2);line-height:1.5;margin-top:3px">Opens the port and <b style="font-weight:600">serves this app</b> to any browser. Download, run, open the address it prints:</div>
                   <div style="margin:6px 0 0;padding:8px;background:var(--inset);border:1px solid var(--line2);overflow-x:auto"><code style="font-family:var(--mono);font-size:var(--fs-nano);color:var(--txt);white-space:pre;user-select:all"># macOS (universal)
 curl -L https://github.com/peterlewis/pcc/releases/latest/download/pccd-macos-universal.tar.gz | tar xz &amp;&amp; cd pcc &amp;&amp; ./pccd
 # Linux (static · x86_64 / aarch64)
 curl -L https://github.com/peterlewis/pcc/releases/latest/download/pccd-linux-$(uname -m).tar.gz | tar xz &amp;&amp; cd pcc &amp;&amp; ./pccd</code></div>
                   <div style="font-size:var(--fs-data-sm);color:var(--txt2);line-height:1.5;margin-top:6px">Then open <b style="font-weight:600"><span style="font-family:var(--mono)">http://localhost:4192</span></b> and click CONNECT DEVICE. Checksums + source: <a href="https://github.com/peterlewis/pcc/releases" target="_blank" rel="noopener" style="color:var(--txt);font-family:var(--mono);font-size:var(--fs-label)">releases</a> · build from <span style="font-family:var(--mono);font-size:var(--fs-label)">host/pccd</span>.</div>
                 </div>
-                <div style="margin:8px 12px 0;font-size:var(--fs-meta);color:var(--txt3);line-height:1.55">Loading this app from <span style="font-family:var(--mono)">peterlewis.github.io</span> instead? Web Serial works (Chromium), and the bridge works <em>in Chromium</em> — but Safari / Firefox can't reach a local <span style="font-family:var(--mono)">ws://127.0.0.1</span> from a secure page, so on those, open the <span style="font-family:var(--mono)">localhost</span> copy the bridge serves (above).</div>
+                <div style="margin:8px 12px 0;font-size:var(--fs-meta);color:var(--txt3);line-height:1.55">Loading this app from <span style="font-family:var(--mono)">peterlewis.github.io</span> instead? Safari / Firefox can't reach <span style="font-family:var(--mono)">ws://127.0.0.1</span> from https. Open the <span style="font-family:var(--mono)">localhost</span> copy (above).</div>
                 <div style="padding:10px 12px 0;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3)">OPTIONAL — FEED CHRONY (STRATUM-1 NTP)</div>
                 <div style="margin:4px 12px;padding:8px;background:var(--well);border:1px solid var(--line2);overflow-x:auto"><code style="font-family:var(--mono);font-size:var(--fs-nano);color:var(--txt);white-space:pre;user-select:all"># add to chrony.conf — Linux: /etc/chrony/chrony.conf · macOS: /etc/chrony.d/*.conf (or brew's /opt/homebrew/etc/chrony.conf)
 refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
-                <div style="padding:2px 12px 12px;font-size:var(--fs-data-sm);color:var(--txt2);line-height:1.5">Start chronyd first (it creates the socket), then run pccd with <span style="font-family:var(--mono);font-size:var(--fs-label)">-s /var/run/chrony.pcc.sock</span>. On Linux use <span style="font-family:var(--mono);font-size:var(--fs-label)">precision 1e-2</span> — PPS lands via arrival timestamps (~ms) there; macOS uses the USB frame clock (~0.1&nbsp;ms). Verify with <span style="font-family:var(--mono);font-size:var(--fs-label)">chronyc sources -v</span>.</div>
+                <div style="padding:2px 12px 12px;font-size:var(--fs-data-sm);color:var(--txt2);line-height:1.5">Start chronyd first (it creates the socket), then run pccd with <span style="font-family:var(--mono);font-size:var(--fs-label)">-s /var/run/chrony.pcc.sock</span>. On Linux use <span style="font-family:var(--mono);font-size:var(--fs-label)">precision 1e-2</span>: PPS is timestamped on arrival (~ms). macOS uses the USB frame clock (~0.1&nbsp;ms). Verify with <span style="font-family:var(--mono);font-size:var(--fs-label)">chronyc sources -v</span>.</div>
               </section>
               <section style="background:var(--panel);border:1px solid var(--line)">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
                   <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">CONNECTION STATES</span>
                   <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">REFERENCE</span>
                 </div>
-                <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="width:8px;height:8px;flex:none;background:var(--line2)"></span><span style="font-family:var(--mono);font-size:var(--fs-label);width:110px;color:var(--txt)">DISCONNECTED</span><span style="font-size:var(--fs-label);color:var(--txt3)">No port open — emulator on host time</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="width:8px;height:8px;flex:none;background:var(--line2)"></span><span style="font-family:var(--mono);font-size:var(--fs-label);width:110px;color:var(--txt)">DISCONNECTED</span><span style="font-size:var(--fs-label);color:var(--txt3)">No port open · emulator on host time</span></div>
                 <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="width:8px;height:8px;flex:none;background:var(--acq)"></span><span style="font-family:var(--mono);font-size:var(--fs-label);width:110px;color:var(--txt)">CONNECTING</span><span style="font-size:var(--fs-label);color:var(--txt3)">Port chooser open / handshake</span></div>
                 <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="width:8px;height:8px;flex:none;background:var(--lock)"></span><span style="font-family:var(--mono);font-size:var(--fs-label);width:110px;color:var(--txt)">LOCKED</span><span style="font-size:var(--fs-label);color:var(--txt3)">Valid 3D fix, stream healthy</span></div>
                 <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="width:8px;height:8px;flex:none;background:var(--acq)"></span><span style="font-family:var(--mono);font-size:var(--fs-label);width:110px;color:var(--txt)">ACQUIRING</span><span style="font-size:var(--fs-label);color:var(--txt3)">Connected, searching the sky</span></div>
-                <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="width:8px;height:8px;flex:none;background:var(--none)"></span><span style="font-family:var(--mono);font-size:var(--fs-label);width:110px;color:var(--txt)">NO FIX</span><span style="font-size:var(--fs-label);color:var(--txt3)">Signal lost — always labelled, never hue-only</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="width:8px;height:8px;flex:none;background:var(--none)"></span><span style="font-family:var(--mono);font-size:var(--fs-label);width:110px;color:var(--txt)">NO FIX</span><span style="font-size:var(--fs-label);color:var(--txt3)">Signal lost</span></div>
                 <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)"><span style="width:8px;height:8px;flex:none;background:var(--acq)"></span><span style="font-family:var(--mono);font-size:var(--fs-label);width:110px;color:var(--txt)">REBOOT</span><span style="font-size:var(--fs-label);color:var(--txt3)">USB re-enumeration, auto-reconnect</span></div>
-                <div style="display:flex;align-items:center;gap:10px;padding:6px 12px"><span style="width:8px;height:8px;flex:none;background:var(--none)"></span><span style="font-family:var(--mono);font-size:var(--fs-label);width:110px;color:var(--txt)">UNSUPPORTED</span><span style="font-size:var(--fs-label);color:var(--txt3)">No Web Serial and no bridge — see support panel</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 12px"><span style="width:8px;height:8px;flex:none;background:var(--none)"></span><span style="font-family:var(--mono);font-size:var(--fs-label);width:110px;color:var(--txt)">UNSUPPORTED</span><span style="font-size:var(--fs-label);color:var(--txt3)">No Web Serial and no bridge · see support panel</span></div>
               </section>
             </div>
           </div>
@@ -1082,7 +1082,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
               <section style="background:var(--panel);border:1px solid var(--line)">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
                   <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">PRECISION</span>
-                  <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">THE CONFIDENCE FIGURE</span>
+                  <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">FROM POSITION SCATTER</span>
                 </div>
                 <div class="pcc-cards" style="display:grid;grid-template-columns:1fr 1fr">
                   <div style="padding:var(--pad-panel-y) var(--pad-panel-x);border-right:1px solid var(--line-soft)">
@@ -1167,7 +1167,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 <div style="padding:12px;flex:1">
                   <canvas ref="{{refPhase}}" style="width:100%;height:240px;display:block"></canvas>
                 </div>
-                <div style="padding:0 12px 10px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">CAPTURED IN FIRMWARE AT THE EDGE (SYSTICK ≈12.5 ns) — USB TRANSPORT JITTER NEVER TOUCHES THIS NUMBER.</div>
+                <div style="padding:0 12px 10px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">CAPTURED IN FIRMWARE AT THE PPS EDGE (SYSTICK ≈12.5 ns). USB TRANSPORT JITTER IS EXCLUDED.</div>
               </section>
               <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
@@ -1177,7 +1177,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 <div style="padding:12px;flex:1">
                   <canvas ref="{{refStair}}" style="width:100%;height:240px;display:block"></canvas>
                 </div>
-                <div style="padding:0 12px 10px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">ppm = calerr · 10⁶ / (32768 · 63) — ONE STEP PER SUCCESSFUL RTC CALIBRATION.</div>
+                <div style="padding:0 12px 10px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">ppm = calerr · 10⁶ / (32768 · 63). ONE STEP PER SUCCESSFUL RTC CALIBRATION.</div>
               </section>
             </div>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;align-items:stretch">
@@ -1189,7 +1189,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 <div style="padding:12px;flex:1">
                   <canvas ref="{{refPpmtemp}}" style="width:100%;height:250px;display:block"></canvas>
                 </div>
-                <div style="padding:0 12px 10px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">THE 32 kHz TUNING FORK'S PARABOLA — FITTED CURVE IN AMBER.</div>
+                <div style="padding:0 12px 10px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">32 kHz TUNING-FORK PARABOLA. FITTED CURVE IN AMBER.</div>
               </section>
               <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
@@ -1199,7 +1199,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 <div style="padding:12px;flex:1">
                   <canvas ref="{{refAdev}}" style="width:100%;height:250px;display:block"></canvas>
                 </div>
-                <div style="padding:0 12px 10px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">THE FIRMWARE'S OWN LADDER (MODE_ADEV / $PMADEV) — HADAMARD TWIN IN AMBER WHEN PRESENT; DASHED τ^-½ = WHITE-FM REFERENCE.</div>
+                <div style="padding:0 12px 10px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">COMPUTED IN FIRMWARE (MODE_ADEV / $PMADEV). HADAMARD IN AMBER WHEN PRESENT; DASHED τ^-½ = WHITE-FM REFERENCE.</div>
               </section>
               <section style="background:var(--panel);border:1px solid var(--line)">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
@@ -1210,7 +1210,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:var(--fs-data-sm);color:var(--txt2)">LSE — battery RTC</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt)">{{fwTcLse}}</span></div>
                 <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:var(--fs-data-sm);color:var(--txt2)">Learned die range</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt)">{{fwTcRange}}</span></div>
                 <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px"><span style="font-size:var(--fs-data-sm);color:var(--txt2)">Read back</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt3)">{{fwTcMeta}}</span></div>
-                <div style="padding:0 12px 10px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">WHAT THE CLOCK ITSELF HAS LEARNED ON-DIE ("tc_dump = on" → $PMTXTC) — THE MODEL IT STEERS HOLDOVER WITH.</div>
+                <div style="padding:0 12px 10px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">LEARNED ON-DIE, READ VIA "tc_dump = on" → $PMTXTC. APPLIED DURING HOLDOVER.</div>
               </section>
               <section style="background:var(--panel);border:1px solid var(--line)">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
@@ -1223,7 +1223,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:var(--fs-data-sm);color:var(--txt2)">Fit residual RMS</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt)">{{fitRms}}</span></div>
                 <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:var(--fs-data-sm);color:var(--txt2)">Compensation state</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:{{compStateC}}">{{compState}}</span></div>
                 <div style="margin:10px 12px;padding:8px 10px;background:var(--well);border:1px solid var(--line2);font-family:var(--mono);font-size:var(--fs-label);color:var(--txt);white-space:pre;overflow-x:auto;line-height:1.7">{{compLine}}</div>
-                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">$PMTXTS TIMESTAMP + DIE-TEMP COME FROM DRAFT FIRMWARE PRs (pps=on). THE HOST FITS ppm(T) FROM THE RTC CAL ERROR — THE LSE CURVE — AND EMITS THE FIRMWARE'S tc_* SEED BLOCK (PASTE INTO config.txt; tc_seed=on LAST WARM-STARTS THE ON-DIE LEARNER). tc_dump ON THE CLOCK STAYS CANONICAL — THIS IS THE HOST'S INDEPENDENT ESTIMATE OF THE SAME CURVE. WHILE LOCKED, calibrateRTC OWNS CALR; ABSOLUTE UTC OFFSET ISN'T RECOVERABLE OVER USB (≈1 ms FLOOR), SO THE APP SHOWS JITTER, STABILITY AND DRIFT.</div>
+                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">NEEDS DRAFT FIRMWARE WITH pps=on ($PMTXTS TIMESTAMP + DIE TEMP). FITS ppm(T) FROM RTC CALIBRATION ERROR AND PRODUCES A tc_* SEED BLOCK FOR config.txt (tc_seed=on GOES LAST). tc_dump ON THE CLOCK IS THE REFERENCE. ABSOLUTE UTC OFFSET IS NOT MEASURABLE OVER USB (≈1 ms), SO JITTER, STABILITY AND DRIFT ARE SHOWN.</div>
               </section>
             </div>
           </div>
@@ -1380,7 +1380,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
               </div>
               <div style="display:flex;gap:8px;padding:0 12px 12px">
                 <span style="display:flex;align-items:center;padding:0 8px;background:var(--well);border:1px solid var(--line2);border-right:0;font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--led)">$</span>
-                <input ref="{{refCmd}}" onKeyDown="{{onCmdKey}}" placeholder="PMTX,STATUS  — checksum appended automatically" spellCheck="false" style="flex:1;min-width:0;font-family:var(--mono);font-size:var(--fs-data-sm);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:6px 8px;margin-left:-8px">
+                <input ref="{{refCmd}}" onKeyDown="{{onCmdKey}}" placeholder="PMTX,STATUS · checksum appended automatically" spellCheck="false" style="flex:1;min-width:0;font-family:var(--mono);font-size:var(--fs-data-sm);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:6px 8px;margin-left:-8px">
                 <button onClick="{{onSendCmd}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:5px 16px;background:transparent;border:1px solid var(--led);color:var(--txt);cursor:pointer" style-hover="background:var(--led-fill)">SEND</button>
               </div>
             </section>
@@ -1397,7 +1397,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
               </div>
               <div style="padding:14px var(--pad-panel-x) var(--pad-panel-x);display:flex;flex-direction:column;gap:12px">
                 <button onClick="{{onTelLog}}" style="display:flex;align-items:center;gap:10px;background:transparent;border:0;padding:0;cursor:pointer;align-self:flex-start;font-family:var(--sans);font-size:var(--fs-data);color:var(--txt)"><span style="{{cbTelLog}}"></span>LOG MY CLOCK'S DATA WHILE CONNECTED</button>
-                <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.04em;color:var(--txt3);line-height:1.6;max-width:640px">Persists your Precision Clock's live stream — position, satellites, temperature, clock skew — to this browser so you can rewind and scrub through it later. Opt-in, off by default. A simulation is NEVER logged. Nothing leaves your machine.</span>
+                <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.04em;color:var(--txt3);line-height:1.6;max-width:640px">Logs position, satellites, temperature and clock skew to this browser for rewind and scrub. Off by default. A simulation is NEVER logged.</span>
                 <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding-top:2px;border-top:1px solid var(--line)">
                   <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.04em;color:var(--txt2)">{{telStat}}</span>
                   <span style="flex:1;min-width:20px"></span>
@@ -1426,7 +1426,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                   <button onClick="{{onReviewDrive}}" title="Replay this moment across every room" style="{{reviewDriveStyle}}">{{reviewDriveLabel}}</button>
                   <button onClick="{{onReviewReload}}" title="Reload from the log" style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.06em;color:var(--txt2);background:transparent;border:1px solid var(--line2);border-radius:var(--r-1);padding:7px 12px;cursor:pointer">RELOAD</button>
                   <span style="flex:1;min-width:20px"></span>
-                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);max-width:300px;line-height:1.5;text-align:right">Drag the timeline to scrub. Hatched spans are CLOCK DISCONNECTED — no data recorded.</span>
+                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);max-width:300px;line-height:1.5;text-align:right">Drag the timeline to scrub. Hatched spans are CLOCK DISCONNECTED (no data recorded).</span>
                 </div>
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:1px;background:var(--line);border:1px solid var(--line)">
                   <div style="background:var(--panel);padding:8px 11px"><div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.12em;color:var(--txt3)">POSITION</div><div style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt);margin-top:3px">{{rvPos}}</div></div>
@@ -1436,7 +1436,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                   <div style="background:var(--panel);padding:8px 11px"><div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.12em;color:var(--txt3)">CLOCK SKEW</div><div style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt);margin-top:3px">{{rvSkew}}</div></div>
                 </div>
                 <sc-if value="{{rvNoData}}" hint-placeholder-val="{{false}}">
-                  <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.04em;color:var(--txt3);line-height:1.6">No recorded telemetry yet. Turn on <strong>LOG MY CLOCK'S DATA</strong> above, connect your Precision Clock, and its stream lands here to rewind through.</span>
+                  <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.04em;color:var(--txt3);line-height:1.6">No recorded telemetry yet. Turn on <strong>LOG MY CLOCK'S DATA</strong> above and connect the clock. Its stream is recorded here.</span>
                 </sc-if>
               </div>
             </section>
@@ -1451,7 +1451,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
               <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:var(--fs-data-sm);color:var(--txt2)">Satellite observations</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt)">{{eObs}}</span></div>
               <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-size:var(--fs-data-sm);color:var(--txt2)">NMEA lines held</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt)">{{eLines}}</span></div>
               <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px"><span style="font-size:var(--fs-data-sm);color:var(--txt2)">PPS samples</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt)">{{ePps}}</span></div>
-              <div style="padding:8px 12px;border-top:1px solid var(--line);font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3)">SESSION LIVES IN MEMORY — CLEARED ON RELOAD.</div>
+              <div style="padding:8px 12px;border-top:1px solid var(--line);font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3)">SESSION IS HELD IN MEMORY. CLEARED ON RELOAD.</div>
             </section>
             <section style="background:var(--panel);border:1px solid var(--line)">
               <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
@@ -1523,6 +1523,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=228"></script>
+<script type="module" src="js/app-controller.js?v=229"></script>
 </body>
 </html>

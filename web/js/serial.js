@@ -71,7 +71,7 @@ export class Clock extends EventTarget {
         // Detect the device vanishing — an unplug, or a `reboot` that re-enumerates USB —
         // which Web Serial signals as a 'disconnect' on navigator.serial for that port. Without
         // this the UI status lingers on "connected" after the link is actually gone.
-        this._onSerialDisconnect = (e) => { if (e.target === this.port) this._handleDrop('device disconnected — USB re-enumerated'); };
+        this._onSerialDisconnect = (e) => { if (e.target === this.port) this._handleDrop('device disconnected (USB re-enumerated)'); };
         navigator.serial.addEventListener('disconnect', this._onSerialDisconnect);
         this._readLoopPromise = this._readLoop();
 
@@ -186,7 +186,7 @@ export class Clock extends EventTarget {
         }
         // The loop only exits on its own when port.readable went null — i.e. the device
         // dropped. (A clean disconnect() sets _closing first, so _handleDrop no-ops.)
-        if (!this._closing) this._handleDrop('serial stream ended — device disconnected');
+        if (!this._closing) this._handleDrop('serial stream ended. Device disconnected.');
     }
 
     /// Reference-counted NMEA firehose request. Multiple UI panels
@@ -261,7 +261,7 @@ export class BridgeClock extends EventTarget {
             };
             // Per-phase watchdog: re-armed on every progress line, so download/verify/install each get a
             // fresh 3-min window. A wedged daemon then settles the promise instead of hanging the panel.
-            const arm = () => { clearTimeout(wd); wd = setTimeout(() => finish(false, 'timed out — check pccd logs'), 180000); };
+            const arm = () => { clearTimeout(wd); wd = setTimeout(() => finish(false, 'timed out. Check pccd logs.'), 180000); };
             try { ws = new WebSocket(`ws://${BridgeClock.authority()}`); } catch { resolve({ ok: false, msg: 'bridge not reachable' }); return; }
             const fire = () => { if (!sent) { sent = true; try { ws.send('pccd:update'); arm(); } catch { finish(false, 'send failed'); } } };
             const openTimer = setTimeout(fire, 500);                 // fallback if the daemon sends no hello

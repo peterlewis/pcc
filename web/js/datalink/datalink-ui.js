@@ -36,9 +36,7 @@ export function mountDatalink(root) {
       </div>
       <span class="dl-beta">BETA</span>
     </header>
-    <p class="dl-lede">The genuine 1994 Timex Datalink protocol, flashed out this screen by light. Compose below,
-      then hold your Datalink&nbsp;150 to the flashing panel — the watch reads the pulses and stores the data,
-      exactly as it did from a CRT thirty years ago.</p>
+    <p class="dl-lede">The 1994 Timex Datalink protocol, sent from this screen as light pulses. Compose below, then hold a Datalink&nbsp;150 to the flashing panel.</p>
 
     <section class="dl-card">
       <div class="dl-card-h">TRANSMISSION</div>
@@ -90,8 +88,7 @@ export function mountDatalink(root) {
       <svg width="15" height="15" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M6.5 1L2 6.5h3L4.5 11 10 5H7z"/></svg>
       HOLD WATCH TO SCREEN &amp; FLASH
     </button>
-    <p class="dl-foot">Preview cadence shown here; watch-accurate optical timing + an on-screen watch that reads
-      the flashes back are the next step. Bytes are already the real protocol.</p>
+    <p class="dl-foot">The flash runs at a preview cadence; the timing is not watch-accurate. The encoded bytes are protocol-exact.</p>
   </div>
 
   <div class="dl-overlay" data-o="overlay" hidden>
