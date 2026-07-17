@@ -48,3 +48,4 @@ host/pccd/dist/
 
 # local backups (firmware images, per-unit configs) — never commit
 backups/
+host/pccd/history/

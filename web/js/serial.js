@@ -246,6 +246,22 @@ export class BridgeClock extends EventTarget {
 
     static isSupported() { return typeof WebSocket !== 'undefined'; }
 
+    /// Read a decimated slice of the daemon's flight-recorder archive (GET /history).
+    /// params: { series: 'timing'|'sky', from, to (epoch s), points }. Returns an array of
+    /// objects keyed by the CSV header (numbers). Throws on HTTP/parse failure.
+    static async fetchHistory(params = {}) {
+        const qs = new URLSearchParams(params).toString();
+        const r = await fetch(`http://${BridgeClock.authority()}/history?${qs}`);
+        if (!r.ok) throw new Error('history HTTP ' + r.status);
+        const lines = (await r.text()).trim().split('\n');
+        const keys = (lines.shift() || '').split(',');
+        return lines.filter(Boolean).map((ln) => {
+            const v = ln.split(','); const o = {};
+            keys.forEach((k, i) => { o[k] = +v[i]; });
+            return o;
+        });
+    }
+
     /// Trigger a pccd self-update over a throwaway socket, independent of any clock connection.
     /// Sends the `pccd:update` control frame, streams the daemon's `pccd:update <msg>` progress
     /// lines to onLine(), and settles: { ok:true } when the socket drops (daemon re-exec'd onto the

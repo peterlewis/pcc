@@ -100,7 +100,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=97'), import('./charts.js?v=97'), import('./realdev.js?v=110'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=97'), import('./charts.js?v=98'), import('./realdev.js?v=111'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -113,6 +113,9 @@ class Component extends DcLite {
         if (JSON.stringify(next) !== JSON.stringify(this.state.bridgeInfo || null)) this.setState({ bridgeInfo: next });
         // First time we see a bridge this session, check GitHub once for a newer pccd (prompts in UPDATES).
         if (next && !this._pccdChecked) { this._pccdChecked = true; setTimeout(() => this.checkPccdUpdate(false), 600); }
+        // Keep the archive panels fed: self-healing (a first fetch can race module/bridge readiness)
+        // and cheap (fetchArchive caches for 60 s and no-ops without a recorder).
+        if (next && next.history) this.fetchArchive();
       }).catch(() => {});
       };
       probeBridge();
@@ -282,7 +285,7 @@ class Component extends DcLite {
     if (name === 'globe') { this.bindGlobe(el); this.drawChart('globe'); return; }
     if (name === 'dacCurve') { this.bindDacCurve(el); this.drawChart('dacCurve'); return; }
     if (name === 'monLog') { this.scrollLog(true); return; }
-    if (['sky', 'cn0elev', 'cn0time', 'posScatter', 'dop', 'cont', 'phase', 'stair', 'ppmtemp', 'adev', 'gammaCurve', 'map'].includes(name)) this.drawChart(name);
+    if (['sky', 'cn0elev', 'cn0time', 'posScatter', 'dop', 'cont', 'phase', 'stair', 'ppmtemp', 'adev', 'archOffset', 'archAux', 'archSky', 'gammaCurve', 'map'].includes(name)) this.drawChart(name);
   }
 
   dropEl(name) {
@@ -526,8 +529,13 @@ class Component extends DcLite {
     const payload = {
       v: 1, savedAt: Date.now(), obs: S.obs ? { lat: S.obs.lat, lon: S.obs.lon } : null,
       trails: m2a(S.trails), gtrails: m2a(S.gtrails),
-      cn0: [...S.cn0Hist.entries()].map(([k, h]) => [k, h.slice(-600)]),   // trim: quota headroom
-      posHist: S.posHist, dopHist: S.dopHist, fixHist: S.fixHist,
+      // With a pccd archive on the bridge host, that is the system of record — this store becomes a
+      // paint cache for instant reload, so the bulky series keep only a short tail. Web Serial (no
+      // daemon) and sim sessions keep the full depth: nothing else records those.
+      cn0: [...S.cn0Hist.entries()].map(([k, h]) => [k, h.slice(this.state.bridgeInfo && this.state.bridgeInfo.history && S.real ? -120 : -600)]),
+      posHist: (this.state.bridgeInfo && this.state.bridgeInfo.history && S.real) ? S.posHist.slice(-600) : S.posHist,
+      dopHist: (this.state.bridgeInfo && this.state.bridgeInfo.history && S.real) ? S.dopHist.slice(-600) : S.dopHist,
+      fixHist: (this.state.bridgeInfo && this.state.bridgeInfo.history && S.real) ? S.fixHist.slice(-600) : S.fixHist,
     };
     try { localStorage.setItem(this.skyHistKey(kind), JSON.stringify(payload)); }
     catch (e) {
@@ -1404,9 +1412,9 @@ class Component extends DcLite {
     const s = this.state.section;
     if (s === 'display') this.drawChart('gammaCurve');
     else if (s === 'satellites') this.drawChart('sky');
-    else if (s === 'signal') { this.drawChart('cn0elev'); this.drawChart('cn0time'); }
+    else if (s === 'signal') { this.drawChart('cn0elev'); this.drawChart('cn0time'); this.fetchArchive(); this.drawChart('archSky'); }
     else if (s === 'position') { this.drawChart('posScatter'); this.drawChart('dop'); this.drawChart('cont'); }
-    else if (s === 'timing') { this.drawChart('phase'); this.drawChart('stair'); this.drawChart('ppmtemp'); this.drawChart('adev'); }
+    else if (s === 'timing') { this.drawChart('phase'); this.drawChart('stair'); this.drawChart('ppmtemp'); this.drawChart('adev'); this.fetchArchive(); this.drawChart('archOffset'); this.drawChart('archAux'); }
     else if (s === 'globe' && !this.state.globeRotate) this.drawChart('globe');
     else if (s === 'map') this.drawChart('map');
   }
@@ -1458,6 +1466,9 @@ class Component extends DcLite {
     if (name === 'stair') return CH.drawStair(el, T, sby ? [] : S.pps.samples, 1800, nowS, sby ? 0 : S.pps.temp);
     if (name === 'ppmtemp') return CH.drawPpmTemp(el, T, sby ? [] : S.pps.samples, sby ? null : (this._timing && this._timing.fit));
     if (name === 'adev') return CH.drawAdev(el, T, this.adevData());
+    if (name === 'archOffset') return CH.drawArchiveOffset(el, T, this._arch && this._arch.t);
+    if (name === 'archAux') return CH.drawArchiveAux(el, T, this._arch && this._arch.t);
+    if (name === 'archSky') return CH.drawArchiveSky(el, T, this._arch && this._arch.s);
     // Ground tracks carry no timestamps (gtrails = plain points at ~45 s cadence), so the TRAIL
     // length control maps to a tail slice: 45 s per point, full buffer (40 pts) at MAX.
     const gcut = (g) => {
@@ -2123,7 +2134,7 @@ class Component extends DcLite {
     return Object.assign({},
       this.rvShell(), this.rvDisplay(), this.rvConnect(), this.rvSats(),
       this.rvSignal(), this.rvPosition(), this.rvTiming(), this.rvGlobe(),
-      this.rvWeather(), this.rvMonitor(), this.rvExport(), this.rvFirmware());
+      this.rvWeather(), this.rvMonitor(), this.rvExport(), this.rvFirmware(), this.rvArchive());
   }
 
   rvShell() {
@@ -3000,6 +3011,47 @@ class Component extends DcLite {
       onClear: () => { if (S) { S.nmeaLog.length = 0; this._monFrozen = []; this.setState({}); } },
       onSendCmd: () => this.sendCmd(),
       onCmdKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); this.sendCmd(); } },
+    };
+  }
+
+  // ---- flight-recorder archive (pccd /history) ----------------------------------------------------
+  // The daemon records timing + sky rows continuously; these fetch a decimated slice for the ARCHIVE
+  // panels. Real recorded data with its source named, so it may render in any app state (incl. Standby).
+  archSpans() { return { '6h': 21600, '24h': 86400, '7d': 604800, 'all': 0 }; }
+  fetchArchive(force) {
+    const hi = this.state.bridgeInfo && this.state.bridgeInfo.history;
+    if (!hi || !this.realdev) { this._arch = null; return; }
+    const range = this.state.archRange || '24h';
+    const fresh = this._arch && this._arch.range === range && Date.now() - this._arch.at < 60000;
+    if ((fresh && !force) || this._archBusy) return;
+    this._archBusy = true;
+    const to = Math.floor(Date.now() / 1000);
+    const span = this.archSpans()[range];
+    const from = span ? to - span : Math.floor(Date.parse(hi.from + 'T00:00:00Z') / 1000);
+    Promise.all([
+      this.realdev.fetchBridgeHistory({ series: 'timing', from, to, points: 700 }),
+      this.realdev.fetchBridgeHistory({ series: 'sky', from, to, points: 400 }),
+    ]).then(([t, s]) => {
+      this._arch = { t, s, range, at: Date.now() };
+      this._archBusy = false;
+      this.setState({});
+      this.drawChart('archOffset'); this.drawChart('archAux'); this.drawChart('archSky');
+    }).catch(() => { this._archBusy = false; this._arch = { t: [], s: [], range, at: Date.now() }; this.setState({}); });
+  }
+  setArchRange(r) { this.setState({ archRange: r }); this._arch = null; this.fetchArchive(); }
+  rvArchive() {
+    const hi = this.state.bridgeInfo && this.state.bridgeInfo.history;
+    const range = this.state.archRange || '24h';
+    const chip = (r) => 'font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.04em;padding:3px 10px;cursor:pointer;background:transparent;border:1px solid ' +
+      (r === range ? 'var(--txt3);color:var(--txt)' : 'var(--line);color:var(--txt3)');
+    const days = hi ? hi.days : 0;
+    return {
+      archShown: !!hi,
+      archCaption: hi ? ('ARCHIVE · RECORDED BY pccd · ' + days + (days === 1 ? ' DAY' : ' DAYS') + ' ON DISK' +
+        (this._arch && this._arch.t && this._arch.t.length ? '' : ' · FETCHING…')) : '',
+      archR6Style: chip('6h'), archR24Style: chip('24h'), archR7Style: chip('7d'), archRAllStyle: chip('all'),
+      onArchR6: () => this.setArchRange('6h'), onArchR24: () => this.setArchRange('24h'),
+      onArchR7: () => this.setArchRange('7d'), onArchRAll: () => this.setArchRange('all'),
     };
   }
 

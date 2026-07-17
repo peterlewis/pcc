@@ -1055,6 +1055,13 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 </div>
               </div>
             </section>
+              <sc-if value="{{archShown}}">
+              <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:27px;padding:4px 11px;background:var(--strip);border-bottom:1px solid var(--line);flex-wrap:wrap"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">ARCHIVE — SIGNAL</span><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button onClick="{{onArchR6}}" style="{{archR6Style}}">6H</button><button onClick="{{onArchR24}}" style="{{archR24Style}}">24H</button><button onClick="{{onArchR7}}" style="{{archR7Style}}">7D</button><button onClick="{{onArchRAll}}" style="{{archRAllStyle}}">ALL</button></div></div><div style="padding:6px 12px 0;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3)">{{archCaption}}</div>
+                <div style="padding:8px 12px 8px"><canvas ref="{{refArchSky}}" style="width:100%;height:200px;display:block"></canvas></div>
+                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">RECORDED BY pccd (ONE SNAPSHOT PER 60 s). C/N0 MEAN (RED), MAX (DASHED), SATS USED (AMBER, RIGHT SCALE).</div>
+              </section>
+              </sc-if>
           </div>
         </sc-if>
 
@@ -1225,6 +1232,14 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 <div style="margin:10px 12px;padding:8px 10px;background:var(--well);border:1px solid var(--line2);font-family:var(--mono);font-size:var(--fs-label);color:var(--txt);white-space:pre;overflow-x:auto;line-height:1.7">{{compLine}}</div>
                 <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">NEEDS DRAFT FIRMWARE WITH pps=on ($PMTXTS TIMESTAMP + DIE TEMP). FITS ppm(T) FROM RTC CALIBRATION ERROR AND PRODUCES A tc_* SEED BLOCK FOR config.txt (tc_seed=on GOES LAST). tc_dump ON THE CLOCK IS THE REFERENCE. ABSOLUTE UTC OFFSET IS NOT MEASURABLE OVER USB (≈1 ms), SO JITTER, STABILITY AND DRIFT ARE SHOWN.</div>
               </section>
+              <sc-if value="{{archShown}}">
+              <section style="background:var(--panel);border:1px solid var(--line);grid-column:1/-1">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:27px;padding:4px 11px;background:var(--strip);border-bottom:1px solid var(--line);flex-wrap:wrap"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">ARCHIVE — OFFSET TO GPS TIME</span><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button onClick="{{onArchR6}}" style="{{archR6Style}}">6H</button><button onClick="{{onArchR24}}" style="{{archR24Style}}">24H</button><button onClick="{{onArchR7}}" style="{{archR7Style}}">7D</button><button onClick="{{onArchRAll}}" style="{{archRAllStyle}}">ALL</button></div></div><div style="padding:6px 12px 0;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3)">{{archCaption}}</div>
+                <div style="padding:8px 12px 4px"><canvas ref="{{refArchOffset}}" style="width:100%;height:200px;display:block"></canvas></div>
+                <div style="padding:0 12px 8px"><canvas ref="{{refArchAux}}" style="width:100%;height:130px;display:block"></canvas></div>
+                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">RECORDED BY pccd ON THE BRIDGE HOST (ONE POINT PER PREFILTER GROUP, ~8 s). TOP: OFFSET SENT TO chrony; BAND = MIN/MAX PER BUCKET. BOTTOM: OSC DRIFT (RED, ppm) + DIE TEMP (AMBER).</div>
+              </section>
+              </sc-if>
             </div>
           </div>
         </sc-if>
@@ -1523,6 +1538,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=229"></script>
+<script type="module" src="js/app-controller.js?v=230"></script>
 </body>
 </html>

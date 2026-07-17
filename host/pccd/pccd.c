@@ -424,6 +424,7 @@ static double reg_pps_mono(unsigned sof_raw, uint32_t dwt_pps, uint32_t dwt_sof,
 static double pf_ring[PF_WIN]; static int pf_cnt=0, pf_idx=0;
 static double pf_at[PF_AGG], pf_ao[PF_AGG]; static int pf_an=0;
 static long   pf_rejects=0, pf_groups=0;
+static double pf_last_sig=0;              // latest MAD-derived sigma (s) — the history log's jitter column
 static void (*pf_sink)(double wall, double off) = NULL;   // production: chrony; self-test: recorder
 static int dbl_cmp(const void *a, const void *b){
   double x=*(const double*)a, y=*(const double*)b; return x<y?-1:(x>y?1:0);
@@ -441,6 +442,7 @@ static void pf_push(double wall, double off){
     double med = median_inplace(tmp,pf_cnt);
     for (int i=0;i<pf_cnt;i++) dev[i]=fabs(pf_ring[i]-med);
     double sig = 1.4826*median_inplace(dev,pf_cnt);       // MAD -> sigma for a normal core
+    pf_last_sig = sig;                                    // pre-floor: the history log wants the real spread
     if (sig < 5e-6) sig = 5e-6;                           // floor: never gate tighter than 5 us
     if (fabs(off-med) > 3.0*sig){
       rejected = 1; pf_rejects++;
@@ -462,8 +464,198 @@ static void pf_push(double wall, double off){
 }
 static double pt_off[16], pt_wall[16]; static int pt_n=0;
 static void pf_test_sink(double wall, double off){ if (pt_n<16){ pt_wall[pt_n]=wall; pt_off[pt_n]=off; pt_n++; } }
+// ---- history: the flight recorder -----------------------------------------------------------------
+// The daemon is the always-on component, so it keeps the record. Two row types in a plain daily file
+// (<histdir>/YYYY-MM-DD.log, UTC):
+//   T,<epoch>,<offset_us>,<jitter_us>,<ppm>,<temp_c>       one per prefilter group (~8 s)
+//   S,<epoch>,<fix>,<used>,<hdop>,<PRN:az:el:cn0;...>      one sky snapshot per 60 s
+// Real-only by construction: pccd never sees a simulation. A missing span IS the record of the clock
+// being unplugged. Files rotate at UTC midnight; files older than opt_retain days are pruned then.
+// The app reads it back through GET /history with server-side decimation (hist_query below).
+static const char *opt_hist = NULL;      // -H dir ("off" disables); main() defaults it next to the exe
+static int  opt_hist_off = 0;            // -H off given: the default derivation must not re-enable it
+static int  opt_retain = 365;            // -R days: prune files older than this at rotation
+static FILE *g_histf = NULL;
+static char g_hist_day[16] = "";         // "YYYY-MM-DD" the open file belongs to
+static double g_last_ppm = 0, g_last_temp = 0; static int g_have_tstats = 0;
+
+// Live satellite table fed by GSV; snapshotted (not streamed) so cadence stays fixed.
+#define HS_MAX 96
+static struct { char tk[3]; int prn, az, el, cn0; double seen; } hs_sat[HS_MAX];
+static int hs_n = 0;
+static struct { int fix, used; double hdop; double seen; } hs_fix = {0,0,0,0};
+
+static void hist_day_of(time_t t, char *out, size_t cap){
+  struct tm tm; gmtime_r(&t,&tm);
+  snprintf(out,cap,"%04d-%02d-%02d",tm.tm_year+1900,tm.tm_mon+1,tm.tm_mday);
+}
+static void hist_prune(void){
+  time_t cutoff = time(NULL) - (time_t)opt_retain*86400;
+  char keep[16]; hist_day_of(cutoff,keep,sizeof keep);
+  DIR *d = opendir(opt_hist); if (!d) return;
+  struct dirent *e;
+  while ((e=readdir(d))){
+    size_t n=strlen(e->d_name);
+    if (n!=14 || strcmp(e->d_name+10,".log")) continue;         // strictly YYYY-MM-DD.log
+    if (strncmp(e->d_name,keep,10) < 0){
+      char p[4400]; snprintf(p,sizeof p,"%s/%s",opt_hist,e->d_name); unlink(p);
+    }
+  }
+  closedir(d);
+}
+// Open (or rotate to) the file for `now`. Returns g_histf or NULL when disabled/unwritable.
+static FILE *hist_file(time_t now){
+  if (!opt_hist) return NULL;
+  char day[16]; hist_day_of(now,day,sizeof day);
+  if (g_histf && !strcmp(day,g_hist_day)) return g_histf;
+  if (g_histf){ fclose(g_histf); g_histf=NULL; }
+  mkdir(opt_hist,0755);
+  char p[4400]; snprintf(p,sizeof p,"%s/%s.log",opt_hist,day);
+  g_histf = fopen(p,"a");
+  if (g_histf){ setvbuf(g_histf,NULL,_IOLBF,0); snprintf(g_hist_day,sizeof g_hist_day,"%s",day); hist_prune(); }
+  return g_histf;
+}
+static void hist_T(double wall, double off){
+  FILE *f = hist_file((time_t)wall); if (!f) return;
+  fprintf(f,"T,%.0f,%.1f,%.1f,%.3f,%.1f\n", wall, off*1e6, pf_last_sig*1e6,
+          g_have_tstats?g_last_ppm:0.0, g_have_tstats?g_last_temp:0.0);
+}
+// NMEA-lite: only the fields the S row needs. Tolerant of empty fields; no checksum re-verify
+// (same policy as the $PMTXTS path — the clock's USB CDC link doesn't corrupt).
+static int hist_tok(const char *s, int idx, char *out, size_t cap){   // 0-based field after the address
+  const char *p=strchr(s,','); if(!p) return -1; p++;
+  for (int i=0;i<idx;i++){ p=strchr(p,','); if(!p) return -1; p++; }
+  size_t n=0; while (p[n] && p[n]!=',' && p[n]!='*' && n<cap-1){ out[n]=p[n]; n++; }
+  out[n]=0; return 0;
+}
+static void hist_feed_nmea(const char *line, double now){
+  if (line[0]!='$' || strlen(line)<10) return;
+  const char *typ = line+3;                                  // after "$GP"/"$GN"/...
+  char f[24];
+  if (!strncmp(typ,"GGA,",4)){
+    if (hist_tok(line,5,f,sizeof f)==0) hs_fix.fix  = atoi(f);        // quality
+    if (hist_tok(line,6,f,sizeof f)==0) hs_fix.used = atoi(f);        // sats in use
+    if (hist_tok(line,7,f,sizeof f)==0) hs_fix.hdop = atof(f);
+    hs_fix.seen = now;
+  } else if (!strncmp(typ,"GSV,",4)){
+    char tk[3] = { line[1], line[2], 0 };
+    // sats start at field 3, four fields each: prn, el, az, cn0
+    for (int s=0;s<4;s++){
+      char prn[8]="", el[8]="", az[8]="", cn[8]="";
+      if (hist_tok(line,3+s*4,prn,sizeof prn)!=0 || !prn[0]) break;
+      hist_tok(line,4+s*4,el,sizeof el); hist_tok(line,5+s*4,az,sizeof az); hist_tok(line,6+s*4,cn,sizeof cn);
+      int p_=atoi(prn); if (p_<=0) continue;
+      int i;
+      for (i=0;i<hs_n;i++) if (hs_sat[i].prn==p_ && !strcmp(hs_sat[i].tk,tk)) break;
+      if (i==hs_n){ if (hs_n>=HS_MAX) continue; hs_n++; snprintf(hs_sat[i].tk,3,"%s",tk); hs_sat[i].prn=p_; }
+      hs_sat[i].el=atoi(el); hs_sat[i].az=atoi(az); hs_sat[i].cn0=cn[0]?atoi(cn):-1; hs_sat[i].seen=now;
+    }
+  }
+  // GSA adds nothing the S row needs beyond GGA (fix type ~ quality; DOP ~ hdop) — skipped by design.
+}
+static void hist_S(double now){
+  FILE *f = hist_file((time_t)now); if (!f) return;
+  if (now - hs_fix.seen > 90 ) return;                        // no live NMEA → nothing real to record
+  fprintf(f,"S,%.0f,%d,%d,%.2f,", now, hs_fix.fix, hs_fix.used, hs_fix.hdop);
+  int first=1;
+  for (int i=0;i<hs_n;i++){
+    if (now - hs_sat[i].seen > 90) continue;                  // aged out of view
+    fprintf(f,"%s%s%d:%d:%d:%d", first?"":";", hs_sat[i].tk, hs_sat[i].prn, hs_sat[i].az, hs_sat[i].el, hs_sat[i].cn0);
+    first=0;
+  }
+  fputc('\n',f);
+}
+// GET /history?series=timing|sky&from=E&to=E&points=N  →  decimated CSV (server-side min/max/mean
+// buckets, so a 90-day chart is one small response). Returns a malloc'd body; caller frees.
+static char *hist_query(const char *qs, size_t *blen){
+  char series[8]="timing"; double from=0, to=(double)time(NULL); long points=800;
+  char f[40];
+  const char *p;
+  if ((p=strstr(qs,"series="))) { size_t n=0; p+=7; while(p[n]&&p[n]!='&'&&n<7){series[n]=p[n];n++;} series[n]=0; }
+  if ((p=strstr(qs,"from=")))   { snprintf(f,sizeof f,"%.30s",p+5); from=atof(f); }
+  if ((p=strstr(qs,"to=")))     { snprintf(f,sizeof f,"%.30s",p+3); to=atof(f); }
+  if ((p=strstr(qs,"points="))) { points=atol(p+7); }
+  if (from<=0) from = to-21600;
+  if (to<=from || points<2) return NULL;
+  if (points>4000) points=4000;
+  int sky = !strcmp(series,"sky");
+  typedef struct { double mn,mx,sum,jit,ppm,tmp,hdop,cn0s; int n,fix,used,sats,cn0mx; } B;
+  B *b = calloc(points,sizeof(B)); if(!b) return NULL;
+  for (long i=0;i<points;i++){ b[i].mn=1e99; b[i].mx=-1e99; }
+  for (time_t d = (time_t)from - ((time_t)from % 86400); d <= (time_t)to; d += 86400){
+    char day[16], path[4400]; hist_day_of(d,day,sizeof day);
+    snprintf(path,sizeof path,"%s/%s.log",opt_hist,day);
+    FILE *fp=fopen(path,"r"); if(!fp) continue;
+    char ln[2048];
+    while (fgets(ln,sizeof ln,fp)){
+      double t; char typ=ln[0];
+      if (ln[1]!=',' ) continue;
+      t=atof(ln+2); if (t<from||t>to) continue;
+      long i=(long)((t-from)*points/(to-from)); if(i<0)i=0; if(i>=points)i=points-1;
+      if (typ=='T' && !sky){
+        double off,jit,ppm,tmp;
+        if (sscanf(ln,"T,%*f,%lf,%lf,%lf,%lf",&off,&jit,&ppm,&tmp)!=4) continue;
+        if (off<b[i].mn)b[i].mn=off; if (off>b[i].mx)b[i].mx=off;
+        b[i].sum+=off; b[i].jit=jit; b[i].ppm=ppm; b[i].tmp=tmp; b[i].n++;
+      } else if (typ=='S' && sky){
+        int fx,used; double hd;
+        if (sscanf(ln,"S,%*f,%d,%d,%lf,",&fx,&used,&hd)!=3) continue;
+        b[i].fix=fx; b[i].used=used; b[i].hdop=hd; b[i].n++;
+        b[i].sats=0; b[i].cn0s=0; b[i].cn0mx=0;
+        const char *s=ln; for(int k=0;k<5;k++){ s=strchr(s,','); if(!s)break; s++; }
+        int ncn=0;
+        while (s && *s && *s!='\n'){
+          const char *c1=strchr(s,':'), *c2=c1?strchr(c1+1,':'):0, *c3=c2?strchr(c2+1,':'):0;
+          if(!c3) break;
+          int cn=atoi(c3+1);
+          b[i].sats++;
+          if (cn>0){ b[i].cn0s+=cn; ncn++; if(cn>b[i].cn0mx)b[i].cn0mx=cn; }
+          s=strchr(c3,';'); if(s)s++;
+        }
+        if (ncn) b[i].cn0s/=ncn;
+      }
+    }
+    fclose(fp);
+  }
+  size_t cap = points*100 + 128;
+  char *out = malloc(cap); if(!out){ free(b); return NULL; }
+  size_t o=0;
+  o += snprintf(out+o,cap-o, sky ? "t,fix,used,hdop,nsats,cn0_mean,cn0_max\n"
+                                 : "t,off_min,off_max,off_mean,jit,ppm,temp\n");
+  for (long i=0;i<points;i++){
+    if (!b[i].n) continue;
+    double t = from + (i+0.5)*(to-from)/points;
+    if (sky) o += snprintf(out+o,cap-o,"%.0f,%d,%d,%.2f,%d,%.1f,%d\n",
+                           t,b[i].fix,b[i].used,b[i].hdop,b[i].sats,b[i].cn0s,b[i].cn0mx);
+    else     o += snprintf(out+o,cap-o,"%.0f,%.1f,%.1f,%.1f,%.1f,%.3f,%.1f\n",
+                           t,b[i].mn,b[i].mx,b[i].sum/b[i].n,b[i].jit,b[i].ppm,b[i].tmp);
+    if (o > cap-120) break;
+  }
+  free(b); *blen=o; return out;
+}
+// history summary for /health: {"from":"YYYY-MM-DD","days":N,"bytes":B} into out (or "null").
+static void hist_summary(char *out, size_t cap){
+  if (!opt_hist){ snprintf(out,cap,"null"); return; }
+  DIR *d=opendir(opt_hist);
+  if (!d){ snprintf(out,cap,"null"); return; }
+  struct dirent *e; char first[16]=""; int days=0; long long bytes=0;
+  while ((e=readdir(d))){
+    size_t n=strlen(e->d_name);
+    if (n!=14 || strcmp(e->d_name+10,".log")) continue;
+    days++;
+    if (!first[0] || strncmp(e->d_name,first,10)<0) snprintf(first,sizeof first,"%.10s",e->d_name);
+    char p[4400]; struct stat st;
+    snprintf(p,sizeof p,"%s/%s",opt_hist,e->d_name);
+    if (stat(p,&st)==0) bytes += st.st_size;
+  }
+  closedir(d);
+  if (!days) snprintf(out,cap,"null");
+  else snprintf(out,cap,"{\"from\":\"%s\",\"days\":%d,\"bytes\":%lld}",first,days,bytes);
+}
+
 static void pf_emit_chrony(double wall, double off){
   if (!opt_dry) chrony_send(wall,off);
+  hist_T(wall,off);                        // the flight recorder logs exactly what steers chrony
   if (opt_verb || opt_dry)
     fprintf(stderr,"[pccd] avg%d offset=%+11.6fs (trimmed mean %s chrony)%s\n",
             PF_AGG, off, (g_chrony>=0&&!opt_dry)?"->":"-x", opt_dry?"  [dry]":"");
@@ -693,25 +885,40 @@ static void http_or_upgrade(Client *c){
     int len = sp ? (int)(sp-p) : 0;
     if (len>0 && len<(int)sizeof path){ memcpy(path,p,len); path[len]=0; }
   }
-  char *q=strchr(path,'?'); if (q) *q=0;                    // drop the query string
+  char *q=strchr(path,'?'); if (q) *q++=0;                  // split off the query string (q = params or NULL)
 
+  if (!strncmp(path,"/history",8)){
+    // decimated archive readout — CORS-open like /health so the hosted app can chart it too
+    size_t blen=0;
+    char *body = opt_hist ? hist_query(q?q:"",&blen) : NULL;
+    if (!body){ http_simple(c,"404 Not Found","text/plain","no history\n"); return; }
+    char hdr[256];
+    int hn=snprintf(hdr,sizeof hdr,
+      "HTTP/1.1 200 OK\r\nContent-Type: text/csv\r\nAccess-Control-Allow-Origin: *\r\n"
+      "Content-Length: %zu\r\nConnection: close\r\n\r\n",blen);
+    if (write(c->fd,hdr,hn)>0){
+      for (size_t off=0; off<blen; ){ ssize_t w=write(c->fd,body+off,blen-off); if (w<=0) break; off+=(size_t)w; }
+    }
+    free(body); close(c->fd); c->fd=-1; return;
+  }
   if (!strncmp(path,"/health",7)){
     // liveness, not just presence: is the tty open, when did the last accepted PPS land, what was
     // it, and how many samples have flowed vs been rejected — so the app can tell a streaming clock
     // from one that unplugged (serial_open:false) or went quiet (last_sample_age_s grows unbounded).
-    char json[900], agebuf[32], offbuf[32];
+    char json[1100], agebuf[32], offbuf[32], histbuf[96];
     if (g_last_sample_mono>0){
       snprintf(agebuf,sizeof agebuf,"%.3f",(now_mono_ns()-g_last_sample_mono)*1e-9);
       snprintf(offbuf,sizeof offbuf,"%.9f",g_last_offset);
     } else { snprintf(agebuf,sizeof agebuf,"null"); snprintf(offbuf,sizeof offbuf,"null"); }
+    hist_summary(histbuf,sizeof histbuf);
     snprintf(json,sizeof json,
       "{\"pccd\":1,\"version\":\"" PCCD_VERSTR "\",\"device\":\"%s\",\"chrony\":%s,"
       "\"serial_open\":%s,\"last_sample_age_s\":%s,\"last_offset_s\":%s,\"sent\":%ld,\"rejected\":%ld,"
-      "\"updatable\":%s,\"platform\":\"%s\"}",
+      "\"updatable\":%s,\"platform\":\"%s\",\"history\":%s}",
       g_devpath, (g_chrony>=0)?"true":"false",
       g_serial_open?"true":"false", agebuf, offbuf, g_nsent, g_nseen-g_nsent,
-      g_updatable?"true":"false", g_platform?g_platform:"");
-    char resp[1024];
+      g_updatable?"true":"false", g_platform?g_platform:"", histbuf);
+    char resp[1400];
     int n=snprintf(resp,sizeof resp,
       "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\n"
       "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",strlen(json),json);
@@ -766,7 +973,7 @@ static void ws_read(Client *c, int serial_fd){
 
 // ---- $PMTXTS ------------------------------------------------------------------------------------
 // $PMTXTS,seq,epoch,subms,systick,load,calerr,sincecal,temp,flags[,dwt_pps,sof_frame,dwt_sof]*CC
-typedef struct { unsigned long seq, epoch; long flags; uint32_t dwt_pps,dwt_sof; unsigned sof_frame; int ext; } Pmtxts;
+typedef struct { unsigned long seq, epoch; long flags; long calerr; double temp; uint32_t dwt_pps,dwt_sof; unsigned sof_frame; int ext; } Pmtxts;
 static int parse_pmtxts(const char *line, Pmtxts *o){
   char body[512]; snprintf(body,sizeof body,"%s",line+1);
   char *star=strchr(body,'*'); if (star) *star=0;
@@ -774,6 +981,7 @@ static int parse_pmtxts(const char *line, Pmtxts *o){
   for (char *p=s; ; p++){ if (*p==','||*p=='\0'){ tok[nt++]=s; int end=(*p=='\0'); *p='\0'; s=p+1; if (end||nt>=16) break; } }
   if (nt < 9) return -1;
   o->seq=strtoul(tok[0],NULL,10); o->epoch=strtoul(tok[1],NULL,10); o->flags=strtol(tok[8],NULL,16);
+  o->calerr=strtol(tok[5],NULL,10); o->temp=strtod(tok[7],NULL);   // RTC cal error + die temp — the history log's ppm/temp columns
   if (nt >= 12){ o->dwt_pps=(uint32_t)strtoul(tok[9],NULL,10); o->sof_frame=(unsigned)strtoul(tok[10],NULL,10);
                  o->dwt_sof=(uint32_t)strtoul(tok[11],NULL,10); o->ext=1; }
   else o->ext=0;
@@ -955,6 +1163,8 @@ int main(int argc, char **argv){
     "  -p port   HTTP/WebSocket port on 127.0.0.1, 1..65535 (default 4192)\n"
     "  -s path   chrony SOCK path (default /var/run/chrony.pcc.sock)\n"
     "  -w dir    serve the PCC web app from this dir (same-origin bridge)\n"
+    "  -H dir    history dir for the flight recorder (default: history/ next to the binary; 'off' disables)\n"
+    "  -R days   history retention, prune older files at rotation (default 365)\n"
     "  -o secs   fixed offset trim added to every sample\n"
     "  -n        dry run: compute offsets, never write to chrony\n"
     "  -v        verbose per-sample logging\n"
@@ -975,12 +1185,14 @@ int main(int argc, char **argv){
     else if (!strcmp(a,"-r")) opt_raw=1;
     else if (!strcmp(a,"-t")) return self_test();
     else if (!strcmp(a,"-T")) return frame_probe();
-    else if (!strcmp(a,"-d")||!strcmp(a,"-p")||!strcmp(a,"-s")||!strcmp(a,"-o")||!strcmp(a,"-w")){
+    else if (!strcmp(a,"-d")||!strcmp(a,"-p")||!strcmp(a,"-s")||!strcmp(a,"-o")||!strcmp(a,"-w")||!strcmp(a,"-H")||!strcmp(a,"-R")){
       if (i+1>=argc){ fprintf(stderr,"[pccd] missing value for %s\n%s",a,USAGE); return 2; }
       const char *val=argv[++i];
       if (!strcmp(a,"-d")) opt_dev=val;
       else if (!strcmp(a,"-s")) opt_sock=val;
       else if (!strcmp(a,"-o")) opt_trim=atof(val);
+      else if (!strcmp(a,"-H")){ if (!strcmp(val,"off")){ opt_hist=NULL; opt_hist_off=1; } else opt_hist=val; }
+      else if (!strcmp(a,"-R")){ int r=atoi(val); if (r<1){ fprintf(stderr,"[pccd] invalid -R '%s' (want days >= 1)\n",val); return 2; } opt_retain=r; }
       else if (!strcmp(a,"-w")){ opt_webroot=val; opt_webroot_flag=1; }   // serve the PCC app same-origin (e07d308)
       else {                                              // -p: reject non-numeric / out-of-range ports
         char *end=NULL; long p=strtol(val,&end,10);
@@ -992,6 +1204,15 @@ int main(int argc, char **argv){
     else { fprintf(stderr,"[pccd] unknown option %s\n%s",a,USAGE); return 2; }
   }
   if (!opt_webroot) opt_webroot = find_bundled_app();   // release tarball ships pccd next to pcc-web/
+  // Flight recorder default: history/ next to the binary (service installs -> /usr/local/pcc/history).
+  static char histdef[4200];
+  if (!opt_hist && !opt_hist_off){
+    char self[4096];
+    if (exe_realpath(self,sizeof self)==0){
+      char *sl=strrchr(self,'/');
+      if (sl){ *sl=0; snprintf(histdef,sizeof histdef,"%s/history",self); opt_hist=histdef; }
+    }
+  }
   // Self-update is allowed only for a real downloaded tarball: platform baked in, app bundled alongside,
   // and no explicit -w (which marks a dev checkout). This keeps a developer's -w daemon untouched.
   g_updatable = (g_platform!=NULL) && !opt_webroot_flag && (opt_webroot!=NULL);
@@ -1011,6 +1232,7 @@ int main(int argc, char **argv){
   if (bakpath[0]) bak_reap_at = now_mono_ns() + 15e9;   // port bound → arm the rollback-copy reap
   fprintf(stderr,"[pccd] v" PCCD_VERSTR " — http/ws on http://127.0.0.1:%d  (health: /health)%s\n",opt_port,opt_dry?"  [DRY RUN]":"");
   if (opt_webroot) fprintf(stderr,"[pccd] serving the PCC app from %s\n[pccd]   -> open http://localhost:%d in ANY browser, then CONNECT DEVICE\n",opt_webroot,opt_port);
+  if (opt_hist) fprintf(stderr,"[pccd] flight recorder: %s (retain %d days; -H off to disable)\n",opt_hist,opt_retain);
   else fprintf(stderr,"[pccd] no bundled app found next to this binary — open the hosted app in a Chromium\n[pccd]   browser (it will use this bridge), or pass -w <web-dir> to serve the app same-origin\n");
 
   int sfd=-1; double next_retry=0;
@@ -1021,6 +1243,9 @@ int main(int argc, char **argv){
     double t_iter = now_mono_ns();   // spin-guard: iteration start; did_serial gates the floor sleep
     int did_serial = 0;
     if (bakpath[0] && t_iter > bak_reap_at){ unlink(bakpath); bakpath[0]=0; }   // update proven healthy → drop rollback copy
+    // Sky snapshot: one S row per 60 s while NMEA is flowing (hist_S self-gates on freshness).
+    { static double next_snap=0;
+      if (opt_hist && t_iter > next_snap){ hist_S((double)time(NULL)); next_snap = t_iter + 60e9; } }
     // Self-heal the $PMTXTS stream: port open but nothing landing for 60 s → re-assert `pps = on`.
     // Covers a clock reboot (back to the pps=off config default), a reflash, and any app that switched
     // it off behind our back. Costs one 10-byte write a minute in the worst case (no GPS lock).
@@ -1104,11 +1329,14 @@ int main(int argc, char **argv){
           line[li]=0; int len=li; li=0;
           if (!len) continue;
           broadcast_line(line);                          // every line goes to every PCC tab
+          if (len>10 && (line[0]=='$') && strncmp(line,"$PMTXTS,",8))
+            hist_feed_nmea(line,(double)time(NULL));     // GGA/GSV update the recorder's sat table
           if (len>8 && !strncmp(line,"$PMTXTS,",8)){
             uint64_t hf; double hmono; int gotF=(usb_frame(&hf,&hmono)==0);
             Pmtxts x;
             if (parse_pmtxts(line,&x)==0){
               g_nseen++;
+              g_last_ppm = x.calerr*1e6/(32768.0*63.0); g_last_temp = x.temp; g_have_tstats = 1;
               if (x.ext && havePrev){ int32_t d=(int32_t)(x.dwt_pps-prevDwt);
                 if (d>60000000 && d<100000000){ f_dwt = haveRate ? 0.9*f_dwt+0.1*d : (double)d; haveRate=1; } }
               if (x.ext){ prevDwt=x.dwt_pps; havePrev=1; }

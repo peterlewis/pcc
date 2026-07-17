@@ -1009,3 +1009,84 @@ export function drawDacCurve(canvas, tok, points, dragIdx) {
     ctx.strokeStyle = tok.led; ctx.lineWidth = 1.4; ctx.stroke(); ctx.lineWidth = 1;
   });
 }
+
+// ---- pccd flight-recorder archive -----------------------------------------------------------------
+// Rows come from GET /history (server-side decimated CSV parsed in serial.js). Absolute-time x-axis:
+// these charts show a recorded range, so ends are labelled with wall-clock times, not "-30m..now".
+function archAbsent(ctx, w, h, tok, msg) {
+  ctx.font = F10; ctx.fillStyle = tok.txt3; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(msg, w / 2, h / 2);
+}
+function archXLabels(ctx, tok, fr, h, t0, t1) {
+  const f = (t) => { const d = new Date(t * 1000); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const day = (t) => { const d = new Date(t * 1000); return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0'); };
+  ctx.font = F9; ctx.fillStyle = tok.txt3; ctx.textBaseline = 'top';
+  // ≤20 h: clock time reads unambiguously. Longer spans wrap midnight, so carry the date.
+  const span = t1 - t0;
+  const lab = (t) => span > 172800 ? day(t) : (span > 72000 ? day(t) + ' ' + f(t) : f(t));
+  ctx.textAlign = 'left'; ctx.fillText(lab(t0), fr.m.l, h - 12);
+  ctx.textAlign = 'right'; ctx.fillText(lab(t1), fr.m.l + fr.iw, h - 12);
+}
+export function drawArchiveOffset(canvas, tok, rows) {
+  const { ctx, w, h } = c2d(canvas);
+  clear(ctx, w, h, tok);
+  const fr = frame(ctx, w, h, tok, { ml: 48, mb: 16 });
+  if (!rows || !rows.length) { archAbsent(ctx, w, h, tok, 'NO ARCHIVE DATA IN RANGE'); return; }
+  const t0 = rows[0].t, t1 = rows[rows.length - 1].t || t0 + 1;
+  let lo = Infinity, hi = -Infinity;
+  for (const r of rows) { if (r.off_min < lo) lo = r.off_min; if (r.off_max > hi) hi = r.off_max; }
+  const pad = Math.max((hi - lo) * 0.15, 1); lo -= pad; hi += pad;
+  const X = (t) => fr.X((t - t0) / (t1 - t0)), Y = (v) => fr.Y((v - lo) / (hi - lo));
+  yTicks(ctx, tok, fr, [lo + (hi - lo) * 0.1, (lo + hi) / 2, hi - (hi - lo) * 0.1].map((v) => ({ v, f: (v - lo) / (hi - lo) })), (v) => (Math.abs(v) >= 1000 ? (v / 1000).toFixed(1) + 'ms' : Math.round(v) + 'µs'));
+  ctx.fillStyle = 'rgba(255,59,46,0.16)';                        // min..max band per bucket
+  ctx.beginPath();
+  rows.forEach((r, i) => { const x = X(r.t); i ? ctx.lineTo(x, Y(r.off_max)) : ctx.moveTo(x, Y(r.off_max)); });
+  for (let i = rows.length - 1; i >= 0; i--) ctx.lineTo(X(rows[i].t), Y(rows[i].off_min));
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = tok.led; ctx.lineWidth = 1.25; ctx.beginPath();
+  rows.forEach((r, i) => { const x = X(r.t), y = Y(r.off_mean); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  ctx.stroke();
+  if (lo < 0 && hi > 0) { ctx.strokeStyle = tok.line; ctx.globalAlpha = 0.7; ctx.beginPath(); ctx.moveTo(fr.m.l, Y(0)); ctx.lineTo(fr.m.l + fr.iw, Y(0)); ctx.stroke(); ctx.globalAlpha = 1; }
+  archXLabels(ctx, tok, fr, h, t0, t1);
+}
+export function drawArchiveAux(canvas, tok, rows) {
+  const { ctx, w, h } = c2d(canvas);
+  clear(ctx, w, h, tok);
+  const fr = frame(ctx, w, h, tok, { ml: 48, mb: 16, mr: 44 });
+  if (!rows || !rows.length) { archAbsent(ctx, w, h, tok, 'NO ARCHIVE DATA IN RANGE'); return; }
+  const t0 = rows[0].t, t1 = rows[rows.length - 1].t || t0 + 1;
+  const X = (t) => fr.X((t - t0) / (t1 - t0));
+  const span = (k) => { let lo = Infinity, hi = -Infinity; for (const r of rows) { if (r[k] < lo) lo = r[k]; if (r[k] > hi) hi = r[k]; } const p = Math.max((hi - lo) * 0.15, 0.05); return [lo - p, hi + p]; };
+  const [plo, phi] = span('ppm'), [tlo, thi] = span('temp');
+  const Yp = (v) => fr.Y((v - plo) / (phi - plo)), Yt = (v) => fr.Y((v - tlo) / (thi - tlo));
+  yTicks(ctx, tok, fr, [plo + (phi - plo) * 0.12, phi - (phi - plo) * 0.12].map((v) => ({ v, f: (v - plo) / (phi - plo) })), (v) => v.toFixed(2));
+  ctx.font = F9; ctx.fillStyle = tok.acq; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText(thi.toFixed(1) + '°', fr.m.l + fr.iw + 4, Yt(thi - (thi - tlo) * 0.12));
+  ctx.fillText(tlo.toFixed(1) + '°', fr.m.l + fr.iw + 4, Yt(tlo + (thi - tlo) * 0.12));
+  ctx.strokeStyle = tok.led; ctx.lineWidth = 1.25; ctx.beginPath();
+  rows.forEach((r, i) => { i ? ctx.lineTo(X(r.t), Yp(r.ppm)) : ctx.moveTo(X(r.t), Yp(r.ppm)); }); ctx.stroke();
+  ctx.strokeStyle = tok.acq; ctx.lineWidth = 1; ctx.beginPath();
+  rows.forEach((r, i) => { i ? ctx.lineTo(X(r.t), Yt(r.temp)) : ctx.moveTo(X(r.t), Yt(r.temp)); }); ctx.stroke();
+  archXLabels(ctx, tok, fr, h, t0, t1);
+}
+export function drawArchiveSky(canvas, tok, rows) {
+  const { ctx, w, h } = c2d(canvas);
+  clear(ctx, w, h, tok);
+  const fr = frame(ctx, w, h, tok, { ml: 40, mb: 16, mr: 48 });
+  if (!rows || !rows.length) { archAbsent(ctx, w, h, tok, 'NO ARCHIVE DATA IN RANGE'); return; }
+  const t0 = rows[0].t, t1 = rows[rows.length - 1].t || t0 + 1;
+  const X = (t) => fr.X((t - t0) / (t1 - t0));
+  const Yc = (v) => fr.Y(Math.min(v, 56) / 56);                  // C/N0 fixed 0..56 dB-Hz
+  let umax = 1; for (const r of rows) if (r.used > umax) umax = r.used;
+  const Yu = (v) => fr.Y(v / (umax + 2));
+  yTicks(ctx, tok, fr, [{ v: 20, f: 20 / 56 }, { v: 40, f: 40 / 56 }], (v) => v + 'dB');
+  ctx.font = F9; ctx.fillStyle = tok.acq; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText(umax + ' SAT', fr.m.l + fr.iw + 4, Yu(umax));
+  ctx.strokeStyle = tok.txt3; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); ctx.beginPath();
+  rows.forEach((r, i) => { i ? ctx.lineTo(X(r.t), Yc(r.cn0_max)) : ctx.moveTo(X(r.t), Yc(r.cn0_max)); }); ctx.stroke(); ctx.setLineDash([]);
+  ctx.strokeStyle = tok.led; ctx.lineWidth = 1.25; ctx.beginPath();
+  rows.forEach((r, i) => { i ? ctx.lineTo(X(r.t), Yc(r.cn0_mean)) : ctx.moveTo(X(r.t), Yc(r.cn0_mean)); }); ctx.stroke();
+  ctx.strokeStyle = tok.acq; ctx.beginPath();
+  rows.forEach((r, i) => { i ? ctx.lineTo(X(r.t), Yu(r.used)) : ctx.moveTo(X(r.t), Yu(r.used)); }); ctx.stroke();
+  archXLabels(ctx, tok, fr, h, t0, t1);
+}
