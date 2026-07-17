@@ -1232,6 +1232,87 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 <div style="margin:10px 12px;padding:8px 10px;background:var(--well);border:1px solid var(--line2);font-family:var(--mono);font-size:var(--fs-label);color:var(--txt);white-space:pre;overflow-x:auto;line-height:1.7">{{compLine}}</div>
                 <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">NEEDS DRAFT FIRMWARE WITH pps=on ($PMTXTS TIMESTAMP + DIE TEMP). FITS ppm(T) FROM RTC CALIBRATION ERROR AND PRODUCES A tc_* SEED BLOCK FOR config.txt (tc_seed=on GOES LAST). tc_dump ON THE CLOCK IS THE REFERENCE. ABSOLUTE UTC OFFSET IS NOT MEASURABLE OVER USB (≈1 ms), SO JITTER, STABILITY AND DRIFT ARE SHOWN.</div>
               </section>
+
+              <!-- 07 · SIGNAL PATH — the pccd prefilter explainer (real pf_push math on a labelled model) -->
+              <section style="background:var(--panel);border:1px solid var(--line);grid-column:1/-1">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:27px;padding:4px 11px;background:var(--strip);border-bottom:1px solid var(--line);flex-wrap:wrap">
+                  <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">07 · SIGNAL PATH — pccd PREFILTER</span>
+                  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                    <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:{{spChipCol}}">{{spChipTxt}}</span>
+                    <button onClick="{{onSpReset}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt2);background:transparent;border:1px solid var(--line2);padding:3px 9px;cursor:pointer">RESET → RECOMMENDED</button>
+                  </div>
+                </div>
+                <div style="padding:6px 12px 0;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3)">RAW PPS OFFSETS IN, ONE TRIMMED MEAN OUT PER GROUP. A MAD GATE DROPS OUTLIERS, A TRIMMED MEAN OF {{spGVal}} CUTS SCATTER ~√{{spGVal}}.</div>
+                <!-- readout band -->
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));border-bottom:1px solid var(--line-soft);border-top:1px solid var(--line-soft);margin-top:8px">
+                  <div style="padding:8px 12px;border-right:1px solid var(--line-soft)">
+                    <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">RAW → CLEAN RMS</div>
+                    <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt)">{{spRawRms}}<span style="color:var(--txt3)"> → </span><span style="color:var(--lock)">{{spCleanRms}}</span><span style="font-size:var(--fs-label);font-weight:400;color:var(--txt3)"> µs</span></div>
+                  </div>
+                  <div style="padding:8px 12px;border-right:1px solid var(--line-soft)">
+                    <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">REDUCTION</div>
+                    <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt-hi)">{{spReduction}}</div>
+                    <div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3);margin-top:3px">AGGREGATE {{spSqrtG}}</div>
+                  </div>
+                  <div style="padding:8px 12px;border-right:1px solid var(--line-soft)">
+                    <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">REJECTED</div>
+                    <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt)"><span style="color:var(--led)">{{spRej}}</span><span style="font-size:var(--fs-label);font-weight:400;color:var(--txt3)"> / {{spTot}}</span></div>
+                  </div>
+                  <div style="padding:8px 12px;border-right:1px solid var(--line-soft)">
+                    <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">KEPT</div>
+                    <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt)">{{spKept}}</div>
+                  </div>
+                  <div style="padding:8px 12px;border-right:1px solid var(--line-soft)">
+                    <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">GROUPS OUT</div>
+                    <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt)">{{spGroups}}</div>
+                    <div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3);margin-top:3px">1 PER ~{{spGVal}} s</div>
+                  </div>
+                  <div style="padding:8px 12px">
+                    <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">GATE</div>
+                    <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt)">{{spGate}}<span style="font-size:var(--fs-label);font-weight:400;color:var(--txt3)"> µs</span></div>
+                    <div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3);margin-top:3px">{{spGateSub}}</div>
+                  </div>
+                </div>
+                <!-- hero canvas -->
+                <div style="padding:12px"><canvas ref="{{refSignalPath}}" style="width:100%;height:320px;display:block"></canvas></div>
+                <!-- control rail -->
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px 24px;padding:0 12px 4px">
+                  <div>
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">GATE σ ×K</span><span style="font-family:var(--mono);font-size:var(--fs-data);color:{{spKCol}}">{{spKVal}}</span></div>
+                    <input type="range" min="{{spKMin}}" max="{{spKMax}}" step="{{spKStep}}" value="{{spKVal}}" onInput="{{onSpK}}" aria-label="gate sigma multiplier" style="width:100%">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:1px"><button onClick="{{onSpKRec}}" title="snap to recommended" style="font-family:var(--mono);font-size:var(--fs-pico);letter-spacing:.08em;color:var(--txt3);background:transparent;border:0;padding:0;cursor:pointer">REC 3.0</button><span style="font-family:var(--mono);font-size:var(--fs-pico);letter-spacing:.05em;color:var(--txt3)">TIGHTER DROPS GOOD · LOOSER PASSES OUTLIERS</span></div>
+                  </div>
+                  <div>
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">GATE WINDOW</span><span style="font-family:var(--mono);font-size:var(--fs-data);color:{{spWCol}}">{{spWVal}}</span></div>
+                    <input type="range" min="{{spWMin}}" max="{{spWMax}}" step="{{spWStep}}" value="{{spWVal}}" onInput="{{onSpW}}" aria-label="gate window samples" style="width:100%">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:1px"><button onClick="{{onSpWRec}}" title="snap to recommended" style="font-family:var(--mono);font-size:var(--fs-pico);letter-spacing:.08em;color:var(--txt3);background:transparent;border:0;padding:0;cursor:pointer">REC 64</button><span style="font-family:var(--mono);font-size:var(--fs-pico);letter-spacing:.05em;color:var(--txt3)">RING FOR MEDIAN + MAD</span></div>
+                  </div>
+                  <div>
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">GROUP SIZE</span><span style="font-family:var(--mono);font-size:var(--fs-data);color:{{spGCol}}">{{spGVal}}</span></div>
+                    <input type="range" min="{{spGMin}}" max="{{spGMax}}" step="{{spGStep}}" value="{{spGVal}}" onInput="{{onSpG}}" aria-label="trimmed-mean group size" style="width:100%">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:1px"><button onClick="{{onSpGRec}}" title="snap to recommended" style="font-family:var(--mono);font-size:var(--fs-pico);letter-spacing:.08em;color:var(--txt3);background:transparent;border:0;padding:0;cursor:pointer">REC 8</button><span style="font-family:var(--mono);font-size:var(--fs-pico);letter-spacing:.05em;color:var(--txt3)">SCATTER ÷ √GROUP</span></div>
+                  </div>
+                  <div>
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">σ FLOOR µs</span><span style="font-family:var(--mono);font-size:var(--fs-data);color:{{spFCol}}">{{spFVal}}</span></div>
+                    <input type="range" min="{{spFMin}}" max="{{spFMax}}" step="{{spFStep}}" value="{{spFVal}}" onInput="{{onSpF}}" aria-label="sigma floor microseconds" style="width:100%">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:1px"><button onClick="{{onSpFRec}}" title="snap to recommended" style="font-family:var(--mono);font-size:var(--fs-pico);letter-spacing:.08em;color:var(--txt3);background:transparent;border:0;padding:0;cursor:pointer">REC 5</button><span style="font-family:var(--mono);font-size:var(--fs-pico);letter-spacing:.05em;color:var(--txt3)">NEVER GATE TIGHTER THAN THIS</span></div>
+                  </div>
+                  <div>
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">corrtimeratio</span><span style="font-family:var(--mono);font-size:var(--fs-data);color:{{spCCol}}">{{spCVal}}</span></div>
+                    <input type="range" min="{{spCMin}}" max="{{spCMax}}" step="{{spCStep}}" value="{{spCVal}}" onInput="{{onSpC}}" aria-label="chrony corrtimeratio" style="width:100%">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:1px"><button onClick="{{onSpCRec}}" title="snap to recommended" style="font-family:var(--mono);font-size:var(--fs-pico);letter-spacing:.08em;color:var(--txt3);background:transparent;border:0;padding:0;cursor:pointer">REC 10</button><span style="font-family:var(--mono);font-size:var(--fs-pico);letter-spacing:.05em;color:var(--txt3)">DOWNSTREAM · CHRONY CORRECTION PACING</span></div>
+                  </div>
+                  <div style="display:flex;align-items:flex-end;gap:8px">
+                    <button onClick="{{onSpFreeze}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt2);background:transparent;border:1px solid var(--line2);padding:4px 11px;cursor:pointer">{{spFreezeLabel}}</button>
+                    <button onClick="{{onSpReseed}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3);background:transparent;border:1px solid var(--line2);padding:4px 11px;cursor:pointer">RESEED MODEL</button>
+                  </div>
+                </div>
+                <!-- chrony.conf emission -->
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px 2px"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">chrony.conf</span><button onClick="{{onSpCopy}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt2);background:transparent;border:1px solid var(--line2);padding:3px 9px;cursor:pointer">COPY</button></div>
+                <div style="margin:0 12px;padding:8px 10px;background:var(--well);border:1px solid var(--line2);font-family:var(--mono);font-size:var(--fs-label);color:var(--txt);white-space:pre;overflow-x:auto;line-height:1.7">{{spConfig}}</div>
+                <div style="padding:8px 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">{{spCaption}}</div>
+              </section>
+
               <sc-if value="{{archShown}}">
               <section style="background:var(--panel);border:1px solid var(--line);grid-column:1/-1">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:27px;padding:4px 11px;background:var(--strip);border-bottom:1px solid var(--line);flex-wrap:wrap"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">ARCHIVE — OFFSET TO GPS TIME</span><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button onClick="{{onArchR6}}" style="{{archR6Style}}">6H</button><button onClick="{{onArchR24}}" style="{{archR24Style}}">24H</button><button onClick="{{onArchR7}}" style="{{archR7Style}}">7D</button><button onClick="{{onArchRAll}}" style="{{archRAllStyle}}">ALL</button></div></div><div style="padding:6px 12px 0;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3)">{{archCaption}}</div>
@@ -1538,6 +1619,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=230"></script>
+<script type="module" src="js/app-controller.js?v=231"></script>
 </body>
 </html>

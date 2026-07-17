@@ -1090,3 +1090,141 @@ export function drawArchiveSky(canvas, tok, rows) {
   rows.forEach((r, i) => { i ? ctx.lineTo(X(r.t), Yu(r.used)) : ctx.moveTo(X(r.t), Yu(r.used)); }); ctx.stroke();
   archXLabels(ctx, tok, fr, h, t0, t1);
 }
+
+// ---- SIGNAL PATH — the pccd prefilter explainer ---------------------------------------------------
+// One hero canvas. LEFT: a live time-series of raw PPS offsets with the MAD gate keep-zone, the
+// rejected outliers on drop-ticks, and the trimmed-mean output trace. RIGHT (>=520px wide): a
+// co-registered marginal — raw vs clean distributions on the SAME microsecond ruler as the series,
+// so the variance collapse is one gesture on one axis. Consumes runPrefilter() output directly.
+//   pf   = { perSample:[{t,raw,med,sigma,lo,hi,rejected,gated}], groups:[{t,clean,members}], stats }
+//   opts = { K, window, reduced, nowIdx }   nowIdx = newest visible sample (the sweep cursor)
+function binCounts(vals, lo, hi, n) {
+  const b = new Array(n).fill(0);
+  const span = hi - lo || 1;
+  for (const v of vals) { let i = Math.floor((v - lo) / span * n); if (i < 0) i = 0; if (i >= n) i = n - 1; b[i]++; }
+  return b;
+}
+export function drawSignalPath(canvas, tok, pf, opts) {
+  const { ctx, w, h } = c2d(canvas);
+  clear(ctx, w, h, tok);
+  const O = opts || {};
+  const ps = pf && pf.perSample, gr = pf && pf.groups, st = pf && pf.stats;
+  if (!ps || !ps.length) {
+    ctx.font = F10; ctx.fillStyle = tok.txt3; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('NO MODEL STREAM', w / 2, h / 2); return;
+  }
+  const K = O.K != null ? O.K : 3;
+  const win = O.window || 64;
+  const reduced = !!O.reduced;
+  const nowIdx = O.nowIdx == null ? ps.length - 1 : Math.max(0, Math.min(ps.length - 1, O.nowIdx | 0));
+
+  // shared Y(offset µs) ruler — spans the FULL raw set so the cloud (incl. outliers) always fits
+  let lo = Infinity, hi = -Infinity;
+  for (const p of ps) { if (p.raw < lo) lo = p.raw; if (p.raw > hi) hi = p.raw; }
+  if (!isFinite(lo)) { lo = -1; hi = 1; }
+  const pad = Math.max((hi - lo) * 0.15, 2); lo -= pad; hi += pad;
+
+  // marginal reserve: only on a roomy canvas; below ~520px give the series the full width
+  const MR = w >= 520 ? Math.max(150, Math.min(184, w * 0.26)) : 0;
+  const fr = frame(ctx, w, h, tok, { ml: 46, mr: MR + (MR ? 12 : 10), mt: 10, mb: 18 });
+  const Y = (v) => fr.Y((v - lo) / (hi - lo));
+  const N = ps.length;
+  const X = (i) => fr.X(i / Math.max(1, N - 1));
+
+  yTicks(ctx, tok, fr, [lo + (hi - lo) * 0.12, (lo + hi) / 2, hi - (hi - lo) * 0.12].map((v) => ({ v, f: (v - lo) / (hi - lo) })),
+    (v) => (Math.abs(v) >= 1000 ? (v / 1000).toFixed(1) + 'ms' : Math.round(v) + 'µs'));
+  if (lo < 0 && hi > 0) { ctx.strokeStyle = tok.line; ctx.globalAlpha = 0.7; ctx.beginPath(); ctx.moveTo(fr.m.l, Y(0)); ctx.lineTo(fr.m.l + fr.iw, Y(0)); ctx.stroke(); ctx.globalAlpha = 1; }
+  ctx.font = F9; ctx.fillStyle = tok.txt3; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText('µs', 3, fr.m.t);
+
+  const latest = ps[nowIdx].gated ? ps[nowIdx] : (() => { for (let i = nowIdx; i >= 0; i--) if (ps[i].gated) return ps[i]; return null; })();
+  const med = latest ? latest.med : 0;
+
+  // 1 — MAD gate keep-zone: ribbon between lo/hi, flat lock-tint (no gradient), hairline edges
+  const gated = [];
+  for (let i = 0; i <= nowIdx; i++) if (ps[i].gated) gated.push(i);
+  if (gated.length > 1) {
+    ctx.beginPath();
+    gated.forEach((i, k) => { const x = X(i), y = Y(ps[i].hi); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    for (let k = gated.length - 1; k >= 0; k--) { const i = gated[k]; ctx.lineTo(X(i), Y(ps[i].lo)); }
+    ctx.closePath();
+    ctx.fillStyle = tok.lock; ctx.globalAlpha = 0.07; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.strokeStyle = tok.line2; ctx.lineWidth = 1;
+    for (const edge of ['hi', 'lo']) { ctx.beginPath(); gated.forEach((i, k) => { const x = X(i), y = Y(ps[i][edge]); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke(); }
+  }
+  // arming region (first samples, gate not yet engaged): faint tag
+  if (!ps[0].gated) {
+    const armEnd = gated.length ? gated[0] : nowIdx;
+    ctx.fillStyle = tok.txt3; ctx.font = F9; ctx.globalAlpha = 0.7; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillText('GATE ARMING', (fr.m.l + X(Math.max(1, armEnd))) / 2, fr.m.t + 3); ctx.globalAlpha = 1;
+  }
+
+  // 2 — running median (dashed)
+  if (gated.length > 1) {
+    ctx.strokeStyle = tok.txt3; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); ctx.beginPath();
+    gated.forEach((i, k) => { const x = X(i), y = Y(ps[i].med); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  // 3 — raw persistence phosphor: accepted raw samples as alpha-stacked squares (no glow)
+  ctx.fillStyle = tok.txt3;
+  for (let i = 0; i <= nowIdx; i++) { const p = ps[i]; if (p.rejected) continue; const age = nowIdx - i; ctx.globalAlpha = reduced ? 0.18 : (0.12 + 0.5 * Math.max(0, 1 - age / win)); sq(ctx, X(i), Y(p.raw), 3); }
+  ctx.globalAlpha = 1;
+
+  // 4 — rejected outliers: the one bold accent, on drop-ticks to the gate edge they crossed
+  let rejVis = 0;
+  ctx.fillStyle = tok.led; ctx.strokeStyle = tok.led;
+  for (let i = 0; i <= nowIdx; i++) { const p = ps[i]; if (!p.rejected) continue; rejVis++; const x = X(i); const edge = p.raw > p.med ? p.hi : p.lo; ctx.globalAlpha = 0.55; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, Y(p.raw)); ctx.lineTo(x, Y(edge)); ctx.stroke(); ctx.globalAlpha = 1; sq(ctx, x, Y(p.raw), 4); }
+  if (rejVis) { ctx.fillStyle = tok.led; ctx.font = F9; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('REJECTED ' + rejVis, fr.m.l + fr.iw - 2, fr.m.t + 3); }
+
+  // 5 — group boundary ticks (aggregation cadence)
+  ctx.strokeStyle = tok.lineSoft || tok.line; ctx.globalAlpha = 0.6; ctx.lineWidth = 1;
+  for (const g of gr) { if (g.t > nowIdx) continue; const x = X(g.t); ctx.beginPath(); ctx.moveTo(x, fr.m.t + fr.ih - 4); ctx.lineTo(x, fr.m.t + fr.ih); ctx.stroke(); }
+  ctx.globalAlpha = 1;
+
+  // 6 — clean output trace: the disciplined signal threading the cloud
+  const gvis = gr.filter((g) => g.t <= nowIdx);
+  if (gvis.length) {
+    ctx.strokeStyle = tok.lock; ctx.lineWidth = 1.5; ctx.beginPath();
+    gvis.forEach((g, k) => { const x = X(g.t), y = Y(g.clean); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke();
+    ctx.fillStyle = tok.lock;
+    gvis.forEach((g, k) => { const fresh = !reduced && k === gvis.length - 1 && (nowIdx - g.t) < 6; sq(ctx, X(g.t), Y(g.clean), fresh ? 4 : 3); });
+  }
+
+  // 7 — RMS envelopes (reference lines): wide raw band vs thin clean band, on the shared ruler
+  if (st) {
+    const drawEnv = (r, col, dash) => { ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash(dash); for (const s of [med + r, med - r]) { const y = Y(s); if (y < fr.m.t || y > fr.m.t + fr.ih) continue; ctx.beginPath(); ctx.moveTo(fr.m.l, y); ctx.lineTo(fr.m.l + fr.iw, y); ctx.stroke(); } ctx.setLineDash([]); };
+    ctx.globalAlpha = 0.6; drawEnv(st.rawRms, tok.txt3, [2, 3]); ctx.globalAlpha = 0.9; drawEnv(st.cleanRms, tok.lock, []); ctx.globalAlpha = 1;
+  }
+
+  // ---- RIGHT marginal: raw vs clean distributions on the SAME Y ruler ----
+  if (MR) {
+    const mx0 = fr.m.l + fr.iw + 14, mw = w - 8 - mx0, xs = mx0 + mw * 0.5, half = mw * 0.5 - 6;
+    const nb = 41, bh = fr.ih / nb;
+    ctx.strokeStyle = tok.line2; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(xs + 0.5, fr.m.t); ctx.lineTo(xs + 0.5, fr.m.t + fr.ih); ctx.stroke();
+    // Both marginals summarise the FULL sets (raw = every sample, clean = every group) so a partial
+    // sweep or a mid-fill FREEZE never compares mismatched populations; the live trace stays gvis.
+    const rawB = binCounts(ps.map((p) => p.raw), lo, hi, nb);
+    const clnB = binCounts(gr.map((g) => g.clean), lo, hi, nb);
+    const rawMax = Math.max(1, ...rawB), clnMax = Math.max(1, ...clnB);
+    // raw lobe grows LEFT (filled txt2), clean lobe grows RIGHT (lock outline)
+    ctx.fillStyle = tok.txt2; ctx.globalAlpha = 0.5;
+    for (let i = 0; i < nb; i++) { if (!rawB[i]) continue; const len = rawB[i] / rawMax * half; const y = fr.m.t + (nb - 1 - i) * bh; ctx.fillRect(xs - len, y + 0.5, len, Math.max(1, bh - 1)); }
+    ctx.globalAlpha = 1; ctx.strokeStyle = tok.lock; ctx.lineWidth = 1;
+    for (let i = 0; i < nb; i++) { if (!clnB[i]) continue; const len = clnB[i] / clnMax * half; const y = fr.m.t + (nb - 1 - i) * bh; ctx.strokeRect(xs + 0.5, y + 0.5, len, Math.max(1, bh - 1)); }
+    // ±K·σ verticals across the raw lobe; mass beyond tints amber (what the gate clips)
+    if (latest) {
+      ctx.strokeStyle = tok.line2; ctx.setLineDash([2, 2]); ctx.lineWidth = 1;
+      for (const s of [med + K * latest.sigma, med - K * latest.sigma]) { const y = Y(s); if (y < fr.m.t || y > fr.m.t + fr.ih) continue; ctx.beginPath(); ctx.moveTo(xs - half, y); ctx.lineTo(xs, y); ctx.stroke(); }
+      ctx.setLineDash([]);
+    }
+    // headers + σ brackets when there's room
+    ctx.font = F9; ctx.textBaseline = 'top';
+    ctx.fillStyle = tok.txt2; ctx.textAlign = 'center'; ctx.fillText('RAW', xs - half * 0.5, fr.m.t - 1);
+    ctx.fillStyle = tok.lock; ctx.fillText('CLEAN', xs + half * 0.5, fr.m.t - 1);
+    if (st && half > 40) {
+      const brk = (x, r, col, lab) => { ctx.strokeStyle = col; ctx.lineWidth = 1; const y0 = Y(med + r), y1 = Y(med - r); ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y1); ctx.moveTo(x - 2, y0); ctx.lineTo(x + 2, y0); ctx.moveTo(x - 2, y1); ctx.lineTo(x + 2, y1); ctx.stroke(); ctx.fillStyle = col; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.save(); ctx.translate(x, (y0 + y1) / 2); ctx.rotate(-Math.PI / 2); ctx.fillText(lab, 0, -5); ctx.restore(); };
+      brk(xs - half - 2, st.rawRms, tok.txt3, 'σ RAW');
+      brk(xs + half + 2, st.cleanRms, tok.lock, 'σ CLEAN');
+    }
+  }
+}
