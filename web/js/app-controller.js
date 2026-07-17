@@ -1238,12 +1238,61 @@ class Component extends DcLite {
   // the menu bar instead of width-constrained to the panel. Size it from the board geometry so
   // its proportions (M.W:M.H = 7.68:1, digits inset) are respected exactly — a true miniature —
   // and lay the hinge (link + pins) on the seam with identical relative math to sizeDispBar.
+  // Free width the header row can give the docked clock: row width minus every non-dock cluster.
+  // The flex:1 spacer is slack, not a claim, so it is excluded; ~52px covers the dock wrapper's own
+  // padding + collapse button. Valid whether or not the dock is currently mounted.
+  hdrDockAvail() {
+    const hdr = document.querySelector('header'); if (!hdr) return null;
+    if (hdr.clientWidth < 200) return null;   // header hidden / not laid out (fold screen) — measurement is meaningless
+    // Direct measure, robust against media-query overlays: what the dock may use = the spacer's slack
+    // + whatever the dock cluster already occupies, minus any genuine row overflow. Summing "all the
+    // other clusters" broke after a mobile round-trip (a full-width overlay child poisoned the sum).
+    let spacer = 0, dockW = 0;
+    for (const ch of hdr.children) {
+      const grow = parseFloat(getComputedStyle(ch).flexGrow) || 0;
+      if (grow >= 1) { spacer += ch.getBoundingClientRect().width; continue; }
+      if (this.els.dockSlot && (ch === this.els.dockSlot || ch.contains(this.els.dockSlot))) dockW += ch.getBoundingClientRect().width;
+    }
+    const overflow = Math.max(0, hdr.scrollWidth - hdr.clientWidth);
+    return spacer + dockW - overflow - 60;   // 60 ≈ dock wrapper padding + collapse button + border slack
+  }
+  HDR_MIN_H = 24;   // below this the digits stop being legible — collapse instead of cropping
+
   sizeHdrBar() {
     const E = this.els, M = this.MM;
     const dock = E.dockSlot ? E.dockSlot.querySelector('[data-dockbar]') : null;
     if (!dock || !E.hdrDateHalf || !E.hdrTimeHalf) return;
-    const H = 46;                 // menu-bar clock height (the constraint)
-    const k = H / M.H, Wk = M.W * k, Hk = H; // Hk === M.H·k === H
+    // The header's clusters lay out over several frames (fonts, sc-if mounts), so a mount-time
+    // free-space measure is stale — at that instant the other clusters can still be 0 wide, which
+    // reads as "plenty of room". Observe THOSE clusters (brand + the right-side groups): when their
+    // real widths land, re-size against the true free space. The dock and the flex spacer are
+    // excluded (the dock is what we resize; the spacer stays 0 whenever the header is full), and the
+    // apply-guard below breaks any observer->write->observer echo.
+    if (!this._hdrRO && typeof ResizeObserver !== 'undefined') {
+      const hdr = document.querySelector('header');
+      if (hdr) {
+        this._hdrRO = new ResizeObserver(() => this.sizeHdrBar());
+        for (const ch of hdr.children) {
+          if (ch.style && ch.style.flex && ch.style.flex.startsWith('1')) continue;
+          if (E.dockSlot && (ch === E.dockSlot || ch.contains(E.dockSlot))) continue;
+          this._hdrRO.observe(ch);
+        }
+      }
+    }
+    // Height-constrained on a roomy header, width-constrained on a narrow one (phones): the docked
+    // clock scales to the free space instead of running off the right edge of the viewport.
+    const avail = this.hdrDockAvail();
+    if (avail === null) return;             // no valid layout to size against — keep current state
+    // (a real NEGATIVE avail is meaningful: the header is genuinely too tight -> k=0 -> auto-collapse)
+    const k = Math.min(46 / M.H, Math.max(avail, 0) / (2 * M.W));
+    if (M.H * k < this.HDR_MIN_H) {
+      // No room for a legible miniature: auto-collapse. Ephemeral (hdrAutoHide), so the user's
+      // docked-clock preference survives; handleResize un-hides when width returns.
+      if (!this.state.hdrAutoHide) this.setState({ hdrAutoHide: true });
+      return;
+    }
+    const H = M.H * k, Wk = M.W * k, Hk = H;
+    if (Math.abs((parseFloat(E.hdrDateHalf.style.width) || 0) - Wk) < 0.5) return;   // already this size — no write, no RO echo
     dock.style.height = Hk + 'px';
     for (const el of [E.hdrDateHalf, E.hdrTimeHalf]) { el.style.width = Wk + 'px'; el.style.height = Hk + 'px'; }
     if (E.hdrDate) this.sizeFaceCanvas('hdrDate', E.hdrDate, E.hdrDateHalf, k, 7.0175);
@@ -1263,6 +1312,11 @@ class Component extends DcLite {
     if (this.state.phase === 'entry') this.layoutEntry();
     this.sizeDispBar();
     this.sizeHdrBar();
+    if (this.state.hdrAutoHide) {
+      const need = 2 * this.MM.W * (this.HDR_MIN_H / this.MM.H) + 24;   // +24: hysteresis, no flapping at the edge
+      const avail = this.hdrDockAvail();
+      if (avail !== null && avail >= need) this.setState({ hdrAutoHide: false });
+    }
     this.drawCharts();
   }
 
@@ -1308,6 +1362,15 @@ class Component extends DcLite {
 
   onTick() {
     if (!this.session) return;
+    // Docked-clock fit: converge within a second in every scenario (fold reveal, font load, rotate,
+    // dock toggle) — the observer/mount triggers all have gaps, and the apply-guard makes this a
+    // no-op (two rect reads) when the size is already right.
+    this.sizeHdrBar();
+    if (this.state.hdrAutoHide) {
+      const need = 2 * this.MM.W * (this.HDR_MIN_H / this.MM.H) + 24;
+      const avail = this.hdrDockAvail();
+      if (avail >= need) this.setState({ hdrAutoHide: false });
+    }
     // REVIEW: session.S is frozen to the playhead by the scrub — never advance live data over it.
     if (this._reviewing) { this.onTickStats(); return; }
     // When a real device is streaming, its NMEA drives session.S — don't let the
@@ -2150,9 +2213,9 @@ class Component extends DcLite {
       // One clock, one home: it lives in the Display panel while you're on Display, and
       // collapses into the header (menu bar) on every other section — where it can be closed
       // (hdrClockOpen) to free ~650px when the crowded status row would otherwise clip.
-      hdrBarOn: st.docked && st.section !== 'display' && st.hdrClockOpen,
+      hdrBarOn: st.docked && st.section !== 'display' && st.hdrClockOpen && !st.hdrAutoHide,
       // Clock docked-but-closed → show a compact "reopen" affordance in its place.
-      hdrClockClosed: st.docked && st.section !== 'display' && !st.hdrClockOpen,
+      hdrClockClosed: st.docked && st.section !== 'display' && !st.hdrClockOpen && !st.hdrAutoHide,
       // Abbreviate the wordmark to "PC" only while the ~650px clock is actually in the header;
       // with it closed (or on Display) there's room for the full name. "PC" not "PCC" — the
       // "COMPANION" subtitle underneath carries the third word (PC = Precision Clock).
