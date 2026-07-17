@@ -10,11 +10,15 @@
 # ---- time sources -----------------------------------------------------------
 
 # The clock. pccd feeds SOF-anchored, prefiltered samples over the SOCK
-# refclock (one per 8 s by default). poll 6 = one measurement per 64 s from a
-# median over ~8 samples; prefer = while PCC is healthy it steers ALONE, so the
-# pool below never dilutes its microsecond-level discipline.
+# refclock (one per 8 s by default; each is already a trimmed mean of 8, ~3 us
+# std dev). poll 4 = one measurement per 16 s; filter 8 = median over ~1 min.
+# Tuned for THERMAL CHASE, not sample noise: the host's own oscillator moves
+# whole ppm per hour under CPU load, and a slow poll leaves the system clock
+# free-running between corrections (measured: poll 6 / filter 128 gave 5 us RMS
+# idle but 50-66 us RMS during builds; the reference itself is 3 us, so faster
+# polling costs nothing). prefer = while PCC is healthy it steers alone.
 # Linux note: the arrival-timestamp path is ms-class — use precision 1e-2 there.
-refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4 poll 6 filter 128 prefer
+refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4 poll 4 filter 8 prefer
 
 # Fallback + sanity jury. Normally outvoted by 'prefer', but these (a) take over
 # seamlessly if the clock is unplugged or pccd stops, (b) expose a malfunctioning
@@ -25,9 +29,11 @@ pool pool.ntp.org iburst maxsources 4
 
 # ---- steering behaviour -----------------------------------------------------
 
-# Gentle corrections: spread each correction over ~30x its size so per-sample
-# noise stays invisible in the realised clock. Raise for even flatter tracking.
-corrtimeratio 30
+# Correction pacing. 10 balances flat idle tracking against thermal transients:
+# 30 was flatter when idle but stretched the response to a ppm-scale frequency
+# ramp (a compile job heating the die) into minutes of 100 us-class offset.
+# The reference is clean enough (~3 us) that faster correction adds no jitter.
+corrtimeratio 10
 
 # Step only at startup (first 3 updates, >100 ms); slew only thereafter.
 makestep 0.1 3
