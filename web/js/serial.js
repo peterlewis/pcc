@@ -314,6 +314,39 @@ export class BridgeClock extends EventTarget {
         });
     }
 
+    /// Ask the running pccd to pull the latest web app from Pages, verify it (shasum -c), and swap it into
+    /// the overlay dir it serves — WITHOUT relaunching (unlike selfUpdate, so timekeeping never pauses). Sends
+    /// `pccd:web-refresh`, streams `pccd:web-refresh <msg>` to onLine(), and settles on the terminal frame:
+    /// { ok:true, msg:'done' } after the swap, { ok:true, msg:'already current' }, or { ok:false, msg } on error.
+    static refreshApp(onLine) {
+        return new Promise((resolve) => {
+            let ws, sent = false, done = false, wd;
+            const finish = (ok, msg) => {
+                if (done) return; done = true;
+                clearTimeout(openTimer); clearTimeout(wd);
+                try { ws && ws.close(); } catch { /* ignore */ }
+                resolve({ ok, msg });
+            };
+            const arm = () => { clearTimeout(wd); wd = setTimeout(() => finish(false, 'timed out. Check pccd logs.'), 180000); };
+            try { ws = new WebSocket(`ws://${BridgeClock.authority()}`); } catch { resolve({ ok: false, msg: 'bridge not reachable' }); return; }
+            const fire = () => { if (!sent) { sent = true; try { ws.send('pccd:web-refresh'); arm(); } catch { finish(false, 'send failed'); } } };
+            const openTimer = setTimeout(fire, 500);                 // fallback if the daemon sends no hello
+            ws.onopen = () => {};
+            ws.onmessage = (e) => {
+                const t = String(e.data);
+                if (t.startsWith('#PCCD')) { fire(); return; }       // hello — now send the command
+                if (!t.startsWith('pccd:web-refresh')) return;
+                const m = t.slice(16).replace(/^\s+/, '');           // strip "pccd:web-refresh "
+                arm(); onLine(m);
+                if (m.startsWith('error')) finish(false, m);
+                else if (m.startsWith('already-current')) finish(true, 'already current');
+                else if (m.startsWith('done')) finish(true, 'done');   // no relaunch: the daemon stays up
+            };
+            ws.onerror = () => finish(false, 'bridge not reachable');
+            ws.onclose = () => finish(false, 'connection closed before the refresh completed');   // no-op if already settled
+        });
+    }
+
     constructor() { super(); this.ws = null; this.device = ''; this.nmeaConsumers = 0; this._closing = false; }
 
     describe() { return 'PCC BRIDGE · ' + (this.device || BridgeClock.authority()); }

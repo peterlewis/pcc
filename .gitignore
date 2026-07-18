@@ -42,6 +42,7 @@ web/emu/phase1/conform/conform_native
 # firmware WASM — compiled from source at build time (web/emu/phase1/build.sh)
 web/emu/clock-fw.mjs
 web/build-info.json
+web/app-manifest.sha256
 
 # pccd release build output (dist.sh regenerates it)
 host/pccd/dist/

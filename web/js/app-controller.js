@@ -104,7 +104,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=98'), import('./charts.js?v=105'), import('./realdev.js?v=113'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=98'), import('./charts.js?v=105'), import('./realdev.js?v=114'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -3461,6 +3461,29 @@ class Component extends DcLite {
     });
   }
 
+  // Ask pccd to pull the latest web app from Pages (verified) and swap its served overlay — no relaunch,
+  // so the bridge stays up. On success the served files changed; reload to load them. Web-only fixes reach
+  // the locally-installed daemon this way BETWEEN releases (daemon features still need a real release).
+  refreshPccdApp() {
+    if (!this.realdev || this._pccdWebBusy) return;
+    this._pccdWebBusy = true;
+    this._pccdWeb = { s: 'STARTING…', c: 'var(--txt2)' }; this.setState({});
+    this.realdev.refreshBridgeApp((line) => {
+      this._pccdWeb = { s: line.toUpperCase(), c: line.startsWith('error') ? 'var(--acq)' : 'var(--txt2)' };
+      this.setState({});
+    }).then((res) => {
+      this._pccdWebBusy = false;
+      if (res.ok && res.msg === 'done') {
+        this._pccdWeb = { s: 'APP UPDATED — RELOADING…', c: 'var(--lock)' }; this.setState({});
+        setTimeout(() => { try { location.reload(); } catch (e) { /* ignore */ } }, 1200);
+      } else if (res.ok) {
+        this._pccdWeb = { s: 'ALREADY CURRENT', c: 'var(--lock)' }; this.setState({});
+      } else {
+        this._pccdWeb = { s: 'REFRESH FAILED — ' + String(res.msg || '').toUpperCase(), c: 'var(--acq)' }; this.setState({});
+      }
+    });
+  }
+
   // DEVICE→UPDATES "FIRMWARE & DATA": what firmware the in-app emulator IS (version + exact
   // clock4 commit the WASM was compiled from — build.mjs writes build-info.json), the tz data
   // shipped alongside, and a user-triggered GitHub check of the rollup branch head.
@@ -3485,6 +3508,11 @@ class Component extends DcLite {
       pccdCmd: 'curl -L https://github.com/peterlewis/pcc/releases/latest/download/pccd-' + asset + '.tar.gz | tar xz && cd pcc && ./pccd',
       onPccdCheck: () => this.checkPccdUpdate(true),
       onPccdUpdate: () => this.runPccdUpdate(),
+      // Pages web-overlay: pull web-only app fixes between releases (no relaunch). Shown only when the daemon
+      // actually understands pccd:web-refresh (/health webrefresh) — a pre-0.6 daemon hides it, not errors.
+      pccdCanWeb: !!(bri && bri.webrefresh && !this._pccdWebBusy),
+      pccdWebState: (this._pccdWeb || {}).s || '', pccdWebC: (this._pccdWeb || {}).c || 'var(--txt3)',
+      onPccdWebRefresh: () => this.refreshPccdApp(),
       fwVer: bi ? bi.version + ' — WASM, BUILT FROM SOURCE' + (bi.dateVersion ? ' · DATE BOARD ' + bi.dateVersion.replace(/^Version\s*/i, '').trim() : '') : 'BUILT FROM SOURCE (run build.mjs for provenance)',
       fwSrc: bi ? 'clock4 @ ' + bi.fwSha.slice(0, 7) + ' (' + bi.fwBranch + ')' : 'web/emu/firmware submodule',
       fwBuilt: bi ? bi.builtAt + (bi.emcc ? ' · emcc ' + bi.emcc : '') : '—',

@@ -56,6 +56,29 @@ its own `-t` self-test *and* be strictly newer, and the tarball is checked
 against `SHA256SUMS`; any failure leaves the install untouched. A source/`-w`
 build won't replace itself — update those with `git pull && make`.
 
+### Tracking the web app between releases
+
+`--update` swaps the whole daemon (binary + bundled app) from a GitHub *release*.
+But the **web app** (the UI you open in a browser) also ships to GitHub Pages on
+every push — often ahead of the next release. A bundled install can pull those
+web-only fixes straight from Pages and serve them from an overlay dir, **without
+restarting** (timekeeping never pauses), leaving the bundled app intact as fallback:
+
+    ./pccd --web-refresh         # fetch the latest app from Pages, verify, swap it in
+    ./pccd --web-refresh-dry     # fetch + verify only; change nothing
+
+or click **REFRESH APP FROM PAGES** in DEVICE → UPDATES. Integrity: Pages ships an
+`app-manifest.sha256` over the deployed tree; pccd re-validates every path, downloads
+only changed files, and gates the swap on `shasum -c` — any mismatch refuses. Trust
+rests on HTTPS + your own Pages origin (there is no signature), so it is **opt-in**.
+
+To track Pages automatically (a check every 6 h), set `PCCD_WEB_TRACK=1` in the
+daemon's environment (LaunchDaemon/systemd `Environment`), optionally with
+`PCCD_WEB_BASE=https://<you>.github.io/pcc`. Off by default — a time server
+shouldn't reach out to the internet unless asked. Daemon *features* (new endpoints)
+still arrive via `--update`; `--web-refresh` only tracks the app. A `--update` drops
+the overlay so the freshly-bundled app shows.
+
 **One-time manual step for v0.3 and v0.4.** Those predate a working update path
 (v0.3 has no self-update; v0.4's version check couldn't see a `.patch` bump, so it
 reports "already-current" for v0.4.1 and refuses it). Install once by hand — plain

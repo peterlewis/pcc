@@ -46,7 +46,7 @@
 #endif
 
 #ifndef PCCD_VERSION
-#define PCCD_VERSION "0.5.0"               /* overridable (-DPCCD_VERSION=...) so a test build can look older */
+#define PCCD_VERSION "0.6.0"               /* overridable (-DPCCD_VERSION=...) so a test build can look older */
 #endif
 #ifdef PCCD_GIT
 #define PCCD_VERSTR PCCD_VERSION "+" PCCD_GIT      /* Makefile stamps the short git hash for traceable /health */
@@ -57,6 +57,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
@@ -97,6 +98,14 @@ static int         opt_verb = 0;
 static int         opt_raw  = 0;
 static const char *opt_webroot = NULL;   // -w: serve the PCC app from this dir (same-origin, no mixed content)
 static int         opt_webroot_flag = 0; // was -w given? (an explicit webroot means a dev build — no self-update)
+// Pages app-overlay: a bundled install can pull a NEWER web app straight from Pages (web-only fixes, no
+// binary change) and serve it from an overlay dir in preference to the bundled app — verified, opt-in, and
+// with the bundle kept intact as fallback. See web_refresh(). (These are the served side; the fetch is below.)
+static char        g_weblive[4096] = {0};// active overlay app dir ("" = serve the bundled app)
+static int         g_web_track = 0;      // opt-in (PCCD_WEB_TRACK): periodically pull a newer app from Pages
+static pid_t       g_web_child = 0;      // pid of an in-flight background refresh worker (0 = none)
+static double      g_web_next  = 0;      // next auto-check time (mono ns)
+static int         g_web_manual = 0;     // a UI button asked for a refresh → broadcast the outcome when it finishes
 
 // ---- self-update ---------------------------------------------------------------------------------
 // A running tarball install can pull a newer release over itself. g_platform is the release-asset tag
@@ -830,10 +839,18 @@ static void http_simple(Client *c, const char *status, const char *type, const c
 }
 // GET <reqpath> from opt_webroot. reqpath is caller-validated (leading '/', no ".."). Streams so the
 // 12 MB tzmap doesn't need buffering. Blocking writes are fine on loopback.
+// Serve the verified Pages overlay if one is active, else the bundled app. ONE switch, so every asset
+// (index.html + emu/*) always comes from the SAME tree — a request never mixes overlay and bundle.
+static const char *web_serve_root(void){ return g_weblive[0] ? g_weblive : opt_webroot; }
 static void serve_file(Client *c, const char *reqpath){
+  const char *rp = reqpath[1]?reqpath:"/index.html";
   char full[1600];
-  snprintf(full,sizeof full,"%s%s",opt_webroot, reqpath[1]?reqpath:"/index.html");
+  snprintf(full,sizeof full,"%s%s",web_serve_root(), rp);
   int fd = open(full,O_RDONLY);
+  if (fd<0 && g_weblive[0] && opt_webroot){   // overlay file missing (e.g. the brief mid-swap window) → serve the bundle
+    snprintf(full,sizeof full,"%s%s",opt_webroot, rp);
+    fd = open(full,O_RDONLY);
+  }
   if (fd<0){ http_simple(c,"404 Not Found","text/plain","not found\n"); return; }
   struct stat st;
   if (fstat(fd,&st)!=0 || !S_ISREG(st.st_mode)){ close(fd); http_simple(c,"404 Not Found","text/plain","not found\n"); return; }
@@ -971,17 +988,19 @@ static void http_or_upgrade(Client *c){
     snprintf(json,sizeof json,
       "{\"pccd\":1,\"version\":\"" PCCD_VERSTR "\",\"device\":\"%s\",\"chrony\":%s,"
       "\"serial_open\":%s,\"last_sample_age_s\":%s,\"last_offset_s\":%s,\"sent\":%ld,\"rejected\":%ld,"
-      "\"updatable\":%s,\"platform\":\"%s\",\"history\":%s,\"raw\":%d}",
+      "\"updatable\":%s,\"platform\":\"%s\",\"webrefresh\":%s,\"history\":%s,\"raw\":%d}",
       g_devpath, (g_chrony>=0)?"true":"false",
       g_serial_open?"true":"false", agebuf, offbuf, g_nsent, g_nseen-g_nsent,
-      g_updatable?"true":"false", g_platform?g_platform:"", histbuf, raw_cnt);
+      g_updatable?"true":"false", g_platform?g_platform:"",
+      (opt_webroot && !opt_webroot_flag)?"true":"false",   // this build understands pccd:web-refresh (gates the app's button)
+      histbuf, raw_cnt);
     char resp[1400];
     int n=snprintf(resp,sizeof resp,
       "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\n"
       "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",strlen(json),json);
     write(c->fd,resp,n); close(c->fd); c->fd=-1; return;
   }
-  if (opt_webroot && path[0]=='/' && !strstr(path,"..")){   // serve the app (same-origin)
+  if (web_serve_root() && path[0]=='/' && !strstr(path,"..")){   // serve the app (same-origin; overlay or bundle)
     serve_file(c,path); return;
   }
   http_simple(c,"200 OK","text/plain",
@@ -989,6 +1008,8 @@ static void http_or_upgrade(Client *c){
 }
 static int  self_update(int dry, Client *cli);   // defined below main's helpers; a "pccd:" control frame calls it
 static void upd_progress(Client *cli, const char *msg);
+static void web_progress(Client *cli, const char *msg);   // defined after self_update; called from ws_read
+static int  web_refresh(int dry, Client *cli);
 // Unmask + deliver client->server text frames: each is a command line for the clock's serial port.
 static void ws_read(Client *c, int serial_fd){
   unsigned char *b=(unsigned char*)c->buf;
@@ -1017,6 +1038,13 @@ static void ws_read(Client *c, int serial_fd){
         if (!strncmp(cmd,"pccd:",5)){                          // bridge control, NOT a clock command
           if      (!strcmp(cmd,"pccd:update"))     self_update(0,c);   // may exec/exit → never returns on success
           else if (!strcmp(cmd,"pccd:update-dry")) self_update(1,c);
+          else if (!strcmp(cmd,"pccd:web-refresh")){
+            // Never run the fetch inline — it would block the single-threaded poll loop and stall timekeeping.
+            // Mark a manual request; the loop forks the worker next iteration and broadcasts the outcome.
+            if (opt_webroot_flag || !opt_webroot) web_progress(c,"error web-refresh needs a bundled app (not a -w dev server)");
+            else if (g_web_child>0) web_progress(c,"error busy (a refresh is already running)");
+            else { g_web_manual=1; web_progress(c,"started"); }
+          }
           else upd_progress(c,"error unknown-control");
         } else if (serial_fd>=0){
           write(serial_fd,cmd,n); write(serial_fd,"\r\n",2);
@@ -1113,6 +1141,9 @@ static int self_update(int dry, Client *cli){
                                  : "error self-update unavailable in this build");
     return -1;
   }
+  // A concurrent web-refresh worker must not outlive us: after we clear the overlay and execv, it could
+  // rename its staged app into place and resurrect a stale overlay. Kill + reap it before touching disk.
+  if (g_web_child>0){ kill(g_web_child,SIGKILL); waitpid(g_web_child,NULL,0); g_web_child=0; }
   // We are (typically) root and about to shell out to curl/tar/shasum/awk/rm via /bin/sh. Pin a trusted
   // PATH so none of those resolve to an attacker-planted binary in a writable early-PATH dir — the shell-
   // out helpers must come from the system, not from wherever the daemon happened to inherit PATH from.
@@ -1184,6 +1215,11 @@ static int self_update(int dry, Client *cli){
         upd_progress(cli,"warn app-not-swapped (binary updated)");
       } else { snprintf(cmd,sizeof cmd,"rm -rf %s",qwebbak); if(system(cmd)){} }
     }
+    // A release supersedes any Pages overlay we were tracking — drop it so the freshly-bundled app shows
+    // (PCCD_WEB_TRACK, if on, re-establishes from Pages on the next check).
+    if (opt_webroot){ char par2[4096]; snprintf(par2,sizeof par2,"%s",opt_webroot); char *s2=strrchr(par2,'/');
+      if (s2){ *s2=0; char ov2[4300],qov2[8600]; snprintf(ov2,sizeof ov2,"%s/pcc-web-live",par2); shq(qov2,sizeof qov2,ov2);
+        snprintf(cmd,sizeof cmd,"rm -rf %s",qov2); if(system(cmd)){} g_weblive[0]=0; } }
     // Installer: refresh the exe-adjacent copy so the planted repair/upgrade/uninstall script tracks the
     // release (it is the sole writer of the LaunchDaemon plist / systemd unit, so re-running it after this
     // brings those up to date too). Same-dir atomic rename; best-effort like the app swap. `dir` is the
@@ -1210,10 +1246,145 @@ static int self_update(int dry, Client *cli){
   return -1;
 }
 
+// ---- Pages app-overlay refresh -------------------------------------------------------------------
+// A bundled install serves the app from disk, so a WEB-ONLY fix (no daemon/binary change) can be pulled
+// straight from GitHub Pages and swapped under the running daemon — no binary swap, no execv, timekeeping
+// never pauses. Integrity: Pages ships app-manifest.sha256 (a SHA256SUMS-style listing build.mjs emits
+// over the deployed tree). We fetch it, RE-VALIDATE every path in C, download only changed files, and gate
+// the swap on `shasum -c`. Trust rests on HTTPS + your own Pages origin (there is no signature), so it is
+// OPT-IN (PCCD_WEB_TRACK) and the bundled app is always left intact as the fallback. Daemon features (new
+// endpoints) still ship via a real release; this only tracks the web app.
+static void web_progress(Client *cli, const char *msg){
+  fprintf(stderr,"[pccd] web-refresh: %s\n",msg);
+  if (cli && cli->fd>=0){ char f[240]; int n=snprintf(f,sizeof f,"pccd:web-refresh %s",msg); if (n>0) ws_send_text(cli,f,n); }
+}
+// Broadcast a web-refresh outcome to every connected WS client (the background worker can't write to the
+// requester's socket itself, so the parent reports on its behalf when the child is reaped).
+static void web_bcast(const char *msg){
+  char f[240]; int n=snprintf(f,sizeof f,"pccd:web-refresh %s",msg); if (n<=0) return;
+  for (int i=0;i<MAXCLI;i++) if (g_cli[i].fd>=0 && g_cli[i].ws) ws_send_text(&g_cli[i],f,n);
+}
+// Validate a fetched manifest before any of it reaches a shell or the filesystem. Every non-blank line must
+// be "<64 lowercase hex>  <relpath>" where relpath is a safe relative path: charset [A-Za-z0-9._/-], 1..200
+// chars, no leading '/', no ".." and no "//". Reject the WHOLE file on the first bad line (fail closed), and
+// cap the count so a hostile listing can't fan out unboundedly. Returns file count (>=1) or -1.
+#define WEB_MAX_FILES 512
+static int validate_manifest(const char *path){
+  FILE *f=fopen(path,"r"); if(!f) return -1;
+  char *ln=NULL; size_t cap=0; ssize_t n; int nfiles=0, bad=0;
+  // getline (not fgets) gives the exact byte count, so an embedded NUL can't hide traversal bytes past a
+  // premature strlen terminator. Reject any line containing a NUL outright, then strip EOL and validate.
+  while ((n=getline(&ln,&cap,f))>=0){
+    if (memchr(ln,'\0',(size_t)n)){ bad=1; break; }               // embedded NUL → refuse
+    while (n>0 && (ln[n-1]=='\n'||ln[n-1]=='\r')) ln[--n]=0;
+    if (n==0) continue;                                           // tolerate a trailing blank line
+    if (n < 67 || ln[64]!=' ' || ln[65]!=' '){ bad=1; break; }    // 64 hex + two spaces + path
+    for (int i=0;i<64;i++){ char c=ln[i]; if (!((c>='0'&&c<='9')||(c>='a'&&c<='f'))){ bad=1; break; } }
+    if (bad) break;
+    const char *p=ln+66; size_t pl=(size_t)n-66;
+    if (pl<1 || pl>200 || p[0]=='/' || strstr(p,"..") || strstr(p,"//")){ bad=1; break; }
+    for (size_t i=0;i<pl;i++){ char c=p[i];
+      if (!((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='.'||c=='_'||c=='-'||c=='/')){ bad=1; break; } }
+    if (bad) break;
+    if (++nfiles > WEB_MAX_FILES){ bad=1; break; }
+  }
+  free(ln); fclose(f);
+  return (bad||nfiles<1) ? -1 : nfiles;
+}
+// Point serving at the overlay dir if it holds a complete app (index.html + its manifest). Called at boot
+// (a prior refresh persists on disk) and after a background worker finishes. Best-effort; no-op otherwise.
+static void web_adopt_overlay(int reverify){
+  if (!opt_webroot || opt_webroot_flag) return;
+  char par[4096]; snprintf(par,sizeof par,"%s",opt_webroot);
+  char *sl=strrchr(par,'/'); if(!sl) return; *sl=0;
+  char ov[4200],idx[4400],man[4500]; struct stat st;
+  snprintf(ov,sizeof ov,"%s/pcc-web-live",par);
+  snprintf(idx,sizeof idx,"%s/index.html",ov);
+  snprintf(man,sizeof man,"%s/app-manifest.sha256",ov);
+  if (!(stat(idx,&st)==0 && S_ISREG(st.st_mode) && stat(man,&st)==0)) return;
+  if (reverify){
+    // Trust an on-disk overlay only after it re-passes its own manifest — guards a crash-corrupted or
+    // locally-tampered overlay persisted from a previous run. A mismatch → ignore it, serve the bundle.
+    setenv("PATH","/usr/bin:/bin:/usr/sbin:/sbin",1);
+    char qov[8500]; shq(qov,sizeof qov,ov);
+    char cmd[9000]; snprintf(cmd,sizeof cmd,"cd %s && (shasum -a 256 -c app-manifest.sha256 >/dev/null 2>&1 || sha256sum -c app-manifest.sha256 >/dev/null 2>&1)",qov);
+    if (system(cmd)!=0){ fprintf(stderr,"[pccd] overlay failed re-verification — ignoring it, serving the bundled app\n"); return; }
+  }
+  if (strcmp(g_weblive,ov)){ snprintf(g_weblive,sizeof g_weblive,"%s",ov); fprintf(stderr,"[pccd] serving the Pages-tracked app overlay: %s\n",ov); }
+}
+// Pull a newer app from Pages, verify, atomically swap the overlay dir. dry stops before the swap. Returns
+// 0 = refreshed (or dry-run OK), 1 = already-current (no-op), <0 = error (install untouched). Blocking: the
+// manual button calls it inline (user-initiated, brief, live progress); the auto path calls it in a forked
+// child so the poll loop never waits on the network.
+static int web_refresh(int dry, Client *cli){
+  const char *cur = web_serve_root();
+  if (!opt_webroot || opt_webroot_flag || !cur){
+    web_progress(cli,"error web-refresh needs a bundled app (not a -w dev server)"); return -1;
+  }
+  setenv("PATH","/usr/bin:/bin:/usr/sbin:/sbin",1);              // pin the shell-out helpers (see self_update)
+  char parent[4096]; snprintf(parent,sizeof parent,"%s",opt_webroot);
+  char *sl=strrchr(parent,'/'); if(!sl){ web_progress(cli,"error bad-webroot-path"); return -1; } *sl=0;
+  char overlay[4200]; snprintf(overlay,sizeof overlay,"%s/pcc-web-live",parent);
+  char tmp[4200]; snprintf(tmp,sizeof tmp,"%s/.pccd-web-XXXXXX",parent);
+  if (!mkdtemp(tmp)){ web_progress(cli,"error mkdtemp"); return -1; }
+  const char *base=getenv("PCCD_WEB_BASE"); if(!base||!*base) base="https://peterlewis.github.io/pcc";
+  char qbase[8500],qtmp[8500],qcur[8500]; shq(qbase,sizeof qbase,base); shq(qtmp,sizeof qtmp,tmp); shq(qcur,sizeof qcur,cur);
+  char cmd[16384]; int rc=-1, nfiles=0;
+  do {
+    web_progress(cli,"checking");
+    snprintf(cmd,sizeof cmd,"curl -fsSL --connect-timeout 10 --max-time 30 --max-filesize 5242880 %s/app-manifest.sha256 -o %s/manifest",qbase,qtmp);
+    if (system(cmd)!=0){ web_progress(cli,"error manifest-unavailable (need network)"); break; }
+    // Already serving this exact app? Its manifest is byte-identical → cheap no-op.
+    snprintf(cmd,sizeof cmd,"cmp -s %s/manifest %s/app-manifest.sha256",qtmp,qcur);
+    if (system(cmd)==0){ web_progress(cli,"already-current"); rc=1; break; }
+    { char mpath[4300]; snprintf(mpath,sizeof mpath,"%s/manifest",tmp);
+      nfiles=validate_manifest(mpath);
+      if (nfiles<0){ web_progress(cli,"error bad-manifest (refusing)"); break; } }
+    web_progress(cli,"downloading");
+    // Stage the app: reuse a current file whose hash already matches (skips re-fetching the 12 MB tz map for
+    // a one-line UI change), else download it. Paths are C-validated and shell-quoted; each fetch is size-
+    // and time-capped. C=current app dir, B=Pages base — set once as shell vars.
+    snprintf(cmd,sizeof cmd,
+      "cd %s && C=%s && B=%s && mkdir -p app && ok=1 && tot=0 && "
+      "sz(){ stat -f%%z \"$1\" 2>/dev/null || stat -c%%s \"$1\" 2>/dev/null || echo 0; } && "
+      "while read h p; do "
+        "mkdir -p \"app/$(dirname \"$p\")\" || { ok=0; break; }; "
+        "if [ -f \"$C/$p\" ] && [ \"$( (shasum -a 256 \"$C/$p\" 2>/dev/null || sha256sum \"$C/$p\") | cut -c1-64)\" = \"$h\" ]; then "
+          "cp \"$C/$p\" \"app/$p\" || { ok=0; break; }; "
+        "else "
+          "curl -fsSL --connect-timeout 10 --max-time 300 --max-filesize 26214400 \"$B/$p\" -o \"app/$p\" || { ok=0; break; }; "
+        "fi; "
+        "tot=$((tot + $(sz \"app/$p\"))); [ \"$tot\" -gt 67108864 ] && { ok=0; break; }; "  /* aggregate cap: 64 MiB */
+      "done < manifest; [ \"$ok\" = 1 ]",
+      qtmp, qcur, qbase);
+    if (system(cmd)!=0){ web_progress(cli,"error download-failed"); break; }
+    web_progress(cli,"verifying");
+    snprintf(cmd,sizeof cmd,"cd %s/app && (shasum -a 256 -c ../manifest >/dev/null 2>&1 || sha256sum -c ../manifest >/dev/null 2>&1)",qtmp);
+    if (system(cmd)!=0){ web_progress(cli,"error verify-failed (sha mismatch)"); break; }
+    snprintf(cmd,sizeof cmd,"cp %s/manifest %s/app/app-manifest.sha256",qtmp,qtmp);   // carry manifest for next diff
+    if (system(cmd)!=0){ web_progress(cli,"error stage-manifest-failed"); break; }
+    if (dry){ char m[160]; snprintf(m,sizeof m,"dry-run OK — %d files, would refresh from Pages",nfiles); web_progress(cli,m); rc=0; break; }
+    // ---- atomic swap: <tmp>/app -> pcc-web-live (same filesystem). The bundled app is never touched. ----
+    web_progress(cli,"installing");
+    char overold[4300], qoverold[8600]; snprintf(overold,sizeof overold,"%s.old",overlay); shq(qoverold,sizeof qoverold,overold);
+    snprintf(cmd,sizeof cmd,"rm -rf %s",qoverold); if(system(cmd)){}
+    struct stat st; int had=(stat(overlay,&st)==0);
+    if (had && rename(overlay,overold)!=0){ web_progress(cli,"error overlay-stash-failed"); break; }
+    char napp[4300]; snprintf(napp,sizeof napp,"%s/app",tmp);
+    if (rename(napp,overlay)!=0){ if(had) rename(overold,overlay); web_progress(cli,"error overlay-swap-failed"); break; }
+    snprintf(cmd,sizeof cmd,"rm -rf %s",qoverold); if(system(cmd)){}
+    snprintf(g_weblive,sizeof g_weblive,"%s",overlay);
+    rc=0;
+  } while(0);
+  snprintf(cmd,sizeof cmd,"rm -rf %s",qtmp); if(system(cmd)){}   // clear staging (whatever's left)
+  if (rc==0 && !dry) web_progress(cli,"done — reload the app to load it");
+  return rc;
+}
+
 int main(int argc, char **argv){
   g_argv = argv;                          // saved for an execv() relaunch after a standalone self-update
   char devbuf[512]={0};   // roomy: /dev/serial/by-id/ symlinks can be long
-  int opt_do_update=0, opt_update_dry=0;
+  int opt_do_update=0, opt_update_dry=0, opt_do_webref=0, opt_webref_dry=0;
   static const char USAGE[] =
     "usage: pccd [-d dev] [-p port] [-s chrony.sock] [-w webroot] [-o trim_s] [-n] [-v] [-r] [-t] [-T] [-h]\n"
     "  -d dev    serial device (default: auto-pick cu.usbmodem* / STM32 by-id / ttyACM*)\n"
@@ -1230,6 +1401,7 @@ int main(int argc, char **argv){
     "  -T        USB frame-clock probe and exit (macOS)\n"
     "  --version print the version and exit\n"
     "  --update  update to the latest release, then relaunch (tarball installs only)\n"
+    "  --web-refresh  pull the latest web app from Pages, verify, swap it in, then exit (bundled installs)\n"
     "  -h        print this help and exit\n";
   for (int i=1;i<argc;i++){
     const char *a=argv[i];
@@ -1237,6 +1409,8 @@ int main(int argc, char **argv){
     else if (!strcmp(a,"--version")){ puts(PCCD_VERSTR); return 0; }
     else if (!strcmp(a,"--update")) opt_do_update=1;
     else if (!strcmp(a,"--self-update-dry")) opt_do_update=opt_update_dry=1;   // fetch+verify, but don't swap
+    else if (!strcmp(a,"--web-refresh")) opt_do_webref=1;                      // pull the latest app from Pages, then exit
+    else if (!strcmp(a,"--web-refresh-dry")) opt_do_webref=opt_webref_dry=1;   // fetch+verify, but don't swap
     else if (!strcmp(a,"-n")) opt_dry=1;
     else if (!strcmp(a,"-v")) opt_verb=1;
     else if (!strcmp(a,"-r")) opt_raw=1;
@@ -1261,6 +1435,10 @@ int main(int argc, char **argv){
     else { fprintf(stderr,"[pccd] unknown option %s\n%s",a,USAGE); return 2; }
   }
   if (!opt_webroot) opt_webroot = find_bundled_app();   // release tarball ships pccd next to pcc-web/
+  // Opt-in Pages app tracking (PCCD_WEB_TRACK=1/on/yes/true): pull web-only fixes from Pages between
+  // releases. OFF by default — a time server shouldn't reach out to the internet unless asked to.
+  { const char *wt=getenv("PCCD_WEB_TRACK"); g_web_track = wt && (*wt=='1'||*wt=='o'||*wt=='O'||*wt=='y'||*wt=='Y'||*wt=='t'||*wt=='T'); }
+  web_adopt_overlay(1);  // a prior verified refresh persists on disk across restarts (re-verify before trusting)
   // Flight recorder default: history/ next to the binary (service installs -> /usr/local/pcc/history).
   static char histdef[4200];
   if (!opt_hist && !opt_hist_off){
@@ -1274,6 +1452,7 @@ int main(int argc, char **argv){
   // and no explicit -w (which marks a dev checkout). This keeps a developer's -w daemon untouched.
   g_updatable = (g_platform!=NULL) && !opt_webroot_flag && (opt_webroot!=NULL);
   if (opt_do_update) return self_update(opt_update_dry,NULL) < 0 ? 1 : 0;
+  if (opt_do_webref) return web_refresh(opt_webref_dry,NULL) < 0 ? 1 : 0;   // one-shot app refresh (cron/manual)
   // A self-update leaves the previous binary at <self>.bak. Reap it only once THIS image proves it can
   // run (port bound + a short grace window below) — if a just-installed binary crashes on boot, launchd
   // never lets it reach that point, so the known-good .bak survives for a manual `mv pccd.bak pccd`.
@@ -1289,6 +1468,8 @@ int main(int argc, char **argv){
   if (bakpath[0]) bak_reap_at = now_mono_ns() + 15e9;   // port bound → arm the rollback-copy reap
   fprintf(stderr,"[pccd] v" PCCD_VERSTR " — http/ws on http://127.0.0.1:%d  (health: /health)%s\n",opt_port,opt_dry?"  [DRY RUN]":"");
   if (opt_webroot) fprintf(stderr,"[pccd] serving the PCC app from %s\n[pccd]   -> open http://localhost:%d in ANY browser, then CONNECT DEVICE\n",opt_webroot,opt_port);
+  if (g_web_track && opt_webroot && !opt_webroot_flag){ g_web_next = now_mono_ns()+30e9; fprintf(stderr,"[pccd] Pages app tracking ON (PCCD_WEB_TRACK) — checking for web-app updates every 6h\n"); }
+  else g_web_track = 0;   // tracking needs a bundled app; a -w dev server manages its own files
   if (opt_hist) fprintf(stderr,"[pccd] flight recorder: %s (retain %d days; -H off to disable)\n",opt_hist,opt_retain);
   else fprintf(stderr,"[pccd] no bundled app found next to this binary — open the hosted app in a Chromium\n[pccd]   browser (it will use this bridge), or pass -w <web-dir> to serve the app same-origin\n");
 
@@ -1300,6 +1481,31 @@ int main(int argc, char **argv){
     double t_iter = now_mono_ns();   // spin-guard: iteration start; did_serial gates the floor sleep
     int did_serial = 0;
     if (bakpath[0] && t_iter > bak_reap_at){ unlink(bakpath); bakpath[0]=0; }   // update proven healthy → drop rollback copy
+    // Opt-in Pages app tracking: run the network fetch in a FORKED child so the poll loop never waits on
+    // it (a stalled download must not pause timekeeping). The child does fetch→verify→atomic-swap on disk;
+    // we reap it below and adopt whatever overlay it staged. Manual refreshes run inline instead.
+    if (g_web_child<=0 && (g_web_manual || (g_web_track && t_iter > g_web_next))){
+      pid_t k=fork();
+      if (k==0){
+        // Drop EVERY inherited long-lived fd first: the child only runs curl/shasum/rename via system() and
+        // must not keep the listener (would pin the loopback port), the tty, the chrony socket, or any client
+        // socket open across a parent relaunch/execv or its own multi-second download.
+        if (g_listen>=0) close(g_listen);
+        if (g_chrony>=0) close(g_chrony);
+        if (sfd>=0) close(sfd);
+        for (int i=0;i<MAXCLI;i++) if (g_cli[i].fd>=0) close(g_cli[i].fd);
+        int rc=web_refresh(0,NULL); _exit(rc<0?3:(rc==1?2:0));
+      }
+      if (k>0){ g_web_child=k; g_web_next=t_iter+6*3600e9; }            // running; next auto-check in 6 h
+      else { g_web_next=t_iter+300e9; if (g_web_manual){ g_web_manual=0; web_bcast("error fork-failed"); } }  // retry in 5 min
+    }
+    if (g_web_child>0){ int wst; pid_t r=waitpid(g_web_child,&wst,WNOHANG);
+      if (r==g_web_child || (r<0 && errno==ECHILD)){
+        int code = (r==g_web_child && WIFEXITED(wst)) ? WEXITSTATUS(wst) : 3;   // 0=refreshed 2=already-current else error
+        g_web_child=0; if (code==0) web_adopt_overlay(0);
+        if (g_web_manual){ g_web_manual=0; web_bcast(code==0?"done":code==2?"already-current":"error refresh-failed (see pccd log)"); }
+      }
+    }
     // Sky snapshot: one S row per 60 s while NMEA is flowing (hist_S self-gates on freshness).
     { static double next_snap=0;
       if (opt_hist && t_iter > next_snap){ hist_S((double)time(NULL)); next_snap = t_iter + 60e9; } }

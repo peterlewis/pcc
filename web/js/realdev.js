@@ -12,7 +12,7 @@
 //
 // Chromium only (Web Serial). Gate the connect button on isSupported().
 
-import { Clock, BridgeClock } from './serial.js?v=21';
+import { Clock, BridgeClock } from './serial.js?v=22';
 import { parseGGA, parseRMC, parseGSA, GSVBuffer } from './nmea.js?v=2';
 import { parsePMTXTS, parsePMTXTC, centrePhase, foldPhase1ms } from './ppsts.js?v=15';
 import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=1';
@@ -450,6 +450,7 @@ export function createRealDevice(session) {
         // or null. The app polls this for the Connection room's live BRIDGE row.
         detectBridge() { return BridgeClock.detect(); },
         updateBridge(onLine) { return BridgeClock.selfUpdate(onLine); },   // pccd self-update (tarball installs)
+        refreshBridgeApp(onLine) { return BridgeClock.refreshApp(onLine); },// pull the latest web app from Pages (no relaunch)
         fetchBridgeHistory(params) { return BridgeClock.fetchHistory(params); },   // flight-recorder readout
         fetchBridgeRaw(n) { return BridgeClock.fetchRaw(n); },                       // pre-gate raw samples (SIGNAL PATH real source)
 

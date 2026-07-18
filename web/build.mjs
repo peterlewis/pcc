@@ -3,10 +3,11 @@
 // so the result works over https (Pages) AND from a double-clicked file:// URL, with
 // zero external network requests. Run: node web/build.mjs
 import esbuild from 'esbuild';
-import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
 const web = dirname(fileURLToPath(import.meta.url));
 const docs = resolve(web, '..', 'docs');
@@ -138,6 +139,24 @@ const buildInfo = {
 writeFileSync(resolve(docs, 'build-info.json'), JSON.stringify(buildInfo, null, 1));
 writeFileSync(resolve(web, 'build-info.json'), JSON.stringify(buildInfo, null, 1));
 console.log(`build-info: ${buildInfo.version}${buildInfo.dateVersion ? ' (date ' + buildInfo.dateVersion.replace(/^Version /, '') + ')' : ''} · clock4 @ ${buildInfo.fwSha.slice(0, 7)} (${buildInfo.fwBranch})`);
+
+// 3d. App manifest — a SHA256SUMS-style listing of every served file, so a bundled pccd can pull a
+//     newer app straight from Pages and verify it (shasum -c) without cutting a full release. The
+//     manifest's OWN hash is the app's identity: the daemon diffs it to decide whether to refresh, then
+//     `shasum -c` gates the swap. Walk docs/ so the list is exactly what ships; exclude the manifest
+//     itself and .nojekyll (a Pages directive the local daemon doesn't serve). Paths are relative and
+//     '/'-joined; the daemon re-validates every path (no '..', no leading '/') before trusting it.
+const APP_MANIFEST = 'app-manifest.sha256';
+const walkFiles = (dir, base = dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+  const p = resolve(dir, e.name);
+  return e.isDirectory() ? walkFiles(p, base) : [p.slice(base.length + 1).split('\\').join('/')];
+});
+const appFiles = walkFiles(docs).filter((rel) => rel !== APP_MANIFEST && rel !== '.nojekyll').sort();
+const appManifest = appFiles.map((rel) =>
+  `${createHash('sha256').update(readFileSync(resolve(docs, rel))).digest('hex')}  ${rel}`).join('\n') + '\n';
+writeFileSync(resolve(docs, APP_MANIFEST), appManifest);
+writeFileSync(resolve(web, APP_MANIFEST), appManifest);   // web/ copy so a dev -w server carries it too
+console.log(`app-manifest: ${appFiles.length} files, id ${createHash('sha256').update(appManifest).digest('hex').slice(0, 12)}`);
 
 // 4. Report + guard against any external reference sneaking into index.html.
 // The page must make zero external network REQUESTS (src=, <link href>, imports). A plain <a href>

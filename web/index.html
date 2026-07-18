@@ -559,6 +559,13 @@
                 <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.04em;color:var(--txt3);line-height:1.7">THIS pccd RUNS FROM A DEV CHECKOUT (-w). SELF-UPDATE IS DISABLED. UPDATE BY HAND:<br><code style="color:var(--txt2);word-break:break-all">{{pccdCmd}}</code></div>
               </sc-if>
               <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">UPDATE NOW: pccd DOWNLOADS AND VERIFIES THE LATEST RELEASE (SHA-256 + SELF-TEST), SWAPS ITSELF, AND RELAUNCHES. THE APP RECONNECTS.</div>
+              <sc-if value="{{pccdCanWeb}}">
+              <div style="display:flex;align-items:center;gap:14px;padding:12px;flex-wrap:wrap;border-top:1px solid var(--line)">
+                <button onClick="{{onPccdWebRefresh}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:7px 16px;background:transparent;border:1px solid var(--line2);color:var(--txt);cursor:pointer" style-hover="border-color:var(--txt3)">REFRESH APP FROM PAGES</button>
+                <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.04em;color:{{pccdWebC}}">{{pccdWebState}}</span>
+              </div>
+              <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">REFRESH APP: pccd PULLS THE LATEST WEB APP FROM PAGES (SHA-256 VERIFIED) AND SWAPS IT IN WITHOUT RESTARTING — WEB-ONLY FIXES BETWEEN RELEASES. DAEMON FEATURES STILL COME VIA UPDATE NOW.</div>
+              </sc-if>
             </section>
             </sc-if>
           </div>
@@ -1621,6 +1628,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=239"></script>
+<script type="module" src="js/app-controller.js?v=240"></script>
 </body>
 </html>
