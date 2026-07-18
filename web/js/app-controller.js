@@ -55,8 +55,7 @@ class Component extends DcLite {
     cuckoo: localStorage.getItem('pccweb.cuckoo') || 'off',
     tzOverride: 'auto', matrixFreq: '1.6',
     skyHeatmap: false, skyHorizon: false, skyTrails: true, skyLabels: true,
-    window: 900,
-    // TRAIL length (s): how much ribbon each sat drags in the sky/map/globe views. With 12 h of
+    // SPAN (s): how much ribbon each sat drags in the sky/map/globe views. With 12 h of
     // restored history a full 90 min per sat reads as clutter, so default mid (45 min); 5400 = MAX
     // (the fade horizon / the full trail buffer — pre-control behaviour, bit-for-bit).
     skyTrailAge: 2700,
@@ -2834,11 +2833,8 @@ class Component extends DcLite {
       cbHoriz: this.cb(st.skyHorizon), oHoriz: () => this.setState({ skyHorizon: !st.skyHorizon }, () => this.drawChart('sky')),
       cbTrails: this.cb(st.skyTrails), oTrails: () => this.setState({ skyTrails: !st.skyTrails }, () => this.drawChart('sky')),
       cbLabels: this.cb(st.skyLabels), oLabels: () => this.setState({ skyLabels: !st.skyLabels }, () => this.drawChart('sky')),
-      ssWinLive: this.seg(st.window === 120, true), ssWin15: this.seg(st.window === 900, false), ssWin1h: this.seg(st.window === 3600, false), ssWinAll: this.seg(st.window === 5400, false),
-      oWinLive: () => this.setState({ window: 120 }, () => this.drawChart('sky')),
-      oWin15: () => this.setState({ window: 900 }, () => this.drawChart('sky')),
-      oWin1h: () => this.setState({ window: 3600 }, () => this.drawChart('sky')),
-      oWinAll: () => this.setState({ window: 5400 }, () => this.drawChart('sky')),
+      // SPAN drives the trail ribbons AND the heatmap history; dim it when neither layer is on.
+      spanDim: (!st.skyTrails && !st.skyHeatmap) ? 'opacity:.4' : '',
       ssTrail45: this.seg(st.skyTrailAge === 2700, true), ssTrail1h: this.seg(st.skyTrailAge === 3600, false),
       ssTrail3h: this.seg(st.skyTrailAge === 10800, false), ssTrail6h: this.seg(st.skyTrailAge === 21600, false),
       ssTrail12h: this.seg(st.skyTrailAge === 43200, false), ssTrail24h: this.seg(st.skyTrailAge === 86400, false),

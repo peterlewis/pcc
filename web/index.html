@@ -913,27 +913,25 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
               <div style="padding:12px">
                 <canvas ref="{{refSky}}" style="width:100%;height:520px;display:block"></canvas>
               </div>
-              <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 12px;border-top:1px solid var(--line)">
-                <button onClick="{{oHeat}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbHeat}}"></span>HEATMAP</button>
-                <button onClick="{{oHoriz}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbHoriz}}"></span>HORIZON</button>
-                <button onClick="{{oTrails}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbTrails}}"></span>TRAILS</button>
-                <button onClick="{{oLabels}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbLabels}}"></span>LABELS</button>
-                <span style="flex:1"></span>
-                <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">TRAIL</span>
-                <div style="display:flex;border:1px solid var(--line)">
-                  <button onClick="{{oTrail45}}" style="{{ssTrail45}}">45M</button>
-                  <button onClick="{{oTrail1h}}" style="{{ssTrail1h}}">1H</button>
-                  <button onClick="{{oTrail3h}}" style="{{ssTrail3h}}">3H</button>
-                  <button onClick="{{oTrail6h}}" style="{{ssTrail6h}}">6H</button>
-                  <button onClick="{{oTrail12h}}" style="{{ssTrail12h}}">12H</button>
-                  <button onClick="{{oTrail24h}}" style="{{ssTrail24h}}">24H</button>
+              <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:10px 12px;border-top:1px solid var(--line)">
+                <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+                  <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">LAYERS</span>
+                  <button onClick="{{oTrails}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbTrails}}"></span>TRAILS</button>
+                  <button onClick="{{oHeat}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbHeat}}"></span>HEATMAP</button>
+                  <button onClick="{{oHoriz}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbHoriz}}"></span>HORIZON</button>
+                  <button onClick="{{oLabels}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbLabels}}"></span>LABELS</button>
                 </div>
-                <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">WINDOW</span>
-                <div style="display:flex;border:1px solid var(--line)">
-                  <button onClick="{{oWinLive}}" style="{{ssWinLive}}">LIVE</button>
-                  <button onClick="{{oWin15}}" style="{{ssWin15}}">15M</button>
-                  <button onClick="{{oWin1h}}" style="{{ssWin1h}}">1H</button>
-                  <button onClick="{{oWinAll}}" style="{{ssWinAll}}">ALL</button>
+                <span style="flex:1"></span>
+                <div style="display:flex;align-items:center;gap:10px;transition:opacity .15s;{{spanDim}}">
+                  <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)" title="How far back trails and the heatmap reach">SPAN</span>
+                  <div style="display:flex;border:1px solid var(--line)">
+                    <button onClick="{{oTrail45}}" style="{{ssTrail45}}">45M</button>
+                    <button onClick="{{oTrail1h}}" style="{{ssTrail1h}}">1H</button>
+                    <button onClick="{{oTrail3h}}" style="{{ssTrail3h}}">3H</button>
+                    <button onClick="{{oTrail6h}}" style="{{ssTrail6h}}">6H</button>
+                    <button onClick="{{oTrail12h}}" style="{{ssTrail12h}}">12H</button>
+                    <button onClick="{{oTrail24h}}" style="{{ssTrail24h}}">24H</button>
+                  </div>
                 </div>
               </div>
             </section>
@@ -1623,6 +1621,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=238"></script>
+<script type="module" src="js/app-controller.js?v=239"></script>
 </body>
 </html>
