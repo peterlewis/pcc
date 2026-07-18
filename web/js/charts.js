@@ -77,9 +77,12 @@ export function drawSky(canvas, tok, data, opts) {
     // trail history — newest-first, ≥10 px apart, ≤32 samples per sat: a soft base field of
     // travelled sky. Points without cn0 (older persisted history) still contribute at neutral
     // quality — dropping them left the heatmap with no history at all, i.e. a dead control.
+    // Long-window (heatLong): the heatmap is the polar view's LONG-TERM record, so sample far more of
+    // each track (≥10 px apart still dedupes), painting the whole travelled sky. Short window: 32.
+    const hmCap = opts.heatLong ? 240 : 32;
     for (const tr of data.trails.values()) {
       let lx = -1e9, ly = -1e9, n = 0;
-      for (let i = tr.length - 1; i >= 0 && n < 32; i--) {
+      for (let i = tr.length - 1; i >= 0 && n < hmCap; i--) {
         const p = tr[i];
         if (p.el < 0) continue;
         const [x, y] = pt(p.az, p.el);
@@ -131,7 +134,9 @@ export function drawSky(canvas, tok, data, opts) {
   // language as the long one, just a shorter ribbon.
   if (opts.trails) {
     const now = data.now;
-    const span = opts.trailAge || 5400;
+    // Polar trail-LINES are the short recent motion; the long-term record is the heatmap (map/globe
+    // own the long ground tracks). lineAge caps the drawn ribbon so a 24 h window is not spaghetti.
+    const span = opts.lineAge || opts.trailAge || 5400;
     for (const [key, tr] of data.trails) {
       const sat = data.sats.find((s) => s.key === key);
       const col = (sat && tok[sat.tok]) || tok[{ G: 'gps', R: 'glo', E: 'gal', C: 'bds' }[key[0]]] || tok.txt3;

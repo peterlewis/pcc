@@ -105,7 +105,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=98'), import('./charts.js?v=102'), import('./realdev.js?v=112'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=98'), import('./charts.js?v=103'), import('./realdev.js?v=112'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -1521,11 +1521,16 @@ class Component extends DcLite {
         const f = tr.filter((p) => nowS - p.t <= cut);
         if (f.length > 1) trails.set(k, f);
       }
+      // Long window in the polar view: the HEATMAP is the long-term record (heatLong), the trail-LINES
+      // stay a short recent ribbon (lineAge ≤45 min) so it never becomes spaghetti. Ground tracks (the
+      // long line trails) live on MAP + GLOBE, not here.
+      const heatLong = !!comp;
+      const lineAge = heatLong ? Math.min(cut, 2700) : cut;
       return CH.drawSky(el, T, {
         sats: S.sats, trails, now: nowS,
         sun: this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon),
         moon: this.SIM.moonPos(Date.now(), S.obs.lat, S.obs.lon),
-      }, { heatmap: st.skyHeatmap, horizon: st.skyHorizon, trails: st.skyTrails, labels: st.skyLabels, trailAge: cut });
+      }, { heatmap: st.skyHeatmap, horizon: st.skyHorizon, trails: st.skyTrails, labels: st.skyLabels, trailAge: cut, heatLong, lineAge });
     }
     if (name === 'cn0elev') return CH.drawCn0Elev(el, T, S.sats, st.sigMedian);
     if (name === 'cn0time') {
@@ -3138,7 +3143,14 @@ class Component extends DcLite {
     this._simTrail = { key, at: now, trails, gtrails };
     return this._simTrail;
   }
-  setTrailAge(s) { this._simTrail = null; this.setState({ skyTrailAge: s }, () => { this.drawChart('sky'); this.drawChart('globe'); this.drawChart('map'); }); }
+  setTrailAge(s) {
+    this._simTrail = null;
+    // A long window in SIM is the polar view's LONG-TERM record → auto-show the heatmap (the coverage
+    // field), since the trail-lines there stay short. Ground-track trails are the MAP/GLOBE story.
+    const patch = { skyTrailAge: s };
+    if (s > 5400 && this.appMode() === 'simulation' && !this.state.skyHeatmap) patch.skyHeatmap = true;
+    this.setState(patch, () => { this.drawChart('sky'); this.drawChart('globe'); this.drawChart('map'); });
+  }
 
   // ---- SIGNAL PATH — the pccd prefilter explainer -------------------------------------------------
   // Runs the REAL prefilter (prefilter.mjs, a verified port of pccd.c pf_push) over a clearly-labelled
