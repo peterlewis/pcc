@@ -3390,9 +3390,14 @@ class Component extends DcLite {
       this._pccdUpd = { s: line.toUpperCase(), c: line.startsWith('error') ? 'var(--acq)' : 'var(--txt2)' };
       this.setState({});
     }).then((res) => {
-      if (!res.ok) { this._pccdUpdating = false; this._pccdUpd = { s: 'UPDATE FAILED — ' + String(res.msg || '').toUpperCase(), c: 'var(--acq)' }; this.setState({}); return; }
-      if (res.msg === 'already up to date') { this._pccdUpdating = false; this._pccdNewerTag = null; this.setState({}); return; }
-      this._pccdUpd = { s: 'UPDATED — RECONNECTING…', c: 'var(--lock)' };
+      if (res.msg === 'already up to date') { this._pccdUpdating = false; this._pccdNewerTag = null; this._pccdUpd = { s: 'ALREADY CURRENT', c: 'var(--txt2)' }; this.setState({}); return; }
+      // /health after reconnect is the GROUND TRUTH. The daemon re-execs itself to swap the binary, which
+      // KILLS the WebSocket — so a dropped bridge (ws error/close) is the signature of a SUCCESSFUL relaunch,
+      // not a failure. An explicit daemon 'error…' instead means it stayed up on the old binary. So verify by
+      // OUTCOME (did the version bump?) rather than trusting a handshake that execv cuts off. This fixes the
+      // false "UPDATE FAILED — BRIDGE NOT REACHABLE" reported when the update had actually succeeded.
+      const failMsg = res.ok ? null : String(res.msg || '');
+      this._pccdUpd = { s: res.ok ? 'UPDATED — RECONNECTING…' : 'VERIFYING…', c: 'var(--txt2)' };
       this.setState({});
       let tries = 0;
       const rc = setInterval(() => {
@@ -3400,9 +3405,6 @@ class Component extends DcLite {
         this.realdev.detectBridge().then((j) => {
           if (j) {
             clearInterval(rc); this._pccdUpdating = false; this.setState({ bridgeInfo: j });
-            // Only claim success if the version ACTUALLY bumped — a mid-download daemon crash relaunches the
-            // SAME old binary, and reporting "updated" then would be a lie (the serial.js sawDone gate makes
-            // this rare, but /health is the ground truth).
             if (this.verNewer(oldV, j.version || '')) {
               this._pccdNewerTag = null;
               this._pccdUpd = { s: 'UPDATED TO v' + (j.version || '?'), c: 'var(--lock)' };
@@ -3410,11 +3412,21 @@ class Component extends DcLite {
               // clock session too: re-establish it if the user was watching a live clock before the update.
               if (wasLive && this.session && !this.session.S.connected) this.connectRealDevice();
             } else {
+              // Version did NOT advance → a genuine failure (daemon stayed on the old binary). Surface the
+              // daemon's own reason if it gave one, else note it's unchanged.
               this._pccdNewerTag = want;   // still stale → keep offering UPDATE NOW
-              this._pccdUpd = { s: 'UPDATE DID NOT TAKE — STILL v' + (j.version || '?'), c: 'var(--acq)' };
+              this._pccdUpd = { s: 'UPDATE FAILED — ' + (failMsg ? failMsg.toUpperCase() : 'STILL v' + (j.version || '?')), c: 'var(--acq)' };
             }
             this.setState({});
-          } else if (tries > 20) { clearInterval(rc); this._pccdUpdating = false; this._pccdUpd = { s: 'UPDATED — REFRESH TO RECONNECT', c: 'var(--acq)' }; this.setState({}); }
+          } else if (tries > 25) {
+            // ~18 s and the bridge hasn't returned. An explicit 'error…' means it never relaunched; otherwise
+            // the relaunch may just be slow — invite a refresh rather than crying failure.
+            clearInterval(rc); this._pccdUpdating = false;
+            this._pccdUpd = (failMsg && failMsg.startsWith('error'))
+              ? { s: 'UPDATE FAILED — ' + failMsg.toUpperCase(), c: 'var(--acq)' }
+              : { s: 'UPDATED — REFRESH TO RECONNECT', c: 'var(--acq)' };
+            this.setState({});
+          }
         }).catch(() => {});
       }, 700);
     });
