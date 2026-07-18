@@ -62,13 +62,16 @@ export function drawSky(canvas, tok, data, opts) {
     const nb = m ? (m[0][0] === '#' || /[a-f]/i.test(m[1]) ? 16 : 10) : 10;
     const lum = m ? (parseInt(m[1], nb) * 0.299 + parseInt(m[2], nb) * 0.587 + parseInt(m[3], nb) * 0.114) : 0;
     const onLight = lum > 140, k = onLight ? 2.2 : 1;   // lift a touch if bg is bright
-    const blob = (x, y, cn0, rad, a) => {
-      // unknown C/N0 (older persisted trail points) → neutral mid-quality, not "weak red"
-      const q = cn0 == null ? 0.5 : Math.max(0, Math.min(1, (cn0 - 20) / 28));
-      const c = Math.round(255 * (1 - q)) + ',' + Math.round(200 * q) + ',80,';
+    // The heatmap is a SKY-OCCUPANCY density field, not a C/N0 quality field — one honest meaning that
+    // holds for both the live buffer and the computed long-window tracks (which have no measured C/N0).
+    // Signal quality is shown by the sat markers (SIZE = C/N0) and the C/N0 charts. Single amber hue;
+    // intensity comes from blob overlap under 'lighter', so dense sky reads bright, gaps read dark.
+    const hm = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(tok.acq || '');
+    const amb = hm ? (parseInt(hm[1], 16) + ',' + parseInt(hm[2], 16) + ',' + parseInt(hm[3], 16)) : '232,166,74';
+    const blob = (x, y, rad, a) => {
       const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
-      g.addColorStop(0, 'rgba(' + c + Math.min(0.5, a * k).toFixed(3) + ')');   // cap keeps multiply from over-darkening
-      g.addColorStop(1, 'rgba(' + c + '0)');
+      g.addColorStop(0, 'rgba(' + amb + ',' + Math.min(0.5, a * k).toFixed(3) + ')');   // cap keeps multiply from over-darkening
+      g.addColorStop(1, 'rgba(' + amb + ',0)');
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, rad, 0, TAU); ctx.fill();
     };
     ctx.save();
@@ -87,14 +90,14 @@ export function drawSky(canvas, tok, data, opts) {
         if (p.el < 0) continue;
         const [x, y] = pt(p.az, p.el);
         if ((x - lx) * (x - lx) + (y - ly) * (y - ly) < 100) continue;
-        blob(x, y, p.cn0, 26, 0.05); lx = x; ly = y; n++;
+        blob(x, y, 26, 0.05); lx = x; ly = y; n++;
       }
     }
     // current sats — the design blob: radius 30, centre alpha .16 (bright foreground)
     for (const s of data.sats) {
       if (s.el < 0) continue;
       const [x, y] = pt(s.az, s.el);
-      blob(x, y, s.cn0, 30, 0.16);
+      blob(x, y, 30, 0.16);
     }
     ctx.restore();   // resets clip, globalCompositeOperation, fillStyle; globalAlpha never touched
   }
