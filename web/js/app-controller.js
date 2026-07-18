@@ -105,7 +105,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=97'), import('./charts.js?v=100'), import('./realdev.js?v=112'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=98'), import('./charts.js?v=102'), import('./realdev.js?v=112'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -1346,8 +1346,15 @@ class Component extends DcLite {
         this.driveEmu();
         this.allFaces((f) => f.render(now));
         if (s.section === 'globe' && s.phase === 'app' && (s.globeRotate || this._globeDrag)) {
-          if (s.globeRotate && !this._globeDrag) this.globeRot.lon += 0.028;
-          this.drawChart('globe');
+          // Long computed trails (24h ≈ 24k points) are costly to reproject each frame, so throttle
+          // the rotating globe to ~18 fps and step 3× per redraw — smooth spin, a third of the cost.
+          const heavy = s.globeTrails && s.skyTrailAge > 5400 && this.appMode() === 'simulation' && !this._globeDrag;
+          if (heavy) {
+            if (now - (this._globeHeavyAt || 0) >= 55) { this._globeHeavyAt = now; this.globeRot.lon += 0.084; this.drawChart('globe'); }
+          } else {
+            if (s.globeRotate && !this._globeDrag) this.globeRot.lon += 0.028;
+            this.drawChart('globe');
+          }
         }
       } catch (e) { if (!this._loopErr) { this._loopErr = 1; console.error('[pcc] render-loop frame error (recovering):', e); } }
     };
@@ -1505,9 +1512,12 @@ class Component extends DcLite {
     if (name === 'dacCurve') return CH.drawDacCurve(el, T, st.dacCurve, this._dacDrag);
     if (name === 'sky') {
       const trails = new Map();
-      // Effective trail cutoff = the tighter of the chart WINDOW and the TRAIL length control.
-      const cut = Math.min(st.window >= 5400 ? 5400 : st.window, st.skyTrailAge);
-      if (st.skyTrails) for (const [k, tr] of S.trails) {
+      // TRAIL control IS the trail span (decoupled from the chart WINDOW). For long windows (1h..24h)
+      // in SIMULATION, use the computed full-constellation tracks; otherwise the live accumulated buffer.
+      const cut = st.skyTrailAge;
+      const comp = this.simTrails(cut);
+      const source = comp ? comp.trails : S.trails;
+      if (st.skyTrails) for (const [k, tr] of source) {
         const f = tr.filter((p) => nowS - p.t <= cut);
         if (f.length > 1) trails.set(k, f);
       }
@@ -1542,6 +1552,8 @@ class Component extends DcLite {
     // Ground tracks carry no timestamps (gtrails = plain points at ~45 s cadence), so the TRAIL
     // length control maps to a tail slice: 45 s per point, full buffer (40 pts) at MAX.
     const gcut = (g) => {
+      const comp = this.simTrails(st.skyTrailAge);
+      if (comp) return comp.gtrails;   // computed sim ground tracks already span exactly the window
       const n = Math.round(st.skyTrailAge / 45);
       if (n >= 40) return g;
       const m = new Map();
@@ -1553,7 +1565,7 @@ class Component extends DcLite {
         rot: this.globeRot, land: this.land, sats: S.sats, gtrails: gcut(S.gtrails),
         sun: this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon),
         moon: this.SIM.moonPos(Date.now(), S.obs.lat, S.obs.lon), obs: S.obs,
-        opts: { terminator: st.globeTerm, trails: st.globeTrails, labels: st.globeLabels, graticule: st.globeGrat },
+        opts: { terminator: st.globeTerm, trails: st.globeTrails, labels: st.globeLabels, graticule: st.globeGrat, trailAge: st.skyTrailAge },
         dark: st.theme === 'dark',
       });
     }
@@ -1562,7 +1574,7 @@ class Component extends DcLite {
         land: this.land, sats: S.sats, gtrails: gcut(S.gtrails),
         sun: this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon),
         moon: this.SIM.moonPos(Date.now(), S.obs.lat, S.obs.lon), obs: S.obs,
-        opts: { terminator: st.mapTerm, trails: st.mapTrails, labels: st.mapLabels, graticule: st.mapGrat },
+        opts: { terminator: st.mapTerm, trails: st.mapTrails, labels: st.mapLabels, graticule: st.mapGrat, trailAge: st.skyTrailAge },
         dark: st.theme === 'dark',
       });
     }
@@ -2789,10 +2801,12 @@ class Component extends DcLite {
       oWin15: () => this.setState({ window: 900 }, () => this.drawChart('sky')),
       oWin1h: () => this.setState({ window: 3600 }, () => this.drawChart('sky')),
       oWinAll: () => this.setState({ window: 5400 }, () => this.drawChart('sky')),
-      ssTrail15: this.seg(st.skyTrailAge === 900, true), ssTrail45: this.seg(st.skyTrailAge === 2700, false), ssTrail90: this.seg(st.skyTrailAge === 5400, false),
-      oTrail15: () => this.setState({ skyTrailAge: 900 }, () => this.drawChart('sky')),
-      oTrail45: () => this.setState({ skyTrailAge: 2700 }, () => this.drawChart('sky')),
-      oTrail90: () => this.setState({ skyTrailAge: 5400 }, () => this.drawChart('sky')),
+      ssTrail45: this.seg(st.skyTrailAge === 2700, true), ssTrail1h: this.seg(st.skyTrailAge === 3600, false),
+      ssTrail3h: this.seg(st.skyTrailAge === 10800, false), ssTrail6h: this.seg(st.skyTrailAge === 21600, false),
+      ssTrail12h: this.seg(st.skyTrailAge === 43200, false), ssTrail24h: this.seg(st.skyTrailAge === 86400, false),
+      oTrail45: () => this.setTrailAge(2700), oTrail1h: () => this.setTrailAge(3600),
+      oTrail3h: () => this.setTrailAge(10800), oTrail6h: () => this.setTrailAge(21600),
+      oTrail12h: () => this.setTrailAge(43200), oTrail24h: () => this.setTrailAge(86400),
     };
     if (!S) {
       Object.assign(out, { fLat: '—', fLon: '—', fAlt: '—', fHdop: '—', fFix: '—', fSatsUV: '—', fGrid: '—', cSunAlt: '—', cSunAz: '—', cMoonAlt: '—', cMoonAz: '—', cMoonPhase: '—', cMoonIllum: '—', cRise: '—', cSet: '—', sStarted: '—', sPasses: '—', sObs: '—', sPeak: '—', sCover: '—', nGps: '·', nGlo: '·', nGal: '·', nBds: '·', starShow: false, starSrc: '', starRows: [] });
@@ -3108,6 +3122,24 @@ class Component extends DcLite {
       this.drawChart('archOffset'); this.drawChart('archAux'); this.drawChart('archSky');
     }).catch(() => { this._archBusy = false; this._arch = { t: [], s: [], range, at: Date.now() }; this.setState({}); });
   }
+  // ---- extended satellite trails --------------------------------------------------------------------
+  // For long TRAIL windows (>90 min live buffer) in SIMULATION, compute each sat's whole track over the
+  // window from the deterministic orbit model (session.computeTrails) instead of waiting to accumulate.
+  // Cached and refreshed at most once per trail step, so it doesn't recompute every animation frame.
+  // Returns null in CONNECTED/STANDBY (a real clock's sats are not modelled) or for short windows.
+  simTrails(winSec) {
+    if (this.appMode() !== 'simulation' || winSec <= 5400) return null;
+    const obs = this.session.S.obs;
+    const key = winSec + '|' + obs.lat.toFixed(3) + ',' + obs.lon.toFixed(3);
+    const now = Date.now();
+    const stepMs = Math.max(30, Math.min(120, Math.round(winSec / 500))) * 1000;
+    if (this._simTrail && this._simTrail.key === key && (now - this._simTrail.at) < stepMs) return this._simTrail;
+    const { trails, gtrails } = this.session.computeTrails(winSec);
+    this._simTrail = { key, at: now, trails, gtrails };
+    return this._simTrail;
+  }
+  setTrailAge(s) { this._simTrail = null; this.setState({ skyTrailAge: s }, () => { this.drawChart('sky'); this.drawChart('globe'); this.drawChart('map'); }); }
+
   // ---- SIGNAL PATH — the pccd prefilter explainer -------------------------------------------------
   // Runs the REAL prefilter (prefilter.mjs, a verified port of pccd.c pf_push) over a clearly-labelled
   // MODEL stream. Model params (seed, calibrated jitter) rebuild the stream; filter knobs re-run the

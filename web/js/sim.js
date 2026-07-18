@@ -448,6 +448,29 @@ export function createSession(opts = {}) {
   return {
     S, obs,
     tick(nowMs) { tick(nowMs, false); },
+    // Compute each sat's track over the past `windowSec` from the closed-form orbit model, at the SAME
+    // Date.now()/1000 time base as tick() — so the trail's newest point coincides with the live sat.
+    // Returns full-constellation tracks (ground = every sat; polar = only the above-horizon spans, so
+    // multi-pass sats break into separate arcs). Used for the long TRAIL windows (1h..24h): no waiting
+    // to accumulate, the whole 24 h of movement appears at once. Sim only (a real clock's sats are not
+    // modelled — those long trails come from the flight recorder).
+    computeTrails(windowSec) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const step = Math.max(30, Math.min(120, Math.round(windowSec / 500)));   // ≤120s so trailBreak won't split a pass
+      const trails = new Map(), gtrails = new Map();
+      for (const s of sats) {
+        const tr = [], gt = [];
+        for (let t = nowSec - windowSec; t <= nowSec; t += step) {
+          const geo = satGeo(s, t);
+          gt.push({ lat: geo.lat, lon: geo.lon, t });
+          const ae = azel(obs.lat, obs.lon, { ...geo, alt: s.alt });
+          if (ae.el > -1) tr.push({ t, az: ae.az, el: ae.el, cn0: 40 });        // horizon-gated → per-pass arcs
+        }
+        if (tr.length > 1) trails.set(s.key, tr);
+        if (gt.length > 1) gtrails.set(s.key, gt);
+      }
+      return { trails, gtrails, step };
+    },
     setScenario(s) { S.scenario = s; },
     connect() { S.connected = true; doPreroll(); },
     disconnect() {

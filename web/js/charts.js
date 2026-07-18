@@ -134,7 +134,7 @@ export function drawSky(canvas, tok, data, opts) {
     const span = opts.trailAge || 5400;
     for (const [key, tr] of data.trails) {
       const sat = data.sats.find((s) => s.key === key);
-      const col = tok[sat ? sat.tok : 'gps'] || tok.txt3;
+      const col = (sat && tok[sat.tok]) || tok[{ G: 'gps', R: 'glo', E: 'gal', C: 'bds' }[key[0]]] || tok.txt3;
       for (let i = 1; i < tr.length; i++) {
         if (tr[i].el < -2 || tr[i - 1].el < -2) continue;
         if (tr[i].t - tr[i - 1].t > 150) continue;   // disconnect gap — don't bridge it
@@ -772,15 +772,20 @@ export function drawGlobe(canvas, tok, g) {
   // polar plot so all three sky views cue track age the same way (points carry `t`).
   if (g.opts.trails) {
     const nowS = Date.now() / 1000;
+    const span = g.opts.trailAge || 1800;   // fade over the actual TRAIL window (was hardcoded 30 min)
     for (const [key, tr] of g.gtrails) {
-      const sat = g.sats.find((x) => x.key === key); if (!sat || tr.length < 2) continue;
-      const col = tok[sat.tok]; const refT = tr[tr.length - 1].t || nowS;
+      if (tr.length < 2) continue;
+      // Colour by constellation even for a sat not currently in view (long tracks span below-horizon
+      // spans): prefer the live sat's tok, else derive from the PRN prefix (G/R/E/C).
+      const sat = g.sats.find((x) => x.key === key);
+      const col = (sat && tok[sat.tok]) || tok[{ G: 'gps', R: 'glo', E: 'gal', C: 'bds' }[key[0]]] || tok.txt3;
+      const refT = tr[tr.length - 1].t || nowS;
       let prev = null, pq = null;
       for (const p of tr) {
         const q = proj(p.lat, p.lon);
         if (!q.vis) { prev = p; pq = null; continue; }
         if (prev && pq && !trailBreak(prev, p)) {
-          const age = Math.min(1, Math.max(0, (refT - (p.t || refT)) / 1800));
+          const age = Math.min(1, Math.max(0, (refT - (p.t || refT)) / span));
           ctx.globalAlpha = 0.5 * (1 - age) + 0.05; ctx.strokeStyle = col;
           ctx.beginPath(); ctx.moveTo(pq.x, pq.y); ctx.lineTo(q.x, q.y); ctx.stroke();
         }
@@ -911,15 +916,18 @@ export function drawMap(canvas, tok, g) {
   if (g.opts.trails && g.gtrails) {
     ctx.lineWidth = 1.3;
     const nowS = Date.now() / 1000;
+    const span = g.opts.trailAge || 1800;   // fade over the actual TRAIL window
     for (const [key, tr] of g.gtrails) {
-      const sat = g.sats.find((x) => x.key === key); if (!sat || tr.length < 2) continue;
-      const col = tok[sat.tok] || tok.txt3; const refT = tr[tr.length - 1].t || nowS;
+      if (tr.length < 2) continue;
+      const sat = g.sats.find((x) => x.key === key);
+      const col = (sat && tok[sat.tok]) || tok[{ G: 'gps', R: 'glo', E: 'gal', C: 'bds' }[key[0]]] || tok.txt3;
+      const refT = tr[tr.length - 1].t || nowS;
       let prev = null, pq = null;
       for (const p of tr) {
         const q = P(p.lon, p.lat);
         // age-faded per segment (newest brightest), matching the globe + polar plot
         if (prev && pq && !trailBreak(prev, p, true)) {
-          const age = Math.min(1, Math.max(0, (refT - (p.t || refT)) / 1800));
+          const age = Math.min(1, Math.max(0, (refT - (p.t || refT)) / span));
           ctx.globalAlpha = 0.45 * (1 - age) + 0.05; ctx.strokeStyle = col;
           ctx.beginPath(); ctx.moveTo(pq.x, pq.y); ctx.lineTo(q.x, q.y); ctx.stroke();
         }
