@@ -526,7 +526,7 @@ static FILE *hist_file(time_t now){
   mkdir(opt_hist,0755);
   char p[4400]; snprintf(p,sizeof p,"%s/%s.log",opt_hist,day);
   g_histf = fopen(p,"a");
-  if (g_histf){ setvbuf(g_histf,NULL,_IOLBF,0); snprintf(g_hist_day,sizeof g_hist_day,"%s",day); hist_prune(); }
+  if (g_histf){ fcntl(fileno(g_histf),F_SETFD,FD_CLOEXEC); setvbuf(g_histf,NULL,_IOLBF,0); snprintf(g_hist_day,sizeof g_hist_day,"%s",day); hist_prune(); }   // CLOEXEC: don't leak the log fd across self-update exec / curl subprocs
   return g_histf;
 }
 static void hist_T(double wall, double off){
@@ -581,15 +581,34 @@ static void hist_S(double now){
 }
 // GET /history?series=timing|sky&from=E&to=E&points=N  →  decimated CSV (server-side min/max/mean
 // buckets, so a 90-day chart is one small response). Returns a malloc'd body; caller frees.
+// Exact-key query-param lookup (…&key=VALUE…). strstr-on-the-whole-string matches substrings — `?min=5`
+// would hijack an `n=` probe — so compare each token's key up to '=' against the exact key.
+static const char *qval(const char *qs, const char *key){
+  if (!qs) return NULL;
+  size_t kl=strlen(key);
+  for (const char *p=qs; p && *p; ){
+    if (!strncmp(p,key,kl) && p[kl]=='=') return p+kl+1;
+    const char *amp=strchr(p,'&'); if(!amp) break; p=amp+1;
+  }
+  return NULL;
+}
 static char *hist_query(const char *qs, size_t *blen){
   char series[8]="timing"; double from=0, to=(double)time(NULL); long points=800;
   char f[40];
   const char *p;
-  if ((p=strstr(qs,"series="))) { size_t n=0; p+=7; while(p[n]&&p[n]!='&'&&n<7){series[n]=p[n];n++;} series[n]=0; }
-  if ((p=strstr(qs,"from=")))   { snprintf(f,sizeof f,"%.30s",p+5); from=atof(f); }
-  if ((p=strstr(qs,"to=")))     { snprintf(f,sizeof f,"%.30s",p+3); to=atof(f); }
-  if ((p=strstr(qs,"points="))) { points=atol(p+7); }
-  if (from<=0) from = to-21600;
+  if ((p=qval(qs,"series"))) { size_t n=0; while(p[n]&&p[n]!='&'&&n<7){series[n]=p[n];n++;} series[n]=0; }
+  if ((p=qval(qs,"from")))   { snprintf(f,sizeof f,"%.30s",p); from=atof(f); }
+  if ((p=qval(qs,"to")))     { snprintf(f,sizeof f,"%.30s",p); to=atof(f); }
+  if ((p=qval(qs,"points"))) { points=atol(p); }
+  // Clamp the scan window BEFORE the day loop: an unbounded/far-future `to` (or NaN) would spin the
+  // per-day loop for ~1e13 passes and freeze this single-threaded stratum-1 daemon. Files older than
+  // opt_retain are pruned anyway, so bounding to the retention window loses no data.
+  if (!isfinite(from) || !isfinite(to)) return NULL;
+  double nowt = (double)time(NULL);
+  if (to > nowt + 86400) to = nowt + 86400;
+  if (from <= 0) from = to - 21600;
+  double span_max = (double)(opt_retain>0?opt_retain:400) * 86400.0;
+  if (to - from > span_max) from = to - span_max;
   if (to<=from || points<2) return NULL;
   if (points>4000) points=4000;
   int sky = !strcmp(series,"sky");
@@ -639,11 +658,14 @@ static char *hist_query(const char *qs, size_t *blen){
   for (long i=0;i<points;i++){
     if (!b[i].n) continue;
     double t = from + (i+0.5)*(to-from)/points;
-    if (sky) o += snprintf(out+o,cap-o,"%.0f,%d,%d,%.2f,%d,%.1f,%d\n",
-                           t,b[i].fix,b[i].used,b[i].hdop,b[i].sats,b[i].cn0s,b[i].cn0mx);
-    else     o += snprintf(out+o,cap-o,"%.0f,%.1f,%.1f,%.1f,%.1f,%.3f,%.1f\n",
+    // snprintf returns the would-be length; if a row (device-supplied temp/ppm can be wide) exceeds the
+    // remaining space, STOP before advancing `o` past cap — else *blen=o drives an OOB heap read.
+    int r = sky ? snprintf(out+o,cap-o,"%.0f,%d,%d,%.2f,%d,%.1f,%d\n",
+                           t,b[i].fix,b[i].used,b[i].hdop,b[i].sats,b[i].cn0s,b[i].cn0mx)
+                : snprintf(out+o,cap-o,"%.0f,%.1f,%.1f,%.1f,%.1f,%.3f,%.1f\n",
                            t,b[i].mn,b[i].mx,b[i].sum/b[i].n,b[i].jit,b[i].ppm,b[i].tmp);
-    if (o > cap-120) break;
+    if (r < 0 || (size_t)r >= cap-o) break;
+    o += (size_t)r;
   }
   free(b); *blen=o; return out;
 }
@@ -708,7 +730,7 @@ static void sha1(const unsigned char *msg, size_t len, unsigned char out[20]){
 
 // ---- WebSocket / HTTP server (RFC 6455, text frames, localhost only) ------------------------------
 #define MAXCLI 8
-typedef struct { int fd; int ws; char buf[2048]; int len; char lb[256]; int li; } Client;
+typedef struct { int fd; int ws; char buf[2048]; int len; char lb[256]; int li; double t0; } Client;
 static Client g_cli[MAXCLI];
 static int g_listen = -1;
 
@@ -919,13 +941,15 @@ static void http_or_upgrade(Client *c){
     // In-memory pre-gate raw samples, oldest->newest CSV `t,off_us`. Feeds the SIGNAL PATH panel's
     // REAL source. n=<count> caps the window (default = all held, ~600). CORS-open like /history.
     long n = raw_cnt; const char *pp;
-    if (q && (pp=strstr(q,"n="))) { long v=atol(pp+2); if (v>0 && v<n) n=v; }
-    size_t cap = (size_t)n*24 + 32; char *body=malloc(cap); if(!body){ http_simple(c,"500 Internal Server Error","text/plain","oom\n"); return; }
+    if ((pp=qval(q,"n"))) { long v=atol(pp); if (v>0 && v<n) n=v; }   // exact-key parse (not substring)
+    size_t cap = (size_t)n*28 + 32; char *body=malloc(cap); if(!body){ http_simple(c,"500 Internal Server Error","text/plain","oom\n"); return; }
     size_t o=0; o+=snprintf(body+o,cap-o,"t,off_us\n");
     int start = raw_cnt - (int)n;   // index within the logical oldest..newest sequence
-    for (int k=start; k<raw_cnt && o<cap-32; k++){
+    for (int k=start; k<raw_cnt; k++){
       int idx = (raw_head - raw_cnt + k + 2*RAW_N) % RAW_N;   // logical k -> physical ring slot
-      o += snprintf(body+o,cap-o,"%u,%.1f\n",(unsigned)raw_ring[idx].t,raw_ring[idx].off_us);
+      int r = snprintf(body+o,cap-o,"%u,%.1f\n",(unsigned)raw_ring[idx].t,raw_ring[idx].off_us);
+      if (r < 0 || (size_t)r >= cap-o) break;                 // never advance o past what was written
+      o += (size_t)r;
     }
     char hdr[256];
     int hn=snprintf(hdr,sizeof hdr,
@@ -1332,7 +1356,7 @@ int main(int argc, char **argv){
       if (fd>=0){
         fcntl(fd, F_SETFD, FD_CLOEXEC);
         int placed=0;
-        for (int i=0;i<MAXCLI;i++) if (g_cli[i].fd<0){ memset(&g_cli[i],0,sizeof(Client)); g_cli[i].fd=fd; placed=1; break; }
+        for (int i=0;i<MAXCLI;i++) if (g_cli[i].fd<0){ memset(&g_cli[i],0,sizeof(Client)); g_cli[i].fd=fd; g_cli[i].t0=now_mono_ns(); placed=1; break; }
         if (!placed) close(fd);
       }
     }
@@ -1345,6 +1369,11 @@ int main(int argc, char **argv){
       c->len+=r;
       if (c->ws) ws_read(c,sfd); else http_or_upgrade(c);
     }
+    // Reap slow-loris clients: a non-WS connection that never finishes its request (no CRLFCRLF) would
+    // otherwise hold one of the MAXCLI slots forever and eventually lock out every client, including the
+    // health probe. Completed requests already closed their fd; a WS upgrade set ws=1. 8 s is generous
+    // for a loopback/LAN request. The 500 ms poll timeout guarantees this sweep runs even with no traffic.
+    { double nn=now_mono_ns(); for (int i=0;i<MAXCLI;i++) if (g_cli[i].fd>=0 && !g_cli[i].ws && nn-g_cli[i].t0>8e9){ close(g_cli[i].fd); g_cli[i].fd=-1; } }
     // serial — POLLNVAL matters: a USB-serial node that vanishes oddly on re-enumeration (a flash /
     // replug, routine here) can leave an fd that poll() reports as INVALID rather than HUP. Without
     // POLLNVAL in the mask that fd is never drained or closed, so poll returns it ready every
@@ -1353,7 +1382,7 @@ int main(int argc, char **argv){
       double rx_mono = now_mono_ns();                    // arrival stamp for the frame-clock fallback
       char chunk[256];
       int r=(int)read(sfd,chunk,sizeof chunk);
-      if (r<=0){ fprintf(stderr,"[pccd] serial lost — will retry\n"); close(sfd); sfd=-1; g_serial_open=0; usb_close(); li=0; overrun=0; next_retry=now_mono_ns()+2e9; continue; }
+      if (r<=0){ fprintf(stderr,"[pccd] serial lost — will retry\n"); close(sfd); sfd=-1; g_serial_open=0; usb_close(); li=0; overrun=0; raw_head=raw_cnt=0; next_retry=now_mono_ns()+2e9; continue; }   // empty the raw window: /raw + /health go honest immediately
       did_serial=1;
       for (int i=0;i<r;i++){
         char ch=chunk[i];
