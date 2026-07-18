@@ -519,6 +519,11 @@ export function createRealDevice(session) {
             clock.requestNMEA();       // ref-counted: turn the firehose on
             clock.send('pps = on');    // ask the firmware to stream $PMTXTS per PPS edge
             clock.send('tc_dump = on'); // read back the learned tempcomp model → $PMTXTC → S.tc
+            // $PMADEV/$PMHDEV are DUMP-ON-REQUEST (adev_dump=on), NOT streamed by MODE_ADEV — so ask, or
+            // the σ_y(τ) chart never fills. The firmware's accumulator is already mature, so one reply
+            // populates it; app-controller re-polls while the TIMING room is open.
+            clock.send('adev_dump = on');   // → $PMADEV → S.stab.adev
+            clock.send('hdev_dump = on');   // → $PMHDEV → S.stab.hdev
 
             // Enter real-device mode. Clear any stale sim telemetry so the rooms
             // start from the device's honest state and fill in as sentences land.

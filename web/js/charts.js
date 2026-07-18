@@ -504,7 +504,7 @@ export function drawStair(canvas, tok, samples, spanSec, now, tempNow) {
 // The classic log-log stability ladder ($PMADEV octave taus, plus the drift-immune Hadamard twin
 // when present). Points are the firmware's own reductions — real device over serial, or the
 // emulator's identical accumulator in simulation; nothing is synthesised here.
-export function drawAdev(canvas, tok, stab) {
+export function drawAdev(canvas, tok, stab, hint) {
   const { ctx, w, h } = c2d(canvas);
   clear(ctx, w, h, tok);
   const fr = frame(ctx, w, h, tok, { ml: 46, mb: 22 });
@@ -515,8 +515,17 @@ export function drawAdev(canvas, tok, stab) {
   const pts = series.map((s) => ({ ...s, p: s.r.taus.map((t, i) => ({ t, s: s.r.sigmas[i] })).filter((q) => q.s > 0) }))
     .filter((s) => s.p.length);
   if (!pts.length) {
+    // Honest, actionable empty-state per why there's no ladder (the old copy described a warm-up that
+    // never happens when the clock isn't in ADEV mode — reads as fiction). `hint` comes from the caller.
     ctx.font = F9; ctx.fillStyle = tok.txt3; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('NO σ_y(τ) DATA. τ=1 s NEEDS ~5 PPS EDGES. EACH OCTAVE DOUBLES.', w / 2, h / 2);
+    const msgs = {
+      'mode-off': ['THE CLOCK IS NOT SENDING $PMADEV.', 'TURN ON ALLAN DEV — DEVICE › MODES · DIAGNOSTIC', '(NEEDS THE ADEV-CAPABLE FIRMWARE). IT THEN BUILDS OVER MINUTES.'],
+      'waiting': ['COMPUTING σ_y(τ) ON THE CLOCK.', 'THE FIRST TAUS APPEAR IN ~A MINUTE;', 'LONGER OCTAVES TAKE PROPORTIONALLY LONGER.'],
+      'sim': ['COMPUTING σ_y(τ) FROM THE VIRTUAL PPS.', 'THE FIRST TAUS APPEAR IN ~A MINUTE;', 'EACH LONGER OCTAVE TAKES ~2× AS LONG.'],
+      'standby': ['NO PPS SOURCE.', 'CONNECT A CLOCK OR RUN A SIMULATION.'],
+    }[hint] || ['NO σ_y(τ) DATA YET.'];
+    const lh = 14, y0 = h / 2 - (msgs.length - 1) * lh / 2;
+    msgs.forEach((ln, i) => ctx.fillText(ln, w / 2, y0 + i * lh));
     return;
   }
   // log-log range: x across the emitted octaves, y snapped to whole decades around the data

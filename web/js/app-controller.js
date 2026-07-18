@@ -105,7 +105,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=98'), import('./charts.js?v=104'), import('./realdev.js?v=112'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=98'), import('./charts.js?v=105'), import('./realdev.js?v=113'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -1440,6 +1440,18 @@ class Component extends DcLite {
         if (this.session.log) this.session.log('tx', 'tc_dump = on');
       }
     }
+    // ADEV/HDEV ladder refresh: $PMADEV/$PMHDEV are dump-on-request, so poll while a real clock is
+    // connected AND the TIMING room is open (where the chart lives) — else the σ_y(τ) plot never fills.
+    // Every ~15 s: the curve evolves slowly, and the firmware's accumulator is already running.
+    this._adevDumpTick = (this._adevDumpTick || 0) + 1;
+    if (this._adevDumpTick >= 15) {
+      this._adevDumpTick = 0;
+      const S3 = this.session.S;
+      if (S3 && S3.real && S3.connected && this.realdev && this.state.section === 'timing') {
+        this.realdev.send('adev_dump = on'); this.realdev.send('hdev_dump = on');
+        if (this.session.log) { this.session.log('tx', 'adev_dump = on'); this.session.log('tx', 'hdev_dump = on'); }
+      }
+    }
     // SIMULATED TRANSITS: the emulator runs the firmware's own MODE_STAR predictor for the sim
     // observer, so the NEXT TRANSITS panel needn't stay blank in Simulation. Refresh every ~10 s
     // (transits move slowly); the panel labels this SIMULATED, kept visually distinct from a real
@@ -1549,7 +1561,7 @@ class Component extends DcLite {
     if (name === 'phase') return CH.drawPhase(el, T, sby ? [] : S.pps.list, 1800, nowS, sby ? 0 : ((S.pps.flags & 2) ? 0 : (S.pps.lastEdge || 0)));
     if (name === 'stair') return CH.drawStair(el, T, sby ? [] : S.pps.samples, 1800, nowS, sby ? 0 : S.pps.temp);
     if (name === 'ppmtemp') return CH.drawPpmTemp(el, T, sby ? [] : S.pps.samples, sby ? null : (this._timing && this._timing.fit));
-    if (name === 'adev') return CH.drawAdev(el, T, this.adevData());
+    if (name === 'adev') return CH.drawAdev(el, T, this.adevData(), this.adevHint());
     if (name === 'archOffset') return CH.drawArchiveOffset(el, T, this._arch && this._arch.t);
     if (name === 'archAux') return CH.drawArchiveAux(el, T, this._arch && this._arch.t);
     if (name === 'archSky') return CH.drawArchiveSky(el, T, this._arch && this._arch.s);
@@ -1785,6 +1797,16 @@ class Component extends DcLite {
     if (this.els.main) this.els.main.scrollTop = 0;
     if (sec === 'export') { this.refreshTelStats(); this.openReview(); }   // log counts + load the scrub model
     if (sec === 'datalink') this.mountDatalink();                          // lazy-mount the watch-programming UI
+    // Entering TIMING with a live clock: request the σ_y(τ) ladder now (dump-on-request) so the ADEV
+    // chart fills at once instead of waiting up to a full poll interval.
+    if (sec === 'timing') {
+      const S = this.session && this.session.S;
+      if (S && S.real && S.connected && this.realdev) {
+        this.realdev.send('adev_dump = on'); this.realdev.send('hdev_dump = on');
+        if (this.session.log) { this.session.log('tx', 'adev_dump = on'); this.session.log('tx', 'hdev_dump = on'); }
+        this._adevDumpTick = 0;
+      }
+    }
   }
 
   // Lazily import + mount the Datalink room (self-contained; builds its own DOM in the refDatalink node).
@@ -1977,6 +1999,17 @@ class Component extends DcLite {
   // in realdev) is the primary source; otherwise the EMULATOR's own accumulator — the same firmware
   // adev code fed by the virtual GPS's PPS edges — is asked for its byte-faithful sentences and run
   // through the same parser. Standby (no PPS source at all) simply has no ladder: honest absence.
+  // Why is the σ_y(τ) ladder empty? Drives the honest empty-state copy in drawAdev.
+  //   mode-off  — a clock is connected but MODE_ADEV is off (or its firmware lacks it): no $PMADEV stream
+  //   waiting   — connected + ADEV on, but the octaves haven't matured yet
+  //   sim       — the emulator is accumulating from the virtual PPS
+  //   standby   — no PPS source at all
+  adevHint() {
+    const m = this.appMode();
+    if (m === 'simulation') return 'sim';
+    if (m === 'connected') return (this.state.modesEnabled && this.state.modesEnabled.adev) ? 'waiting' : 'mode-off';
+    return 'standby';
+  }
   adevData() {
     const S = this.session && this.session.S;
     if (S && S.real && S.stab) return S.stab;
