@@ -262,6 +262,20 @@ export class BridgeClock extends EventTarget {
         });
     }
 
+    /// Fetch the daemon's in-memory pre-gate raw offset ring (GET /raw). Returns [{t, raw}] (raw in
+    /// microseconds) oldest->newest, the shape prefilter.runPrefilter consumes. Throws on HTTP failure.
+    static async fetchRaw(n) {
+        const q = n ? `?n=${n | 0}` : '';
+        const r = await fetch(`http://${BridgeClock.authority()}/raw${q}`);
+        if (!r.ok) throw new Error('raw HTTP ' + r.status);
+        const lines = (await r.text()).trim().split('\n');
+        lines.shift();   // header "t,off_us"
+        return lines.filter(Boolean).map((ln) => {
+            const v = ln.split(',');
+            return { t: +v[0], raw: +v[1] };
+        });
+    }
+
     /// Trigger a pccd self-update over a throwaway socket, independent of any clock connection.
     /// Sends the `pccd:update` control frame, streams the daemon's `pccd:update <msg>` progress
     /// lines to onLine(), and settles: { ok:true } when the socket drops (daemon re-exec'd onto the

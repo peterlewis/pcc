@@ -46,7 +46,7 @@
 #endif
 
 #ifndef PCCD_VERSION
-#define PCCD_VERSION "0.4.2"               /* overridable (-DPCCD_VERSION=...) so a test build can look older */
+#define PCCD_VERSION "0.5.0"               /* overridable (-DPCCD_VERSION=...) so a test build can look older */
 #endif
 #ifdef PCCD_GIT
 #define PCCD_VERSTR PCCD_VERSION "+" PCCD_GIT      /* Makefile stamps the short git hash for traceable /health */
@@ -425,6 +425,19 @@ static double pf_ring[PF_WIN]; static int pf_cnt=0, pf_idx=0;
 static double pf_at[PF_AGG], pf_ao[PF_AGG]; static int pf_an=0;
 static long   pf_rejects=0, pf_groups=0;
 static double pf_last_sig=0;              // latest MAD-derived sigma (s) — the history log's jitter column
+
+// Raw pre-gate sample ring: every offset that enters the prefilter, in memory only (~10 min at 1/s).
+// This is the ONE place the raw stream survives — the flight-recorder archive keeps only the
+// post-filter output. GET /raw serves it so the app's SIGNAL PATH panel can run its (identical)
+// prefilter math on this clock's REAL samples instead of a model. Cleared when the port drops.
+#define RAW_N 600
+static struct { uint32_t t; float off_us; } raw_ring[RAW_N];
+static int raw_head=0, raw_cnt=0;
+static void raw_capture(double wall, double off){
+  raw_ring[raw_head].t = (uint32_t)wall;
+  raw_ring[raw_head].off_us = (float)(off*1e6);
+  raw_head = (raw_head+1)%RAW_N; if (raw_cnt<RAW_N) raw_cnt++;
+}
 static void (*pf_sink)(double wall, double off) = NULL;   // production: chrony; self-test: recorder
 static int dbl_cmp(const void *a, const void *b){
   double x=*(const double*)a, y=*(const double*)b; return x<y?-1:(x>y?1:0);
@@ -436,6 +449,7 @@ static double median_inplace(double *v, int n){
 static void pf_reset(void){ pf_cnt=0; pf_idx=0; pf_an=0; }
 static void pf_push(double wall, double off){
   int rejected = 0;
+  raw_capture(wall, off);   // record the pre-gate sample (incl. outliers) for GET /raw
   if (pf_cnt >= 16){
     double tmp[PF_WIN], dev[PF_WIN];
     memcpy(tmp,pf_ring,pf_cnt*sizeof(double));
@@ -901,6 +915,25 @@ static void http_or_upgrade(Client *c){
     }
     free(body); close(c->fd); c->fd=-1; return;
   }
+  if (!strncmp(path,"/raw",4)){
+    // In-memory pre-gate raw samples, oldest->newest CSV `t,off_us`. Feeds the SIGNAL PATH panel's
+    // REAL source. n=<count> caps the window (default = all held, ~600). CORS-open like /history.
+    long n = raw_cnt; const char *pp;
+    if (q && (pp=strstr(q,"n="))) { long v=atol(pp+2); if (v>0 && v<n) n=v; }
+    size_t cap = (size_t)n*24 + 32; char *body=malloc(cap); if(!body){ http_simple(c,"500 Internal Server Error","text/plain","oom\n"); return; }
+    size_t o=0; o+=snprintf(body+o,cap-o,"t,off_us\n");
+    int start = raw_cnt - (int)n;   // index within the logical oldest..newest sequence
+    for (int k=start; k<raw_cnt && o<cap-32; k++){
+      int idx = (raw_head - raw_cnt + k + 2*RAW_N) % RAW_N;   // logical k -> physical ring slot
+      o += snprintf(body+o,cap-o,"%u,%.1f\n",(unsigned)raw_ring[idx].t,raw_ring[idx].off_us);
+    }
+    char hdr[256];
+    int hn=snprintf(hdr,sizeof hdr,
+      "HTTP/1.1 200 OK\r\nContent-Type: text/csv\r\nAccess-Control-Allow-Origin: *\r\n"
+      "Content-Length: %zu\r\nConnection: close\r\n\r\n",o);
+    if (write(c->fd,hdr,hn)>0){ for (size_t off=0; off<o; ){ ssize_t w=write(c->fd,body+off,o-off); if (w<=0) break; off+=(size_t)w; } }
+    free(body); close(c->fd); c->fd=-1; return;
+  }
   if (!strncmp(path,"/health",7)){
     // liveness, not just presence: is the tty open, when did the last accepted PPS land, what was
     // it, and how many samples have flowed vs been rejected — so the app can tell a streaming clock
@@ -914,10 +947,10 @@ static void http_or_upgrade(Client *c){
     snprintf(json,sizeof json,
       "{\"pccd\":1,\"version\":\"" PCCD_VERSTR "\",\"device\":\"%s\",\"chrony\":%s,"
       "\"serial_open\":%s,\"last_sample_age_s\":%s,\"last_offset_s\":%s,\"sent\":%ld,\"rejected\":%ld,"
-      "\"updatable\":%s,\"platform\":\"%s\",\"history\":%s}",
+      "\"updatable\":%s,\"platform\":\"%s\",\"history\":%s,\"raw\":%d}",
       g_devpath, (g_chrony>=0)?"true":"false",
       g_serial_open?"true":"false", agebuf, offbuf, g_nsent, g_nseen-g_nsent,
-      g_updatable?"true":"false", g_platform?g_platform:"", histbuf);
+      g_updatable?"true":"false", g_platform?g_platform:"", histbuf, raw_cnt);
     char resp[1400];
     int n=snprintf(resp,sizeof resp,
       "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\n"
@@ -1266,7 +1299,7 @@ int main(int argc, char **argv){
 #else
         fprintf(stderr,"[pccd] serial open: %s  (arrival timestamps — Linux has no USB frame clock; ~ms accuracy)\n",dev);
 #endif
-        havePrev=0; haveRate=0; li=0; overrun=0; pf_reset(); reg_reset();
+        havePrev=0; haveRate=0; li=0; overrun=0; pf_reset(); reg_reset(); raw_head=raw_cnt=0;   // fresh session, empty raw window
       } else {
         // Nothing to open. Say so ONCE per outage (mirrors the chrony-EACCES warn-once above): a
         // launchd pccd otherwise logs the listen banner then goes silent — same signature as a hang.

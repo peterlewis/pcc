@@ -10,7 +10,7 @@ import { prepReview, drawReview, sampleAt, tAtX } from './review.js?v=1';
 import { subSatellitePoint } from './satpass.js?v=1';
 import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=1';
 import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=4';
-import { REC as PF_REC, RANGE as PF_RANGE, modelStream, runPrefilter } from './prefilter.mjs?v=1';
+import { REC as PF_REC, RANGE as PF_RANGE, modelStream, runPrefilter } from './prefilter.mjs?v=2';
 
 // config.txt is the single source of truth: the clock-behaviour defaults (enabled modes, colon,
 // astro dwell, …) are DERIVED from the canonical golden config, not hand-written here. See
@@ -47,7 +47,7 @@ class Component extends DcLite {
     // SIGNAL PATH explainer knobs (TIMING room). Defaults = the shipped recommended values (PF_REC);
     // session-only — this is a tuning explainer, not a persisted preference. seed drives the model
     // stream; freeze halts the sweep for inspection.
-    sp: { K: PF_REC.k, window: PF_REC.window, group: PF_REC.group, floorUs: PF_REC.floorUs, corrRatio: PF_REC.corrRatio, seed: 0x9e37, freeze: false },
+    sp: { K: PF_REC.k, window: PF_REC.window, group: PF_REC.group, floorUs: PF_REC.floorUs, corrRatio: PF_REC.corrRatio, seed: 0x9e37, freeze: false, source: 'model' },
     showcase: false,
     // CUCKOO: scheduled showcase flourishes off the displayed time — 'off' | 'hour' (the full
     // minute-long cycle at the top of the hour) | 'quarter' (that, plus a short heartbeat chime
@@ -105,7 +105,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=97'), import('./charts.js?v=99'), import('./realdev.js?v=111'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=97'), import('./charts.js?v=100'), import('./realdev.js?v=112'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -1483,7 +1483,7 @@ class Component extends DcLite {
     else if (s === 'satellites') this.drawChart('sky');
     else if (s === 'signal') { this.drawChart('cn0elev'); this.drawChart('cn0time'); this.fetchArchive(); this.drawChart('archSky'); }
     else if (s === 'position') { this.drawChart('posScatter'); this.drawChart('dop'); this.drawChart('cont'); }
-    else if (s === 'timing') { this.drawChart('phase'); this.drawChart('stair'); this.drawChart('ppmtemp'); this.drawChart('adev'); this.drawChart('signalPath'); this.spKick(); this.fetchArchive(); this.drawChart('archOffset'); this.drawChart('archAux'); }
+    else if (s === 'timing') { this.drawChart('phase'); this.drawChart('stair'); this.drawChart('ppmtemp'); this.drawChart('adev'); this.spMaybeAutoSource(); this.drawChart('signalPath'); this.spKick(); this.fetchArchive(); this.drawChart('archOffset'); this.drawChart('archAux'); }
     else if (s === 'globe' && !this.state.globeRotate) this.drawChart('globe');
     else if (s === 'map') this.drawChart('map');
   }
@@ -3118,26 +3118,63 @@ class Component extends DcLite {
     const t = this._arch && this._arch.t;
     if (t && t.length) {
       const j = t.map((r) => r.jit).filter((x) => x > 0).sort((a, b) => a - b);
-      if (j.length) return { us: Math.max(3, j[j.length >> 1]), real: true };
+      if (j.length) return { us: Math.max(3, j[j.length >> 1]), calibrated: true };
     }
-    return { us: 10, real: false };
+    return { us: 10, calibrated: false };
   }
   spEnsureStream() {
-    const cal = this.spCalibJitter();
-    const key = this.state.sp.seed + ':' + cal.us.toFixed(1);
-    if (this._spStreamKey !== key || !this._spStream) {
-      // coreSigma from measured jitter; outliers model USB-retry spikes ~10x the core
-      this._spStream = modelStream({ n: 480, coreSigmaUs: cal.us, outlierRate: 0.035, outlierMagUs: Math.max(80, cal.us * 12), driftUs: cal.us * 0.6, seed: this.state.sp.seed });
-      this._spStreamKey = key;
+    const sp = this.state.sp;
+    // REAL: this clock's pre-gate samples fetched from pccd GET /raw (>=16 needed to arm the gate).
+    // MODEL: a seeded synthetic stream, calibrated to the archive's measured jitter when present.
+    const useReal = sp.source === 'real' && this._spRaw && this._spRaw.length >= 16;
+    const key = useReal ? ('real:' + this._spRawStamp)
+      : ('model:' + sp.seed + ':' + this.spCalibJitter().us.toFixed(1));
+    if (this._spStreamKey === key && this._spStream) return;   // unchanged — keep the stream + sweep position
+    if (useReal) {
+      this._spStream = this._spRaw;
+      this._spCal = { real: true, live: true, n: this._spRaw.length };
+    } else {
+      const cal = this.spCalibJitter();
+      // coreSigma from measured jitter; outliers model USB-retry spikes ~12x the core
+      this._spStream = modelStream({ n: 480, coreSigmaUs: cal.us, outlierRate: 0.035, outlierMagUs: Math.max(80, cal.us * 12), driftUs: cal.us * 0.6, seed: sp.seed });
       this._spCal = cal;
-      this._spNow = 479;   // default = the COMPLETE frame; the fill sweep (spKick) resets to 16 only when it can animate
     }
+    this._spStreamKey = key;
+    this._spNow = this._spStream.length - 1;   // default = the COMPLETE frame; spKick rewinds to 16 to animate
   }
   spCompute() {
     this.spEnsureStream();
     const sp = this.state.sp;
     this._spPf = runPrefilter(this._spStream, { window: sp.window, group: sp.group, k: sp.K, floorUs: sp.floorUs });
     return this._spPf;
+  }
+  // Fetch this clock's pre-gate raw samples from the bridge (GET /raw). `auto` = triggered by the
+  // room-enter auto-select (don't fall back to MODEL on a transient fetch error).
+  spFetchRaw(auto) {
+    const hi = this.state.bridgeInfo;
+    if (!this.realdev || !hi || !(hi.raw > 0)) { if (this.state.sp.source === 'real' && !auto) this.spSetSource('model', true); return; }
+    if (this._spRawBusy) return;
+    this._spRawBusy = true;
+    this.realdev.fetchBridgeRaw(600).then((rows) => {
+      this._spRawBusy = false;
+      this._spRaw = rows; this._spRawStamp = Date.now();
+      if (this.state.sp.source === 'real') { this._spStreamKey = null; this._spSwept = false; this.spCompute(); this.drawChart('signalPath'); this.spKick(); this.setState({}); }
+    }).catch(() => { this._spRawBusy = false; if (this.state.sp.source === 'real' && !auto) this.spSetSource('model', true); });
+  }
+  spSetSource(src, isUser) {
+    if (src === 'real' && !(this.state.bridgeInfo && this.state.bridgeInfo.raw >= 16)) return;   // unavailable
+    if (isUser) this._spSourceUserSet = true;
+    this.setState({ sp: Object.assign({}, this.state.sp, { source: src }) });
+    this._spStreamKey = null; this._spSwept = false;
+    if (src === 'real') this.spFetchRaw(!isUser);
+    this.spCompute(); this.drawChart('signalPath'); this.spKick(); this.setState({});
+  }
+  // Room-enter default: if this clock is streaming raw samples and the user hasn't chosen, show REAL.
+  spMaybeAutoSource() {
+    if (this._spSourceUserSet) return;
+    const avail = this.state.bridgeInfo && this.state.bridgeInfo.raw >= 16;
+    if (avail && this.state.sp.source !== 'real') this.spSetSource('real', false);
+    else if (!avail && this.state.sp.source === 'real') this.spSetSource('model', false);
   }
   spKick() {
     // The COMPLETE frame is always shown by default (_spNow=479). This runs the ONE-TIME fill sweep as
@@ -3187,7 +3224,7 @@ class Component extends DcLite {
   rvSignalPath() {
     if (!this._spPf) this.spCompute();
     const sp = this.state.sp, pf = this._spPf, st = pf.stats;
-    const cal = this._spCal || { us: 10, real: false };
+    const cal = this._spCal || { us: 10, calibrated: false };
     const fmt = (x, d = 0) => (x == null ? '—' : x.toFixed(d));
     // latest gate half-width (K·σ) at the newest sample, and whether σ is floored there
     let gateUs = null, floored = false;
@@ -3206,11 +3243,16 @@ class Component extends DcLite {
     const kG = knob('group', PF_RANGE.group[0], PF_RANGE.group[1], 2);
     const kF = knob('floorUs', PF_RANGE.floorUs[0], PF_RANGE.floorUs[1], 1);
     const kC = knob('corrRatio', PF_RANGE.corrRatio[0], PF_RANGE.corrRatio[1], 1);
-    const chip = cal.real
-      ? { txt: "MODEL STREAM · CALIBRATED TO THIS CLOCK'S JITTER σ≈" + cal.us.toFixed(0) + 'µs', col: 'var(--lock)' }
-      : (this.appMode() === 'sim'
-        ? { txt: 'MODEL STREAM · REAL PREFILTER MATH', col: 'var(--acq)' }
-        : { txt: 'MODEL STREAM · NOMINAL JITTER', col: 'var(--acq)' });
+    // Chip reflects the data ACTUALLY shown (cal.live = real device samples in the stream), never
+    // what was merely selected — so a "real" label can't sit over model data.
+    const realAvail = !!(this.state.bridgeInfo && this.state.bridgeInfo.raw >= 16);
+    let chip;
+    if (cal.live) chip = { txt: 'REAL — pccd RAW SAMPLES · ' + (cal.n || 0) + ' HELD', col: 'var(--lock)' };
+    else if (sp.source === 'real') chip = { txt: 'REAL SELECTED — LOADING pccd RAW SAMPLES', col: 'var(--acq)' };
+    else if (cal.calibrated) chip = { txt: "MODEL · CALIBRATED TO THIS CLOCK'S JITTER σ≈" + Math.round(cal.us) + 'µs', col: 'var(--lock)' };
+    else chip = { txt: 'MODEL · NOMINAL JITTER', col: 'var(--acq)' };
+    const segStyle = (on) => 'font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;padding:3px 10px;cursor:pointer;background:transparent;border:1px solid ' + (on ? 'var(--txt3);color:var(--txt)' : 'var(--line);color:var(--txt3)');
+    const realSel = sp.source === 'real';
     return {
       spRawRms: fmt(st.rawRms, 1), spCleanRms: fmt(st.cleanRms, 1),
       spReduction: st.reduction ? '×' + st.reduction.toFixed(1) : '—',
@@ -3219,7 +3261,14 @@ class Component extends DcLite {
       spGate: gateUs == null ? '—' : '±' + Math.round(gateUs),
       spGateSub: 'MED-CENTRED' + (floored ? ' · FLOOR ' + sp.floorUs + 'µs' : ''),
       spChipTxt: chip.txt, spChipCol: chip.col,
-      spCaption: 'SYNTHETIC OFFSET MODEL. THE GATE AND TRIMMED-MEAN MATH IS THE SHIPPED pccd ALGORITHM (pccd.c pf_push), SO THE KNOB LESSONS HOLD. RAW PRE-GATE SAMPLES ARE NOT KEPT IN THE FLIGHT-RECORDER ARCHIVE (POST-FILTER OUTPUT + MEASURED JITTER σ ONLY).',
+      spCaption: cal.live
+        ? "THIS CLOCK'S PRE-GATE OFFSET SAMPLES FROM pccd (GET /raw, IN-MEMORY, LAST ~10 MIN). THE KNOBS RE-FILTER YOUR OWN SAMPLES WITH THE SHIPPED pccd MATH (pf_push). REFRESH PULLS THE LATEST WINDOW."
+        : 'SYNTHETIC OFFSET MODEL. THE GATE AND TRIMMED-MEAN MATH IS THE SHIPPED pccd ALGORITHM (pccd.c pf_push), SO THE KNOB LESSONS HOLD. CONNECT A CLOCK VIA pccd FOR THE REAL SOURCE.',
+      // source toggle (MODEL | REAL); REAL enabled only when the bridge streams raw samples
+      spModelStyle: segStyle(!realSel), spRealStyle: segStyle(realSel) + (realAvail ? '' : ';opacity:.4;cursor:not-allowed'),
+      onSpModel: () => this.spSetSource('model', true), onSpReal: () => this.spSetSource('real', true),
+      spRefreshLabel: realSel ? 'REFRESH' : 'RESEED MODEL',
+      onSpRefresh: () => (realSel ? this.spFetchRaw(false) : this.spReseed()),
       spConfig: this.spConfigText(),
       // knob rows: value (rec-coloured), input attrs, handlers, REC label
       spKVal: sp.K.toFixed(1), spKCol: recCol(kK.atRec), spKMin: kK.min, spKMax: kK.max, spKStep: kK.step, onSpK: kK.on, onSpKRec: kK.rec,

@@ -1239,6 +1239,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                   <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">07 · SIGNAL PATH — pccd PREFILTER</span>
                   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                     <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:{{spChipCol}}">{{spChipTxt}}</span>
+                    <div style="display:flex;align-items:center" title="MODEL = synthetic stream · REAL = this clock's pre-gate samples via pccd"><button onClick="{{onSpModel}}" style="{{spModelStyle}}">MODEL</button><button onClick="{{onSpReal}}" style="{{spRealStyle}}">REAL</button></div>
                     <button onClick="{{onSpReset}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt2);background:transparent;border:1px solid var(--line2);padding:3px 9px;cursor:pointer">RESET → RECOMMENDED</button>
                   </div>
                 </div>
@@ -1304,7 +1305,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                   </div>
                   <div style="display:flex;align-items:flex-end;gap:8px">
                     <button onClick="{{onSpFreeze}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt2);background:transparent;border:1px solid var(--line2);padding:4px 11px;cursor:pointer">{{spFreezeLabel}}</button>
-                    <button onClick="{{onSpReseed}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3);background:transparent;border:1px solid var(--line2);padding:4px 11px;cursor:pointer">RESEED MODEL</button>
+                    <button onClick="{{onSpRefresh}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3);background:transparent;border:1px solid var(--line2);padding:4px 11px;cursor:pointer">{{spRefreshLabel}}</button>
                   </div>
                 </div>
                 <!-- chrony.conf emission -->
@@ -1619,6 +1620,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=231"></script>
+<script type="module" src="js/app-controller.js?v=232"></script>
 </body>
 </html>

@@ -1178,16 +1178,16 @@ export function drawSignalPath(canvas, tok, pf, opts) {
 
   // 5 — group boundary ticks (aggregation cadence)
   ctx.strokeStyle = tok.lineSoft || tok.line; ctx.globalAlpha = 0.6; ctx.lineWidth = 1;
-  for (const g of gr) { if (g.t > nowIdx) continue; const x = X(g.t); ctx.beginPath(); ctx.moveTo(x, fr.m.t + fr.ih - 4); ctx.lineTo(x, fr.m.t + fr.ih); ctx.stroke(); }
+  for (const g of gr) { if (g.xi > nowIdx) continue; const x = X(g.xi); ctx.beginPath(); ctx.moveTo(x, fr.m.t + fr.ih - 4); ctx.lineTo(x, fr.m.t + fr.ih); ctx.stroke(); }
   ctx.globalAlpha = 1;
 
   // 6 — clean output trace: the disciplined signal threading the cloud
-  const gvis = gr.filter((g) => g.t <= nowIdx);
+  const gvis = gr.filter((g) => g.xi <= nowIdx);
   if (gvis.length) {
     ctx.strokeStyle = tok.lock; ctx.lineWidth = 1.5; ctx.beginPath();
-    gvis.forEach((g, k) => { const x = X(g.t), y = Y(g.clean); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke();
+    gvis.forEach((g, k) => { const x = X(g.xi), y = Y(g.clean); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke();
     ctx.fillStyle = tok.lock;
-    gvis.forEach((g, k) => { const fresh = !reduced && k === gvis.length - 1 && (nowIdx - g.t) < 6; sq(ctx, X(g.t), Y(g.clean), fresh ? 4 : 3); });
+    gvis.forEach((g, k) => { const fresh = !reduced && k === gvis.length - 1 && (nowIdx - g.xi) < 6; sq(ctx, X(g.xi), Y(g.clean), fresh ? 4 : 3); });
   }
 
   // 7 — RMS envelopes (reference lines): wide raw band vs thin clean band, on the shared ruler

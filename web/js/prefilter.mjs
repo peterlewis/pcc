@@ -75,9 +75,11 @@ export function runPrefilter(samples, opts = {}) {
   const ring = [];                                // last W RAW offsets (rejected ones included, as in pccd)
   const perSample = [];
   const groups = [];
-  let groupOff = [], groupT = [];
+  let groupOff = [], groupT = [], groupI = [];    // groupI = member array-indices → group.xi (x-axis position)
+  let si = -1;                                    // running sample index (real data uses epoch t, so x must be index)
 
   for (const s of samples) {
+    si++;
     let med = null, sigma = null, lo = null, hi = null, rejected = false, gated = false;
     if (ring.length >= 16) {                       // pccd: gate engages once >=16 samples seen
       gated = true;
@@ -96,15 +98,16 @@ export function runPrefilter(samples, opts = {}) {
     perSample.push({ t: s.t, raw: s.raw, med, sigma, lo, hi, rejected, gated });
 
     if (rejected) continue;
-    groupOff.push(s.raw); groupT.push(s.t);
+    groupOff.push(s.raw); groupT.push(s.t); groupI.push(si);
     if (groupOff.length >= G) {
       const srt = groupOff.slice().sort((a, b) => a - b);
       let sum = 0, cnt = 0;
       for (let i = trim; i < G - trim; i++) { sum += srt[i]; cnt++; }
       const clean = sum / cnt;
       const tc = groupT.reduce((a, b) => a + b, 0) / groupT.length;
-      groups.push({ t: tc, clean, members: groupOff.slice() });
-      groupOff = []; groupT = [];
+      const xi = groupI.reduce((a, b) => a + b, 0) / groupI.length;   // mean member index — x position
+      groups.push({ t: tc, xi, clean, members: groupOff.slice() });
+      groupOff = []; groupT = []; groupI = [];
     }
   }
 
