@@ -764,7 +764,7 @@ class Component extends DcLite {
     // Both time faces: the open display AND the folded entry clock — a cuckoo that fires while
     // the clock is folded plays on the fold. (The firmware separately refuses to start pieces
     // in MODE_STANDBY, the hardware's true "closed" state, and displayOff aborts a running one.)
-    const targets = [this.faces.dispTime, this.faces.entryTime].filter((f) => f && f.setSegField);
+    const targets = [this.faces.dispTime, this.faces.entryTime, this.faces.hdrTime].filter((f) => f && f.setSegField);
     if (!targets.length) return;
     if (!this.emu.cuckooActive()) {
       if (this._ckOn) { this._ckOn = false; if (!this._sc) for (const t of targets) t.setSegField(null); }
@@ -800,7 +800,11 @@ class Component extends DcLite {
   }
 
   driveShowcase(frame) {
-    const d = this.faces.dispDate, t = this.faces.dispTime;
+    // The acts perform on whichever face pair is MOUNTED — the FACE-room hero when it exists, else
+    // the header dock (open or desk pose; both rows live in both). The clock performs wherever it
+    // is; the stale-pair guard below already resets a running act when the pair changes on a
+    // section switch, so an act never drives dead DOM.
+    const d = this.faces.dispDate || this.faces.hdrDate, t = this.faces.dispTime || this.faces.hdrTime;
     if (!d || !t || !d.setSegField || !this.D7) return;
     const wantManual = this.state.showcase;
 
@@ -1945,7 +1949,9 @@ class Component extends DcLite {
 
   // ---------- actions ----------
   go(sec) {
+    const prevSec = this.state.section;
     (this._lastSub = this._lastSub || {})[this.roomOf(sec)] = sec; // remember the sub-tab per room
+    this.traverseClock(prevSec, sec);   // measure the source BEFORE the rerender (setState is microtask-coalesced)
     this.setState({ section: sec });
     localStorage.setItem('pccweb.section', sec);
     if (this.els.main) this.els.main.scrollTop = 0;
@@ -1961,6 +1967,60 @@ class Component extends DcLite {
         if (this.session.log) { this.session.log('tx', 'adev_dump = on'); this.session.log('tx', 'hdev_dump = on'); }
         this._adevDumpTick = 0;
       }
+    }
+  }
+
+  // THE TRAVERSE (Act II of the presentation grammar): the clock never teleports between its two
+  // homes. Crossing the FACE-room boundary, the SAME flat clock flies between the header dock and
+  // the hero slot — a translate+scale of one object (same pose, so no fold is owed; pose changes
+  // fold, relocations slide). Mechanics: the source box is measured BEFORE the rerender swaps the
+  // mounts (setState coalesces to a microtask, so the old DOM is still live here), then two rAFs
+  // later the destination is sized and the destination ELEMENT plays from the source box to rest
+  // (FLIP) — a handoff between the two real elements, pixel-continuous at both ends. Skipped when
+  // the dock is folded (desk pose ≠ flat: that relocation would owe a fold — a later act), hidden,
+  // or animation is unavailable.
+  traverseClock(prev, sec) {
+    if (prev === sec || this.state.phase !== 'app' || !this.state.docked) return;
+    const entering = sec === 'display' && prev !== 'display';
+    const leaving = prev === 'display' && sec !== 'display';
+    if ((!entering && !leaving) || !this.canAnimate()) return;
+    if (this.state.hdrPose !== 'open' || this.state.hdrAutoHide || this._hdrFolding) return;
+    const fly = (el, src, z) => {
+      const dst = el.getBoundingClientRect();
+      if (!dst.width || !src.width) return;
+      el.style.transformOrigin = '0 0';
+      el.style.zIndex = z;
+      const s = src.width / dst.width;
+      this._travLast = { dir: entering ? 'in' : 'out', dx: Math.round(src.left - dst.left), dy: Math.round(src.top - dst.top), s: +s.toFixed(3) };
+      const a = el.animate(
+        [{ transform: 'translate(' + (src.left - dst.left) + 'px,' + (src.top - dst.top) + 'px) scale(' + s + ')' },
+         { transform: 'none' }],
+        { duration: 380, easing: 'cubic-bezier(.55,.02,.14,1)' });
+      const land = () => { el.style.transform = ''; el.style.zIndex = ''; };
+      a.onfinish = land; a.oncancel = land;
+    };
+    // Two rAFs let the swap render and the destination get sized — but raced against a timeout so a
+    // throttled-rAF environment still flies (same defensive shape as settle()).
+    const frames = () => Promise.race([this.raf2(), this.sleep(90)]);
+    if (entering) {
+      const dock = this.els.dockSlot && this.els.dockSlot.querySelector('[data-dockbar]');
+      const src = dock && dock.getBoundingClientRect();
+      if (!src || src.width < 10) return;
+      frames().then(() => {
+        const bar = this.els.dispBar; if (!bar) return;
+        this.sizeDispBar();
+        fly(bar, src, '5');
+      });
+    } else {
+      const bar = this.els.dispBar;
+      const src = bar && bar.getBoundingClientRect();
+      if (!src || src.width < 10) return;
+      frames().then(() => {
+        this.sizeHdrBar();
+        const dock = this.els.dockSlot && this.els.dockSlot.querySelector('[data-dockbar]');
+        if (!dock) return;
+        fly(dock, src, '80');
+      });
     }
   }
 
