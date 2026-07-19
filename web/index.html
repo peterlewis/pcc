@@ -976,7 +976,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 </div>
                 <span style="flex:1"></span>
                 <div style="display:flex;align-items:center;gap:10px;transition:opacity .15s;{{spanDim}}">
-                  <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)" title="How far back each satellite's trail reaches. Also sets trail depth on GLOBE and MAP. Connected clocks accumulate trail live from the moment this tab connects.">TRAIL</span>
+                  <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)" title="How far back each satellite's trail reaches. One control, shared with GROUND TRACK. Connected clocks accumulate trail live from the moment this tab connects.">TRAIL</span>
                   <div style="display:flex;border:1px solid var(--line)">
                     <button onClick="{{oTrail45}}" style="{{ssTrail45}}">45M</button>
                     <button onClick="{{oTrail1h}}" style="{{ssTrail1h}}">1H</button>
@@ -1424,6 +1424,16 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                   <button onClick="{{oGRot}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbGRot}}"></span>AUTO-ROTATE</button>
                   <button onClick="{{oGClock}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbGClock}}"></span>CLOCK OVERLAY</button>
                 </sc-if>
+                <span style="flex:1"></span>
+                <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)" title="How far back the ground-track trails reach. One control, shared with the SKY PLOT.">TRAIL</span>
+                <div style="display:flex;border:1px solid var(--line)">
+                  <button onClick="{{oTrail45}}" style="{{ssTrail45}}">45M</button>
+                  <button onClick="{{oTrail1h}}" style="{{ssTrail1h}}">1H</button>
+                  <button onClick="{{oTrail3h}}" style="{{ssTrail3h}}">3H</button>
+                  <button onClick="{{oTrail6h}}" style="{{ssTrail6h}}">6H</button>
+                  <button onClick="{{oTrail12h}}" style="{{ssTrail12h}}">12H</button>
+                  <button onClick="{{oTrail24h}}" style="{{ssTrail24h}}">24H</button>
+                </div>
               </div>
             </section>
             <div style="display:flex;flex-direction:column;gap:14px">
@@ -1440,7 +1450,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
                   <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">NOTES</span>
                 </div>
-                <div style="padding:10px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.7">SATELLITES AT SUB-SATELLITE POINTS · TRAILS = GROUND TRACKS · SUN GOLD · MOON COOL · OBSERVER GREEN.<br>TRAIL DEPTH FOLLOWS THE SKYPLOT TRAIL CONTROL.<br>{{landNote}}</div>
+                <div style="padding:10px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.7">SATELLITES AT SUB-SATELLITE POINTS · TRAILS = GROUND TRACKS · SUN GOLD · MOON COOL · OBSERVER GREEN.<br>ONE TRAIL CONTROL — SHARED WITH THE SKY PLOT.<br>{{landNote}}</div>
               </section>
             </div>
           </div>
