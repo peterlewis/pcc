@@ -3428,34 +3428,40 @@ class Component extends DcLite {
       const failMsg = res.ok ? null : String(res.msg || '');
       this._pccdUpd = { s: res.ok ? 'UPDATED — RECONNECTING…' : 'VERIFYING…', c: 'var(--txt2)' };
       this.setState({});
-      let tries = 0;
+      let tries = 0, lastJ = null;
       const rc = setInterval(() => {
         tries += 1;
         this.realdev.detectBridge().then((j) => {
-          if (j) {
-            clearInterval(rc); this._pccdUpdating = false; this.setState({ bridgeInfo: j });
-            if (this.verNewer(oldV, j.version || '')) {
-              this._pccdNewerTag = null;
-              this._pccdUpd = { s: 'UPDATED TO v' + (j.version || '?'), c: 'var(--lock)' };
-              // The bridge transport needs no user gesture, so make "reconnects automatically" true for a
-              // clock session too: re-establish it if the user was watching a live clock before the update.
-              if (wasLive && this.session && !this.session.S.connected) this.connectRealDevice();
+          if (j) lastJ = j;
+          if (j && this.verNewer(oldV, j.version || '')) {
+            // SUCCESS — a NEWER version answering is the ONLY trustworthy signal. `pccd --update` downloads
+            // the tarball on its single thread, which stalls this WebSocket, so an old-version or unreachable
+            // /health mid-flight is NOT failure (the daemon may still be downloading or relaunching). Never
+            // conclude from a transient reply — only from a version bump here, or the timeout below.
+            clearInterval(rc); this._pccdUpdating = false; this._pccdNewerTag = null;
+            this.setState({ bridgeInfo: j });
+            this._pccdUpd = { s: 'UPDATED TO v' + (j.version || '?'), c: 'var(--lock)' };
+            // The bridge transport needs no user gesture, so make "reconnects automatically" true for a
+            // clock session too: re-establish it if the user was watching a live clock before the update.
+            if (wasLive && this.session && !this.session.S.connected) this.connectRealDevice();
+            this.setState({});
+          } else if (tries > 40) {
+            // ~28 s with no newer version — long enough to cover a blocking download + relaunch. Report by
+            // what we ACTUALLY last saw, not by the (expected) mid-flight ws drop.
+            clearInterval(rc); this._pccdUpdating = false;
+            if (lastJ) this.setState({ bridgeInfo: lastJ });
+            if (failMsg && failMsg.startsWith('error')) {
+              this._pccdNewerTag = want;
+              this._pccdUpd = { s: 'UPDATE FAILED — ' + failMsg.toUpperCase(), c: 'var(--acq)' };
+            } else if (lastJ && !this.verNewer(oldV, lastJ.version || '')) {
+              this._pccdNewerTag = want;   // daemon stayed on the old binary → let them retry
+              this._pccdUpd = { s: 'STILL v' + (lastJ.version || '?') + ' — TRY AGAIN', c: 'var(--acq)' };
             } else {
-              // Version did NOT advance → a genuine failure (daemon stayed on the old binary). Surface the
-              // daemon's own reason if it gave one, else note it's unchanged.
-              this._pccdNewerTag = want;   // still stale → keep offering UPDATE NOW
-              this._pccdUpd = { s: 'UPDATE FAILED — ' + (failMsg ? failMsg.toUpperCase() : 'STILL v' + (j.version || '?')), c: 'var(--acq)' };
+              this._pccdUpd = { s: 'UPDATED — REFRESH TO RECONNECT', c: 'var(--acq)' };
             }
             this.setState({});
-          } else if (tries > 25) {
-            // ~18 s and the bridge hasn't returned. An explicit 'error…' means it never relaunched; otherwise
-            // the relaunch may just be slow — invite a refresh rather than crying failure.
-            clearInterval(rc); this._pccdUpdating = false;
-            this._pccdUpd = (failMsg && failMsg.startsWith('error'))
-              ? { s: 'UPDATE FAILED — ' + failMsg.toUpperCase(), c: 'var(--acq)' }
-              : { s: 'UPDATED — REFRESH TO RECONNECT', c: 'var(--acq)' };
-            this.setState({});
           }
+          // else: old-version or unreachable /health before the timeout → keep polling; the relaunch may lag.
         }).catch(() => {});
       }, 700);
     });
