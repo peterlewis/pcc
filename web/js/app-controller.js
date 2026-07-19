@@ -1221,7 +1221,7 @@ class Component extends DcLite {
     const pose = toClosed ? 'closed' : 'open';
     if (this.state.hdrPose === pose) return;
     const E = this.els, M = this.MM;
-    const wrap = E.hdrFoldWrap, dh = E.hdrDateHalf, th = E.hdrTimeHalf;
+    const wrap = E.hdrFoldWrap, dh = E.hdrDateHalf, th = E.hdrTimeHalf, link = E.hdrLink;
     const dock = E.dockSlot ? E.dockSlot.querySelector('[data-dockbar]') : null;
     if (!this.canAnimate() || !wrap || !dh || !th || !dock) {
       this.setState({ hdrPose: pose, hdrPoseAuto: false }); this.sizeHdrBar(); return;
@@ -1231,46 +1231,47 @@ class Component extends DcLite {
     const face = () => this.faces.hdrDate;
     const anims = [];
     const play = (el, kf, opts) => { const a = el.animate(kf, opts); anims.push(a); return a; };
+    // The TRUE pivot is the pin line at the TOP edge of the boards on the seam — rotating the leaf
+    // 180° about that corner lands it stacked above the time row with no compensating translate,
+    // and the PLATE co-rotates 90° in place about the same point (a two-pin linkage turns the
+    // plate at half the leaf's rate — this is what makes the hinge read as a hinge). The whole
+    // close is ONE overlapped gesture, not stop-start beats: the cartwheel begins while the
+    // lift-out is still landing, and the glide home begins while the leaf is still settling.
     try {
       if (toClosed) {
         const Wk = parseFloat(dh.style.width) || 0, Hk = parseFloat(dh.style.height) || 0;
-        const kOpen = Hk / M.H;
+        const kOpen = Hk / M.H, pk = 6 * kOpen;
         const k2 = Math.min(46 / (2 * M.H), 2 * Wk / M.W);          // closed scale; statics re-land exact
         const s = k2 / kOpen, D = Wk + 24;
         dock.style.zIndex = '80'; dock.style.transformOrigin = '0 0';
-        wrap.style.transformOrigin = Wk + 'px ' + (Hk / 2) + 'px';   // the seam pivot
-        // beat 0 — off the shelf
-        await this.settle(play(dock, [{ transform: 'translateY(0px)' }, { transform: 'translateY(' + D + 'px)' }],
-          { duration: 260, easing: 'ease-out', fill: 'forwards' }), 280);
-        // beat 1 — the leaf rises to vertical
-        await this.settle(play(wrap, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(90deg)' }],
-          { duration: 340, easing: ease, fill: 'forwards' }), 360);
-        if (face()) face().setInverted(false);                       // the hinge switch, at the top of the arc
-        // beat 2 — the leaf lays down one row above the time board (the double-hinge row-step)
-        await this.settle(play(wrap, [{ transform: 'rotate(90deg)' }, { transform: 'translateY(' + (-Hk) + 'px) rotate(180deg)' }],
-          { duration: 340, easing: ease, fill: 'forwards' }), 360);
-        // beat 3 — back onto the shelf: the stacked assembly (top-left at dock-local (Wk,−Hk)) flies
-        // to the dock origin at the closed scale; the dock's layout width narrows in step.
+        wrap.style.transformOrigin = Wk + 'px ' + pk + 'px';         // the pin line on the seam
+        if (link) link.style.transformOrigin = '50% 0%';             // plate turns about its pin line
+        play(dock, [{ transform: 'translateY(0px)' }, { transform: 'translateY(' + D + 'px)' }],
+          { duration: 220, easing: 'cubic-bezier(.55,.02,.14,1)', fill: 'forwards' });
+        play(wrap, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(180deg)' }],
+          { duration: 540, delay: 140, easing: ease, fill: 'forwards' });
+        if (link) play(link, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(90deg)' }],
+          { duration: 540, delay: 140, easing: ease, fill: 'forwards' });
+        this.sleep(140 + 270).then(() => face() && face().setInverted(false));   // the switch, at the top of the arc
         const tx = -s * Wk, ty = s * Hk;
         play(dock, [{ transform: 'translateY(' + D + 'px)' },
                     { transform: 'translate(' + tx + 'px,' + ty + 'px) scale(' + s + ')' }],
-          { duration: 320, easing: ease, fill: 'forwards' });
+          { duration: 300, delay: 600, easing: ease, fill: 'forwards' });
         play(dock, [{ width: (2 * Wk) + 'px' }, { width: (M.W * k2) + 'px' }],
-          { duration: 320, easing: ease, fill: 'forwards' });
-        await this.sleep(340);
+          { duration: 300, delay: 600, easing: ease, fill: 'forwards' });
+        await this.sleep(920);
       } else {
         const Wc = parseFloat(dh.style.width) || 0, Hc = parseFloat(dh.style.height) || 0;
         const k2 = Hc / M.H;
         const avail = this.hdrDockAvail();
         const kOpen = Math.min(46 / M.H, Math.max(avail === null ? 2 * Wc : avail, 0) / (2 * M.W));
-        const Wk = M.W * kOpen, Hk = M.H * kOpen;
+        const Wk = M.W * kOpen, Hk = M.H * kOpen, pk = 6 * kOpen;
         const S = kOpen / k2, D = Wk + 24;
         dock.style.zIndex = '80'; dock.style.transformOrigin = '0 0';
-        // beat 0 — off the shelf, growing to open scale: the stacked mini flies out to where the
-        // big unfold will happen (its top-left lands at dock-local (Wk, D−Hk)).
+        // Off the shelf, growing to open scale: the stacked mini flies to where the unfold happens.
         await this.settle(play(dock, [{ transform: 'translate(0px,0px) scale(1)' },
                                       { transform: 'translate(' + Wk + 'px,' + (D - Hk) + 'px) scale(' + S + ')' }],
-          { duration: 320, easing: ease, fill: 'forwards' }), 340);
+          { duration: 300, easing: ease, fill: 'forwards' }), 320);
         // One-tick swap to the open-statics rig, held in the folded pose at the same spot — the
         // paint is pixel-equivalent, so no flash: open layout + wrap folded + dock descended.
         for (const a of anims.splice(0)) { try { a.cancel(); } catch (e) {} }
@@ -1280,25 +1281,25 @@ class Component extends DcLite {
         if (E.hdrDate) this.sizeFaceCanvas('hdrDate', E.hdrDate, dh, kOpen, 7.0175);
         if (E.hdrTime) this.sizeFaceCanvas('hdrTime', E.hdrTime, th, kOpen, 7.0175);
         if (E.hdrLink) { const L = E.hdrLink; L.style.left = (Wk - 12 * kOpen) + 'px'; L.style.top = '0px';
-          L.style.width = (24 * kOpen) + 'px'; L.style.height = (12 * kOpen) + 'px'; L.style.borderRadius = (6 * kOpen) + 'px'; }
-        wrap.style.transformOrigin = Wk + 'px ' + (Hk / 2) + 'px';
-        const holdW = play(wrap, [{ transform: 'translateY(' + (-Hk) + 'px) rotate(180deg)' },
-                                  { transform: 'translateY(' + (-Hk) + 'px) rotate(180deg)' }], { duration: 1, fill: 'forwards' });
+          L.style.width = (24 * kOpen) + 'px'; L.style.height = (12 * kOpen) + 'px'; L.style.borderRadius = (6 * kOpen) + 'px';
+          L.style.transformOrigin = '50% 0%'; }
+        wrap.style.transformOrigin = Wk + 'px ' + pk + 'px';
+        const holdW = play(wrap, [{ transform: 'rotate(180deg)' }, { transform: 'rotate(180deg)' }], { duration: 1, fill: 'forwards' });
+        const holdL = link ? play(link, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(90deg)' }], { duration: 1, fill: 'forwards' }) : null;
         const holdD = play(dock, [{ transform: 'translateY(' + D + 'px)' }, { transform: 'translateY(' + D + 'px)' }],
           { duration: 1, fill: 'forwards' });
         await this.raf2();
-        // beat 1 — the leaf rises back to vertical
-        holdW.cancel();
-        await this.settle(play(wrap, [{ transform: 'translateY(' + (-Hk) + 'px) rotate(180deg)' }, { transform: 'rotate(90deg)' }],
-          { duration: 340, easing: ease, fill: 'forwards' }), 360);
-        if (face()) face().setInverted(true);                        // back to the flat-mounting LUT
-        // beat 2 — the leaf lays down into the line
-        await this.settle(play(wrap, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(0deg)' }],
-          { duration: 340, easing: ease, fill: 'forwards' }), 360);
-        // beat 3 — back onto the shelf
+        // The unfold — one gesture: leaf 180° back, plate 90° back, shelf-return overlapping the tail.
+        holdW.cancel(); if (holdL) holdL.cancel();
+        play(wrap, [{ transform: 'rotate(180deg)' }, { transform: 'rotate(0deg)' }],
+          { duration: 540, easing: ease, fill: 'forwards' });
+        if (link) play(link, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(0deg)' }],
+          { duration: 540, easing: ease, fill: 'forwards' });
+        this.sleep(270).then(() => face() && face().setInverted(true));   // back to the flat-mounting LUT
+        await this.sleep(460);
         holdD.cancel();
         await this.settle(play(dock, [{ transform: 'translateY(' + D + 'px)' }, { transform: 'translateY(0px)' }],
-          { duration: 280, easing: 'ease-out', fill: 'forwards' }), 300);
+          { duration: 280, easing: 'cubic-bezier(.55,.02,.14,1)', fill: 'forwards' }), 300);
       }
     } finally {
       // Land the final pose through the ONE writer of dock statics, then drop the transients.
@@ -1408,49 +1409,63 @@ class Component extends DcLite {
     this._faceFolding = true;
     const ease = 'cubic-bezier(.5,.03,.16,1)';
     const face = () => this.faces.dispDate;
+    const link = E.dispLink;
     const anims = [];
     const play = (el, kf, opts) => { const a = el.animate(kf, opts); anims.push(a); return a; };
+    // Same linkage physics as the header fold: the pivot is the PIN LINE at the top edge of the
+    // boards on the seam (rotating the leaf 180° about that corner lands it stacked — no
+    // compensating translate), the PLATE co-rotates 90° about the same point (half the leaf's
+    // rate — a two-pin linkage's true motion), and the whole fold is ONE overlapped gesture.
     try {
       const Wk = parseFloat(dh.style.width) || 0, Hk = parseFloat(dh.style.height) || 0;
+      const pk = 6 * (Hk / M.H);
       bar.style.zIndex = '60'; bar.style.transformOrigin = '0 0';
-      wrap.style.transformOrigin = Wk + 'px ' + (Hk / 2) + 'px';
+      wrap.style.transformOrigin = Wk + 'px ' + pk + 'px';
+      if (link) link.style.transformOrigin = '50% 0%';
       if (toStacked) {
         const D = Math.max(60, Wk + 24 - (bar.getBoundingClientRect().top - 60));   // clearance above the seam for the rising leaf
-        await this.settle(play(bar, [{ transform: 'translateY(0px)' }, { transform: 'translateY(' + D + 'px)' }],
-          { duration: 260, easing: 'ease-out', fill: 'forwards' }), 280);
-        await this.settle(play(wrap, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(90deg)' }],
-          { duration: 340, easing: ease, fill: 'forwards' }), 360);
-        if (face()) face().setInverted(false);
-        await this.settle(play(wrap, [{ transform: 'rotate(90deg)' }, { transform: 'translateY(' + (-Hk) + 'px) rotate(180deg)' }],
-          { duration: 340, easing: ease, fill: 'forwards' }), 360);
-        // settle home: the stacked assembly (top-left at bar-local (Wk,−Hk)) glides to the bar origin.
-        await this.settle(play(bar, [{ transform: 'translateY(' + D + 'px)' },
-                                     { transform: 'translate(' + (-Wk) + 'px,' + Hk + 'px)' }],
-          { duration: 300, easing: ease, fill: 'forwards' }), 320);
+        play(bar, [{ transform: 'translateY(0px)' }, { transform: 'translateY(' + D + 'px)' }],
+          { duration: 220, easing: 'cubic-bezier(.55,.02,.14,1)', fill: 'forwards' });
+        play(wrap, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(180deg)' }],
+          { duration: 540, delay: 140, easing: ease, fill: 'forwards' });
+        if (link) play(link, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(90deg)' }],
+          { duration: 540, delay: 140, easing: ease, fill: 'forwards' });
+        this.sleep(140 + 270).then(() => face() && face().setInverted(false));
+        // glide home: the stacked assembly (left edge on the seam, one row up) settles to the bar origin.
+        play(bar, [{ transform: 'translateY(' + D + 'px)' },
+                   { transform: 'translate(' + (-Wk) + 'px,' + (Hk - 2 * pk) + 'px)' }],
+          { duration: 300, delay: 600, easing: ease, fill: 'forwards' });
+        await this.sleep(920);
       } else {
-        // Reverse: out into the room, unfold, glide home flat.
+        // Reverse: out into the room, unfold in one gesture, glide home flat.
         const D = Wk + 24;
         if (face()) face().setInverted(false);
-        const holdW = play(wrap, [{ transform: 'translateY(' + (-Hk) + 'px) rotate(180deg)' },
-                                  { transform: 'translateY(' + (-Hk) + 'px) rotate(180deg)' }], { duration: 1, fill: 'forwards' });
+        const holdW = play(wrap, [{ transform: 'rotate(180deg)' }, { transform: 'rotate(180deg)' }], { duration: 1, fill: 'forwards' });
+        const holdL = link ? play(link, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(90deg)' }], { duration: 1, fill: 'forwards' }) : null;
         // pre-swap: lay the bar out FLAT-statics but hold the wrap folded so the paint matches the
         // stacked rest, then lift out. (Statics swap batched in one tick — no flash.)
         dh.style.transform = 'rotate(180deg)'; th.style.left = Wk + 'px'; th.style.top = '0px';
         bar.style.width = (2 * Wk) + 'px'; bar.style.height = Hk + 'px';
-        const holdB = play(bar, [{ transform: 'translate(' + (-Wk) + 'px,' + Hk + 'px)' },
-                                 { transform: 'translate(' + (-Wk) + 'px,' + Hk + 'px)' }], { duration: 1, fill: 'forwards' });
+        if (link) {   // full FLAT plate statics; the held rotate(90) about the pin line paints it vertical
+          const kk = Hk / M.H;
+          link.style.left = (Wk - 12 * kk) + 'px'; link.style.top = '0px';
+          link.style.width = (24 * kk) + 'px'; link.style.height = (12 * kk) + 'px'; link.style.borderRadius = (6 * kk) + 'px';
+        }
+        const holdB = play(bar, [{ transform: 'translate(' + (-Wk) + 'px,' + (Hk - 2 * pk) + 'px)' },
+                                 { transform: 'translate(' + (-Wk) + 'px,' + (Hk - 2 * pk) + 'px)' }], { duration: 1, fill: 'forwards' });
         await this.raf2();
         holdB.cancel();
-        await this.settle(play(bar, [{ transform: 'translate(' + (-Wk) + 'px,' + Hk + 'px)' }, { transform: 'translateY(' + D + 'px)' }],
-          { duration: 300, easing: ease, fill: 'forwards' }), 320);
-        holdW.cancel();
-        await this.settle(play(wrap, [{ transform: 'translateY(' + (-Hk) + 'px) rotate(180deg)' }, { transform: 'rotate(90deg)' }],
-          { duration: 340, easing: ease, fill: 'forwards' }), 360);
-        if (face()) face().setInverted(true);
-        await this.settle(play(wrap, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(0deg)' }],
-          { duration: 340, easing: ease, fill: 'forwards' }), 360);
+        await this.settle(play(bar, [{ transform: 'translate(' + (-Wk) + 'px,' + (Hk - 2 * pk) + 'px)' }, { transform: 'translateY(' + D + 'px)' }],
+          { duration: 280, easing: ease, fill: 'forwards' }), 300);
+        holdW.cancel(); if (holdL) holdL.cancel();
+        play(wrap, [{ transform: 'rotate(180deg)' }, { transform: 'rotate(0deg)' }],
+          { duration: 540, easing: ease, fill: 'forwards' });
+        if (link) play(link, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(0deg)' }],
+          { duration: 540, easing: ease, fill: 'forwards' });
+        this.sleep(270).then(() => face() && face().setInverted(true));
+        await this.sleep(460);
         await this.settle(play(bar, [{ transform: 'translateY(' + D + 'px)' }, { transform: 'translateY(0px)' }],
-          { duration: 280, easing: 'ease-out', fill: 'forwards' }), 300);
+          { duration: 280, easing: 'cubic-bezier(.55,.02,.14,1)', fill: 'forwards' }), 300);
       }
     } finally {
       this._faceFolding = false;
