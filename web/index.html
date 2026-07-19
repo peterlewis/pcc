@@ -53,11 +53,21 @@
       <div ref="{{refDockSlot}}" style="display:flex;align-items:stretch">
         <sc-if value="{{hdrBarOn}}" hint-placeholder-val="{{false}}">
           <div style="display:flex;align-items:center;gap:8px;padding:0 12px 0 16px;border-right:1px solid var(--line-soft)">
-          <div data-dockbar="1" style="position:relative;height:46px;display:flex">
-            <div ref="{{refHdrDateHalf}}" style="position:relative;width:353px;height:46px;background:var(--inset);border:1px solid var(--clock-bezel);transform:rotate(180deg)">
-              <canvas ref="{{refHdrDate}}" style="position:absolute"></canvas>
+          <!-- ONE dock, two poses. Closed = the clamshell shut around its hinge: the date half has
+               swung over the seam and sits behind the time half, which keeps ticking — a physically
+               closed Mk IV still shows time on the board facing you (the firmware has no fold
+               sensor). Clicking the closed clock unfolds it; the fold button beside it does both. -->
+          <div data-dockbar="1" onClick="{{onHdrDockClick}}" title="{{hdrDockTitle}}" style="{{hdrDockStyle}}">
+            <!-- The fold wrapper mirrors the entry's nested-rotation rig (linkWrap around dateHalf):
+                 the inner 180° date-board flip is about the element centre, the FOLD pivots on the
+                 seam — two origins, so two elements. The time half sits above it (z) so the closing
+                 leaf tucks BEHIND the face and never occludes the running clock. -->
+            <div ref="{{refHdrFoldWrap}}" style="display:flex;position:relative;z-index:0;transform-origin:100% 50%">
+              <div ref="{{refHdrDateHalf}}" style="position:relative;width:353px;height:46px;background:var(--inset);border:1px solid var(--clock-bezel);transform:rotate(180deg)">
+                <canvas ref="{{refHdrDate}}" style="position:absolute"></canvas>
+              </div>
             </div>
-            <div ref="{{refHdrTimeHalf}}" style="position:relative;width:353px;height:46px;background:var(--inset);border:1px solid var(--clock-bezel);border-left:0">
+            <div ref="{{refHdrTimeHalf}}" style="position:relative;z-index:1;width:353px;height:46px;background:var(--inset);border:1px solid var(--clock-bezel);border-left:0">
               <canvas ref="{{refHdrTime}}" style="position:absolute"></canvas>
             </div>
             <div ref="{{refHdrLink}}" style="position:absolute;left:337px;top:0;width:32px;height:16px;background:var(--inset);border:1px solid var(--clock-bezel);border-radius:8px">
@@ -65,12 +75,7 @@
               <span ref="{{refHdrPinB}}" style="position:absolute;border-radius:50%;background:radial-gradient(circle at 50% 44%,#25282f 0 34%,#3e434d 34% 52%,#15171b 52%);box-shadow:0 0 0 .5px #2b2f38"></span>
             </div>
           </div>
-          <button onClick="{{onCloseHdrClock}}" title="Collapse the docked clock" style="align-self:center;width:20px;height:46px;display:flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--line);color:var(--txt3);cursor:pointer;padding:0" style-hover="color:var(--txt);border-color:var(--line2)"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 2l6 6M8 2l-6 6"></path></svg></button>
-          </div>
-        </sc-if>
-        <sc-if value="{{hdrClockClosed}}" hint-placeholder-val="{{false}}">
-          <div style="display:flex;align-items:center;padding:0 14px;border-right:1px solid var(--line-soft)">
-            <button onClick="{{onOpenHdrClock}}" title="Show the docked clock" style="display:flex;align-items:center;gap:7px;height:30px;padding:0 11px;background:transparent;border:1px solid var(--line);color:var(--txt2);cursor:pointer;font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.12em;white-space:nowrap" style-hover="border-color:var(--line2);color:var(--txt)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1"><circle cx="6" cy="6" r="4.6"></circle><path d="M6 3.4V6l1.7 1"></path></svg>CLOCK</button>
+          <button onClick="{{onHdrFold}}" title="{{hdrFoldTitle}}" style="align-self:center;width:20px;height:46px;display:flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--line);color:var(--txt3);cursor:pointer;padding:0" style-hover="color:var(--txt);border-color:var(--line2)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1"><path d="M6 1.5v9M6 1.5L1.8 3.4v6.2L6 7.7M6 1.5l4.2 1.9v6.2L6 7.7"></path></svg></button>
           </div>
         </sc-if>
       </div>
@@ -602,6 +607,8 @@
               <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
                 <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">01 · {{faceRoomCap}}</span>
                 <span style="flex:1"></span>
+                <button onClick="{{onShowcase}}" style="{{scBtnStyle}}" style-hover="color:var(--txt2);border-color:var(--txt3)">{{scLabel}}</button>
+                <button onClick="{{onReplay}}" title="Replay the opening fold" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.12em;color:var(--txt3);background:transparent;border:1px solid var(--line2);border-radius:var(--r-1);padding:6px 11px;cursor:pointer" style-hover="color:var(--txt2);border-color:var(--txt3)">REPLAY FOLD</button>
                 <sc-if value="{{hwCalShow}}" hint-placeholder-val="{{false}}">
                   <button onClick="{{onHwCalibrate}}" style="{{hwCalBtnStyle}}">{{hwCalBtnLabel}}</button>
                 </sc-if>
@@ -628,18 +635,31 @@
                     </div>
                   </div>
                 </div>
-                <!-- On-device MENU buttons. The board furniture is hidden for a clean face, so these
-                     stand in for the two physical switches: drive the real firmware menu (compiled to
-                     WASM) exactly as the hardware does. Tap = step; hold a single button to repeat;
-                     hold 1+2 to open/page the menu and release to select. -->
+                <!-- On-device MENU. The two switch-cover buttons on the DATE BOARD EDGE are live —
+                     the real controls at their true position, driving the firmware menu (WASM) exactly
+                     as the hardware's buttons drive the real one. This strip is the mouse/keyboard
+                     fallback (a chord needs two fingers the pointer doesn't have). -->
                 <div style="margin-top:12px;display:flex;flex-direction:column;align-items:center;gap:8px">
                   <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:100%">
                     <button class="pcc-mbtn" onPointerDown="{{onB1Down}}" onPointerUp="{{onB1Up}}" onPointerCancel="{{onB1Up}}"><span style="font-size:var(--fs-pico);letter-spacing:.1em;color:var(--txt3);display:block;margin-bottom:0">BTN</span>1</button>
                     <button class="pcc-mbtn" onPointerDown="{{onB2Down}}" onPointerUp="{{onB2Up}}" onPointerCancel="{{onB2Up}}"><span style="font-size:var(--fs-pico);letter-spacing:.1em;color:var(--txt3);display:block;margin-bottom:0">BTN</span>2</button>
                     <button class="pcc-mbtn pcc-mbtn--chord" onPointerDown="{{onBBothDown}}" onPointerUp="{{onBBothUp}}" onPointerCancel="{{onBBothUp}}"><span style="font-size:var(--fs-pico);letter-spacing:.1em;color:var(--txt3);display:block;margin-bottom:0">BTN</span>1 + 2</button>
                   </div>
-                  <div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.07em;color:var(--txt3);text-align:center;max-width:520px;line-height:1.65">
-                    HOLD <b style="color:var(--txt2);font-weight:600">1 + 2</b> TO OPEN THE MENU · TAP <b style="color:var(--txt2);font-weight:600">1</b> / <b style="color:var(--txt2);font-weight:600">2</b> TO MOVE · HOLD <b style="color:var(--txt2);font-weight:600">1 + 2</b> AGAIN TO SELECT
+                  <div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.07em;color:var(--txt3);text-align:center;max-width:560px;line-height:1.65">
+                    THE TWO BUTTONS ON THE DATE BOARD EDGE ARE LIVE — SAME CONTROLS. HOLD <b style="color:var(--txt2);font-weight:600">1 + 2</b> TO OPEN THE MENU · TAP <b style="color:var(--txt2);font-weight:600">1</b> / <b style="color:var(--txt2);font-weight:600">2</b> TO MOVE · HOLD <b style="color:var(--txt2);font-weight:600">1 + 2</b> TO SELECT
+                  </div>
+                  <sc-if value="{{menuBtnNoteOn}}" hint-placeholder-val="{{false}}">
+                    <div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.07em;color:var(--acq);text-align:center;max-width:560px;line-height:1.65">
+                      THESE DRIVE THE BUILT-IN FIRMWARE'S MENU, NOT THE CONNECTED CLOCK'S. ITS OWN MENU IS THE TWO BUTTONS ON ITS DATE BOARD.
+                    </div>
+                  </sc-if>
+                  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center">
+                    <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">CUCKOO</span>
+                    <div style="display:flex;border:1px solid var(--line)">
+                      <button onClick="{{onCkOff}}" style="{{ssCkOff}}">OFF</button>
+                      <button onClick="{{onCkHr}}" style="{{ssCkHr}}">HOURLY</button>
+                      <button onClick="{{onCkQt}}" style="{{ssCkQt}}">QUARTERS</button>
+                    </div>
                   </div>
                 </div>
                 <div style="display:flex;align-items:center;justify-content:flex-end;padding:9px 2px 2px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.14em;color:var(--txt3)">
@@ -681,7 +701,6 @@
                   <div style="position:absolute;left:0;top:0;bottom:0;width:{{precMeterPct}};background:linear-gradient(90deg,var(--lock),var(--acq) 55%,var(--none));transition:width var(--t-disclose) var(--ease-ui)"></div>
                 </div>
                 <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-                  <button onClick="{{onShowcase}}" style="{{scBtnStyle}}" style-hover="color:var(--txt2);border-color:var(--txt3)">{{scLabel}}</button>
                   <button onClick="{{onDrillTog}}" style="display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.12em;color:var(--txt3);background:transparent;border:1px solid var(--line2);border-radius:var(--r-1);padding:6px 11px;cursor:pointer" style-hover="color:var(--txt2);border-color:var(--txt3)"><span>{{drillChev}}</span>DRILL</button>
                   <span style="flex:1;min-width:80px"></span>
                   <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body);max-width:300px">Turn on Significance Fade, drop GPS, and run time-lapse. Sub-second digits fade as uncertainty grows.</span>
@@ -1633,6 +1652,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=243"></script>
+<script type="module" src="js/app-controller.js?v=248"></script>
 </body>
 </html>

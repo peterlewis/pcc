@@ -80,7 +80,10 @@ const FURNITURE_LAYER = false;
 // bridges the seam — no z-index on the transparent holder can clear it. They are instead rendered as
 // children of the link-plate itself (index.html: the two hinge pins, styled as fastener screws), so
 // they are guaranteed to paint ON the opaque hinge. See refDispPinA/B, refPinTop/Bot, refHdrPinA/B.
-const FURNITURE_KEEP = [];
+// The two switch-cover BUTTONS stay on: they are the on-device menu's real controls at their
+// CAD-true 268 mm board position, and their chord-aware wiring drives the WASM firmware menu
+// exactly as the hardware's buttons drive the real one. The rest of the furniture stays off.
+const FURNITURE_KEEP = ['d-btn-1', 'd-btn-2'];
 
 export function createClockFaceSVG(container, opts = {}) {
   const {

@@ -19,7 +19,7 @@ const CONFIG_DEFAULTS = configToState(DEFAULT_CONFIG);
 
 class Component extends DcLite {
   state = {
-    phase: 'boot', entryVisible: true, docked: false, drawerOpen: false, hdrClockOpen: true,
+    phase: 'boot', entryVisible: true, docked: false, drawerOpen: false, hdrPose: 'open',
     section: 'display', theme: 'dark', scenario: 'locked',
     mode: 'time',
     // Clock-behaviour defaults (dateFormat, weekdayFmt, timeRow, modesEnabled, astroFmt, colon,
@@ -104,7 +104,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=98'), import('./charts.js?v=106'), import('./realdev.js?v=114'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=98'), import('./charts.js?v=106'), import('./realdev.js?v=114'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -1194,6 +1194,73 @@ class Component extends DcLite {
     }));
   }
 
+  // Closing the docked clock IS closing the hinge, and it is the ENTRY FOLD RUN BACKWARDS: the
+  // same two 90° stages beginFold performs, reversed, with the LUT switch at the crossing. The
+  // leaf first rises off the line to the stacked pose (the pose the app opened with), then
+  // continues down BEHIND the time board (z-under — the running clock is never occluded), and the
+  // clamshell settles as a one-board bar, still ticking (a physically closed Mk IV keeps showing
+  // time on the board that faces you; the firmware has no fold sensor). Reopen is the reverse.
+  // Rotation rides refHdrFoldWrap (fold pivots the seam) around the date half's own centre-180°
+  // flip — the entry's nested-rotation rig at header scale. Degrades to an instant pose swap when
+  // animation is unavailable, like every fold in the app.
+  async foldHdrClock(toClosed) {
+    if (this._hdrFolding) return;
+    const pose = toClosed ? 'closed' : 'open';
+    if (this.state.hdrPose === pose) return;
+    const E = this.els, wrap = E.hdrFoldWrap, th = E.hdrTimeHalf, link = E.hdrLink;
+    if (!this.canAnimate() || !wrap || !th) {
+      this.setState({ hdrPose: pose, hdrPoseAuto: false }); this.sizeHdrBar(); return;
+    }
+    this._hdrFolding = true;
+    const ease = 'cubic-bezier(.5,.03,.16,1)';
+    const face = () => this.faces.hdrDate;
+    const Wk = wrap.getBoundingClientRect().width || 0;
+    const linkL = parseFloat(link && link.style.left) || 0;   // seam-riding plate: left = Wk - 12k
+    const anims = [];
+    const play = (el, kf, opts) => { const a = el.animate(kf, opts); anims.push(a); return a; };
+    const stage = (from, to) => play(wrap, [{ transform: 'rotate(' + from + 'deg)' }, { transform: 'rotate(' + to + 'deg)' }],
+      { duration: 340, easing: ease, fill: 'forwards' });
+    try {
+      if (toClosed) {
+        // Stage 1 — flat -> stacked: the leaf rises to vertical (the entry pose, revisited).
+        await this.settle(stage(0, -90), 360);
+        if (face()) face().setInverted(false);                 // the hinge switch, at the crossing
+        // Stage 2 — stacked -> shut: the leaf descends behind the time board (z-under).
+        await this.settle(stage(-90, -180), 360);
+        // Settle: the empty leaf slot closes — board, hinge plate and header slide left together.
+        wrap.style.display = 'none';
+        play(th, [{ transform: 'translateX(' + Wk + 'px)' }, { transform: 'translateX(0px)' }],
+          { duration: 230, easing: 'ease-out', fill: 'forwards' });
+        if (link) play(link, [{ left: linkL + 'px' }, { left: (linkL - Wk) + 'px' }],
+          { duration: 230, easing: 'ease-out', fill: 'forwards' });
+        await this.sleep(240);
+      } else {
+        // Reverse: make room first (board slides right), then the leaf swings up from behind the
+        // face and lays down into the line — the entry fold itself, at header scale.
+        if (face()) face().setInverted(false);
+        wrap.style.display = '';
+        const hold = play(wrap, [{ transform: 'rotate(-180deg)' }, { transform: 'rotate(-180deg)' }],
+          { duration: 1, fill: 'forwards' });
+        play(th, [{ transform: 'translateX(-' + Wk + 'px)' }, { transform: 'translateX(0px)' }],
+          { duration: 230, easing: 'ease-out', fill: 'forwards' });
+        if (link) play(link, [{ left: (linkL - Wk) + 'px' }, { left: linkL + 'px' }],
+          { duration: 230, easing: 'ease-out', fill: 'forwards' });
+        await this.sleep(240);
+        hold.cancel();
+        await this.settle(stage(-180, -90), 360);
+        if (face()) face().setInverted(true);                  // back to the mounted-inverted LUT
+        await this.settle(stage(-90, 0), 360);
+      }
+    } finally {
+      // Land the final pose through the ONE writer of dock statics, then drop the transients.
+      this.setState({ hdrPose: pose, hdrPoseAuto: false });
+      this.sizeHdrBar();
+      for (const a of anims) { try { a.cancel(); } catch (e) {} }
+      th.style.transform = '';
+      this._hdrFolding = false;
+    }
+  }
+
   sizeDispBar(retry) {
     const E = this.els;
     // Width comes from the DOM parent chain, NOT the dispWrap ref — on remount the canvas
@@ -1291,22 +1358,33 @@ class Component extends DcLite {
     const avail = this.hdrDockAvail();
     if (avail === null) return;             // no valid layout to size against — keep current state
     // (a real NEGATIVE avail is meaningful: the header is genuinely too tight -> k=0 -> auto-collapse)
-    const k = Math.min(46 / M.H, Math.max(avail, 0) / (2 * M.W));
+    if (this._hdrFolding) return;           // a fold is choreographing the dock — don't fight it
+    const closed = this.state.hdrPose === 'closed';
+    const boards = closed ? 1 : 2;          // the closed clamshell is one board long
+    const k = Math.min(46 / M.H, Math.max(avail, 0) / (boards * M.W));
     if (M.H * k < this.HDR_MIN_H) {
-      // No room for a legible miniature: auto-collapse. Ephemeral (hdrAutoHide), so the user's
-      // docked-clock preference survives; handleResize un-hides when width returns.
+      // No room for a legible miniature. First fallback is PHYSICAL: fold the clock shut (half the
+      // width). Only when even the closed clamshell won't fit legibly does the dock hide entirely.
+      if (!closed) {
+        const kC = Math.min(46 / M.H, Math.max(avail, 0) / M.W);
+        if (M.H * kC >= this.HDR_MIN_H) { this.setState({ hdrPose: 'closed', hdrPoseAuto: true }); return; }
+      }
       if (!this.state.hdrAutoHide) this.setState({ hdrAutoHide: true });
       return;
     }
     const H = M.H * k, Wk = M.W * k, Hk = H;
-    if (Math.abs((parseFloat(E.hdrDateHalf.style.width) || 0) - Wk) < 0.5) return;   // already this size — no write, no RO echo
+    if (dock.dataset.pose === this.state.hdrPose &&
+        Math.abs((parseFloat(E.hdrTimeHalf.style.width) || 0) - Wk) < 0.5) return;   // already this pose+size — no write, no RO echo
+    dock.dataset.pose = this.state.hdrPose;
     dock.style.height = Hk + 'px';
+    if (E.hdrFoldWrap) E.hdrFoldWrap.style.display = closed ? 'none' : '';   // the folded leaf lives inside the clamshell
     for (const el of [E.hdrDateHalf, E.hdrTimeHalf]) { el.style.width = Wk + 'px'; el.style.height = Hk + 'px'; }
     if (E.hdrDate) this.sizeFaceCanvas('hdrDate', E.hdrDate, E.hdrDateHalf, k, 7.0175);
     if (E.hdrTime) this.sizeFaceCanvas('hdrTime', E.hdrTime, E.hdrTimeHalf, k, 7.0175);
     if (E.hdrLink) {
       const L = E.hdrLink;
-      L.style.left = (Wk - 12 * k) + 'px'; L.style.top = '0px';
+      // The plate rides the seam: between the boards when open, on the closed edge when folded shut.
+      L.style.left = ((closed ? 0 : Wk) - 12 * k) + 'px'; L.style.top = '0px';
       L.style.width = (24 * k) + 'px'; L.style.height = (12 * k) + 'px'; L.style.borderRadius = (6 * k) + 'px';
       const pd = 3.2 * k, bw = 1;   // pins scale with the bar (no px floor) — matches the display face
       const pinEl = (el, cx) => { if (!el) return; el.style.left = (cx - bw - pd / 2) + 'px'; el.style.top = (6 * k - bw - pd / 2) + 'px'; el.style.width = pd + 'px'; el.style.height = pd + 'px'; };
@@ -1319,10 +1397,16 @@ class Component extends DcLite {
     if (this.state.phase === 'entry') this.layoutEntry();
     this.sizeDispBar();
     this.sizeHdrBar();
+    const availR = this.hdrDockAvail();
     if (this.state.hdrAutoHide) {
-      const need = 2 * this.MM.W * (this.HDR_MIN_H / this.MM.H) + 24;   // +24: hysteresis, no flapping at the edge
-      const avail = this.hdrDockAvail();
-      if (avail !== null && avail >= need) this.setState({ hdrAutoHide: false });
+      // First fallback is the closed clamshell (one board), so un-hiding needs only that much room.
+      const need = this.MM.W * (this.HDR_MIN_H / this.MM.H) + 24;   // +24: hysteresis, no flapping at the edge
+      if (availR !== null && availR >= need) this.setState({ hdrAutoHide: false });
+    }
+    if (this.state.hdrPoseAuto && this.state.hdrPose === 'closed' && !this._hdrFolding) {
+      // The clock folded itself shut for want of width — unfold when the open pose fits again.
+      const needOpen = 2 * this.MM.W * (this.HDR_MIN_H / this.MM.H) + 24;
+      if (availR !== null && availR >= needOpen) this.foldHdrClock(false);
     }
     this.drawCharts();
   }
@@ -1381,7 +1465,7 @@ class Component extends DcLite {
     // no-op (two rect reads) when the size is already right.
     this.sizeHdrBar();
     if (this.state.hdrAutoHide) {
-      const need = 2 * this.MM.W * (this.HDR_MIN_H / this.MM.H) + 24;
+      const need = this.MM.W * (this.HDR_MIN_H / this.MM.H) + 24;   // closed clamshell is the first fallback
       const avail = this.hdrDockAvail();
       if (avail >= need) this.setState({ hdrAutoHide: false });
     }
@@ -2274,17 +2358,19 @@ class Component extends DcLite {
       onExitReview: () => this.exitReview(),
       entryVisible: st.entryVisible, docked: st.docked,
       // One clock, one home: it lives in the Display panel while you're on Display, and
-      // collapses into the header (menu bar) on every other section — where it can be closed
-      // (hdrClockOpen) to free ~650px when the crowded status row would otherwise clip.
-      hdrBarOn: st.docked && st.section !== 'display' && st.hdrClockOpen && !st.hdrAutoHide,
-      // Clock docked-but-closed → show a compact "reopen" affordance in its place.
-      hdrClockClosed: st.docked && st.section !== 'display' && !st.hdrClockOpen && !st.hdrAutoHide,
-      // Abbreviate the wordmark to "PC" only while the ~650px clock is actually in the header;
-      // with it closed (or on Display) there's room for the full name. "PC" not "PCC" — the
-      // "COMPANION" subtitle underneath carries the third word (PC = Precision Clock).
-      // (brand is static markup now — no abbreviated 'PC' variant; it read as a different product)
-      onCloseHdrClock: () => this.setState({ hdrClockOpen: false }),
-      onOpenHdrClock: () => this.setState({ hdrClockOpen: true }),
+      // collapses into the header (menu bar) on every other section. There is no "close" — closing
+      // IS the fold: the date half swings shut over the hinge and the clamshell stays docked as a
+      // half-width, single-row clock, still ticking (the real Mk IV keeps showing time when folded;
+      // the firmware has no fold sensor). hdrAutoHide remains the last resort for headers too
+      // narrow even for the closed pose.
+      hdrBarOn: st.docked && st.section !== 'display' && !st.hdrAutoHide,
+      hdrFoldTitle: st.hdrPose === 'closed' ? 'Unfold the clock' : 'Fold the clock shut',
+      // The glyph (a hinged pair of leaves) is static SVG markup: dc-lite bindings must stay on
+      // HTML-namespace attributes — an SVG-attribute binding kills the template compile downstream.
+      hdrDockTitle: st.hdrPose === 'closed' ? 'Closed clock — click to unfold' : '',
+      hdrDockStyle: 'position:relative;height:46px;display:flex' + (st.hdrPose === 'closed' ? ';cursor:pointer' : ''),
+      onHdrFold: () => this.foldHdrClock(st.hdrPose !== 'closed'),
+      onHdrDockClick: () => { if (this.state.hdrPose === 'closed') this.foldHdrClock(false); },
       onEntryClick: () => this.beginFold(),
       // …ElementChild, not …Child: whitespace between the markup's children parses to text nodes,
       // and a text node has no .style — the old .lastChild threw on every hover (Safari console).
@@ -2407,6 +2493,10 @@ class Component extends DcLite {
       onHwCopy: () => { try { navigator.clipboard.writeText(JSON.stringify(this.hwConfig, null, 2)); } catch (e) {} },
       onHwReset: () => this.resetHwConfig(),
       // External button strip → drive the on-device menu (the board furniture buttons are hidden).
+      // Fourth wall: the menu these buttons drive belongs to the BUILT-IN firmware. With a real
+      // clock connected the face shows the device's data, so say whose menu this is — the exact
+      // ambiguity that once convinced a user their bench clock had a menu its flash predates.
+      menuBtnNoteOn: _mode === 'connected',
       onB1Down: (e) => this.extBtnDown(1, e), onB1Up: (e) => this.extBtnUp(1, e),
       onB2Down: (e) => this.extBtnDown(2, e), onB2Up: (e) => this.extBtnUp(2, e),
       onBBothDown: (e) => this.extBtnDown('both', e), onBBothUp: (e) => this.extBtnUp('both', e),
