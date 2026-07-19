@@ -104,7 +104,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=98'), import('./charts.js?v=105'), import('./realdev.js?v=114'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=113'), import('./sim.js?v=98'), import('./charts.js?v=106'), import('./realdev.js?v=114'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -1450,6 +1450,7 @@ class Component extends DcLite {
       const S3 = this.session.S;
       if (S3 && S3.real && S3.connected && this.realdev && this.state.section === 'timing') {
         this.realdev.send('adev_dump = on'); this.realdev.send('hdev_dump = on');
+        this._adevAsked = (this._adevAsked || 0) + 1;   // unanswered asks drive the honest no-answer state
         if (this.session.log) { this.session.log('tx', 'adev_dump = on'); this.session.log('tx', 'hdev_dump = on'); }
       }
     }
@@ -1804,6 +1805,7 @@ class Component extends DcLite {
       const S = this.session && this.session.S;
       if (S && S.real && S.connected && this.realdev) {
         this.realdev.send('adev_dump = on'); this.realdev.send('hdev_dump = on');
+        this._adevAsked = (this._adevAsked || 0) + 1;
         if (this.session.log) { this.session.log('tx', 'adev_dump = on'); this.session.log('tx', 'hdev_dump = on'); }
         this._adevDumpTick = 0;
       }
@@ -2001,14 +2003,17 @@ class Component extends DcLite {
   // adev code fed by the virtual GPS's PPS edges — is asked for its byte-faithful sentences and run
   // through the same parser. Standby (no PPS source at all) simply has no ladder: honest absence.
   // Why is the σ_y(τ) ladder empty? Drives the honest empty-state copy in drawAdev.
-  //   mode-off  — a clock is connected but MODE_ADEV is off (or its firmware lacks it): no $PMADEV stream
-  //   waiting   — connected + ADEV on, but the octaves haven't matured yet
+  //   no-answer — we've asked the clock (adev_dump) at least twice and NOTHING came back: its
+  //               firmware either predates the ADEV serial dump or has the silent CDC-drop bug
+  //               (fixed on rollup) — a reflash is the cure, so say that, not "computing…" forever
+  //   waiting   — connected, request(s) sent, first reply not in yet
   //   sim       — the emulator is accumulating from the virtual PPS
   //   standby   — no PPS source at all
   adevHint() {
     const m = this.appMode();
     if (m === 'simulation') return 'sim';
-    if (m === 'connected') return (this.state.modesEnabled && this.state.modesEnabled.adev) ? 'waiting' : 'mode-off';
+    if (m === 'connected') return ((this._adevAsked || 0) >= 2 && !this.adevData()) ? 'no-answer' : 'waiting';
+    this._adevAsked = 0;   // fresh judgement for the next connection
     return 'standby';
   }
   adevData() {
@@ -2746,9 +2751,10 @@ class Component extends DcLite {
           // ≥v0.0.5 clocks persist on-device MENU edits into SETTINGS.BIN, so the EFFECTIVE config is
           // config.txt ⊕ those overrides (merged with the firmware's mtime-stamped precedence rule).
           // Reconstruct that merge here so the app reflects what the clock is actually doing.
-          let ovr = null;
+          let ovr = null, parsedKeep = null;
           if (r.settings && this.SB) {
             const parsed = this.SB.parseSettingsBin(r.settings);
+            parsedKeep = parsed && parsed.found ? parsed : null;   // raw fields feed MERGE INTO config.txt
             ovr = this.SB.winningOverrides(parsed, r.text, r.mtime, this.fwModeName());
             if (ovr) {
               const f = parsed.fields;
@@ -2762,6 +2768,7 @@ class Component extends DcLite {
           }
           this.applyDeviceConfig(r.cfg);
           this._menuOvr = ovr;                                // panel model (not serialisable state)
+          this._menuOvrParsed = parsedKeep;                   // raw SETTINGS.BIN fields for the transpose
           this.cfgHandle = r.fh; this._cfgOriginal = r.text; // handle/original are not serialisable state
           if (this.els.cfgEditor) this.els.cfgEditor.value = r.text;
           const en = Object.values(r.cfg.modes || {}).filter(Boolean).length;
@@ -2809,6 +2816,43 @@ class Component extends DcLite {
       menuOvrNote: this._menuOvr ? (this._menuOvr.stampOk
         ? `config.txt unchanged since the menu edit (stamp match). Menu values take precedence, including keys config.txt defines · store gen ${this._menuOvr.gen}`
         : `config.txt was re-saved after the menu edit. config.txt takes precedence wherever both define a key · store gen ${this._menuOvr.gen}`) : '',
+      // Transpose the on-device menu state into the config.txt editor as key = value lines. Existing
+      // lines for those keys are commented out and the block is APPENDED — the firmware parses top to
+      // bottom, last write wins, so the appended block is authoritative and the history stays visible.
+      // Saving then re-stamps config.txt's mtime, which is exactly right: config re-asserts these keys.
+      onMenuOvrMerge: () => {
+        const p = this._menuOvrParsed, ovr = this._menuOvr, SB = this.SB;
+        if (!p || !ovr || !SB || !this.els.cfgEditor) return;
+        const f = p.fields;
+        const kidOf = (id) => (SB.KIDS.find((k) => k.id === id) || {}).kid;
+        const has = (id) => !!(p.simpleMask & (1 << kidOf(id)));
+        const kv = [];   // [key, value|null]; null = menu says AUTO → the key must be ABSENT (comment out only)
+        if (has('brightness')) kv.push(['brightness', f.brightness < 0 ? null : String(f.brightness)]);
+        if (has('colon')) kv.push(['colon_mode', SB.COLON_NAMES[f.colon] || 'slowfade']);
+        if (has('colonAlt')) kv.push(['colon_alt_mode', SB.COLON_NAMES[f.colonAlt] || 'slowfade']);
+        if (has('pageMs')) kv.push(['page_ms', String(f.pageMs)]);
+        if (has('sigFade')) kv.push(['significance_fade', f.sigFade ? 'on' : 'off']);
+        if (has('pps')) kv.push(['pps', f.pps ? 'on' : 'off']);
+        if (has('nmea')) kv.push(['nmea', SB.NMEA_NAMES[f.nmea] || 'all']);
+        if (has('matrixFreq')) kv.push(['matrix_frequency', String(f.matrixFreq)]);
+        if (has('tempcomp')) { const v = f.tempcomp ? 'on' : 'off'; kv.push(['tc_learn', v], ['tc_apply', v], ['tc_persist', v]); }
+        if (has('balance')) { const v = f.balance ? 'on' : 'off'; kv.push(['seg_balance', v], ['colon_balance', v]); }
+        for (const m of ovr.modes) kv.push([m.name, m.on ? 'on' : 'off']);
+        if (!kv.length) return;
+        const keys = new Set(kv.map(([k]) => k.toLowerCase()));
+        const lines = this.els.cfgEditor.value.split(/\r?\n/).map((ln) => {
+          const mm = ln.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/);   // uncommented definitions only
+          return (mm && keys.has(mm[1].toLowerCase())) ? '#' + ln : ln;
+        });
+        while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+        if (lines.length) lines.push('', '');   // spacer only when there is existing content above
+        lines.push('## as set in the on-device menu — transposed by PCC');
+        for (const [k, v] of kv) lines.push(v == null ? `# ${k}: AUTO in the menu — key left unset` : `${k} = ${v}`);
+        lines.push('');
+        this.els.cfgEditor.value = lines.join('\n');
+        if (this.session && this.session.log) this.session.log('tx', `[config] transposed ${kv.length} menu value${kv.length === 1 ? '' : 's'} into the editor — SAVE TO CLOCK to write them`);
+        this.setState({ cfgDirty: this.els.cfgEditor.value !== (this._cfgOriginal || '') });
+      },
       cfgSaveDisabled: !(st.cfgDirty && st.cfgWrite && this.cfgHandle),
       cfgSaveStyle: this.btn(false, !(st.cfgDirty && st.cfgWrite && this.cfgHandle)),
       readCfgDisabled: this.appMode() === 'standby' || !(typeof window !== 'undefined' && ('showDirectoryPicker' in window || 'showOpenFilePicker' in window)),
@@ -3322,8 +3366,8 @@ class Component extends DcLite {
     // what was merely selected — so a "real" label can't sit over model data.
     const realAvail = !!(this.state.bridgeInfo && this.state.bridgeInfo.raw >= 16);
     let chip;
-    if (cal.live) chip = { txt: 'REAL — pccd RAW SAMPLES · ' + (cal.n || 0) + ' HELD', col: 'var(--lock)' };
-    else if (sp.source === 'real') chip = { txt: 'REAL SELECTED — LOADING pccd RAW SAMPLES', col: 'var(--acq)' };
+    if (cal.live) chip = { txt: 'THIS CLOCK — pccd RAW SAMPLES · ' + (cal.n || 0) + ' HELD', col: 'var(--lock)' };
+    else if (sp.source === 'real') chip = { txt: 'THIS CLOCK — LOADING pccd RAW SAMPLES', col: 'var(--acq)' };
     else if (cal.calibrated) chip = { txt: "MODEL · CALIBRATED TO THIS CLOCK'S JITTER σ≈" + Math.round(cal.us) + 'µs', col: 'var(--lock)' };
     else chip = { txt: 'MODEL · NOMINAL JITTER', col: 'var(--acq)' };
     const segStyle = (on) => 'font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;padding:3px 10px;cursor:pointer;background:transparent;border:1px solid ' + (on ? 'var(--txt3);color:var(--txt)' : 'var(--line);color:var(--txt3)');

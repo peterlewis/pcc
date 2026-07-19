@@ -1,9 +1,9 @@
-// menu_reset_check.mjs — SYS › RESET, the on-device factory-reset ACTION item (MIT_ACTION). Unlike a
+// factory_reset_check.mjs — SYS › RESET, the on-device factory-reset ACTION item (MIT_ACTION). Unlike a
 // toggle it is NOT one-press: EDIT opens a "SURE?" confirm, and only the SAVE chord fires it (CANCEL
-// aborts). Firing sets menu_reset_pending, which the main loop's menu_reset_step services — erasing the
+// aborts). Firing sets factory_reset_pending, which the main loop's factory_reset_step services — erasing the
 // stored overrides and re-reading config.txt (back to defaults, no reboot). Reboot is a separate thing
 // (the L0 REBOOT chord). Asserts: the item exists, the confirm gate, CANCEL is safe, SAVE wipes.
-// Run: node menu_reset_check.mjs
+// Run: node factory_reset_check.mjs
 import factory from '../clock-fw.mjs';
 
 const M = await factory();
@@ -18,8 +18,8 @@ const eeCommit=w('emu_ee_commit', 'number');
 const ovrValid=w('emu_ovr_valid', 'number');
 const setMtime=w('emu_set_mtime', 'void', ['number','number']);
 const setBal = w('emu_set_balance', 'void', ['number','number']);
-const resetPending = w('emu_menu_reset_pending', 'number');
-const resetStep    = w('emu_menu_reset_step', 'void');
+const resetPending = w('emu_factory_reset_pending', 'number');
+const resetStep    = w('emu_factory_reset_step', 'void');
 const row = () => { const p = rowPtr(); let s = ''; for (let i = 1; i <= 10; i++) { const c = M.HEAPU8[p + i]; if (c < 32 || c > 126) break; s += String.fromCharCode(c); } return s.trimEnd(); };
 
 const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95, S3: 0x96 };

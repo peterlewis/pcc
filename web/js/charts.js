@@ -519,8 +519,8 @@ export function drawAdev(canvas, tok, stab, hint) {
     // never happens when the clock isn't in ADEV mode — reads as fiction). `hint` comes from the caller.
     ctx.font = F9; ctx.fillStyle = tok.txt3; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const msgs = {
-      'mode-off': ['THE CLOCK IS NOT SENDING $PMADEV.', 'TURN ON ALLAN DEV — DEVICE › MODES · DIAGNOSTIC', '(NEEDS THE ADEV-CAPABLE FIRMWARE). IT THEN BUILDS OVER MINUTES.'],
-      'waiting': ['COMPUTING σ_y(τ) ON THE CLOCK.', 'THE FIRST TAUS APPEAR IN ~A MINUTE;', 'LONGER OCTAVES TAKE PROPORTIONALLY LONGER.'],
+      'no-answer': ['adev_dump REQUESTED — THE CLOCK IS NOT ANSWERING.', 'ITS FIRMWARE PREDATES THE FIXED $PMADEV SERIAL DUMP', '(A MATURE RECORD OVERRAN A 128-BYTE BUFFER AND WAS DROPPED).', 'FLASH THE CURRENT mk4-time BUILD TO ENABLE THIS CHART.'],
+      'waiting': ['σ_y(τ) REQUESTED FROM THE CLOCK.', 'THE FIRST REPLY NORMALLY LANDS WITHIN ~15 s.'],
       'sim': ['COMPUTING σ_y(τ) FROM THE VIRTUAL PPS.', 'THE FIRST TAUS APPEAR IN ~A MINUTE;', 'EACH LONGER OCTAVE TAKES ~2× AS LONG.'],
       'standby': ['NO PPS SOURCE.', 'CONNECT A CLOCK OR RUN A SIMULATION.'],
     }[hint] || ['NO σ_y(τ) DATA YET.'];

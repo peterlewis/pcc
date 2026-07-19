@@ -408,16 +408,10 @@
                   <span style="flex:1"></span>
                   <sc-if value="{{cfgDirty}}" hint-placeholder-val="{{false}}"><span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.1em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:var(--r-1);padding:2px 7px">UNSAVED CHANGES</span></sc-if>
                 </div>
-                <textarea ref="{{refCfgEditor}}" onInput="{{onCfgInput}}" spellCheck="false" placeholder="Click READ CLOCK DRIVE and pick config.txt on the mounted CLOCK drive to edit it here…" style="width:100%;height:320px;resize:vertical;font-family:var(--mono);font-size:var(--fs-data-sm);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:10px;line-height:1.55;white-space:pre;overflow:auto"></textarea>
-                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                  <button onClick="{{onCfgSave}}" disabled="{{cfgSaveDisabled}}" style="{{cfgSaveStyle}}">SAVE TO CLOCK</button>
-                  <button onClick="{{onCfgRevert}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="border-color:var(--txt3);color:var(--txt)">REVERT</button>
-                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body)">Serial config is write-only. Read config.txt <b style="font-weight:600">and SETTINGS.BIN</b> (the on-device menu-edit store) via the CLOCK drive (Chromium only). Write-back is off by default; re-plug or reboot the clock to reload it.</span>
-                </div>
                 <sc-if value="{{menuOvrOn}}" hint-placeholder-val="{{false}}">
                   <div style="border:1px solid var(--line2);background:var(--well)">
                     <div style="display:flex;align-items:center;justify-content:space-between;height:24px;padding:0 10px;border-bottom:1px solid var(--line)">
-                      <span style="font-family:var(--mono);font-size:var(--fs-micro);letter-spacing:var(--ls-micro);color:var(--txt2)">MENU OVERRIDES — SETTINGS.BIN (ON-DEVICE EDITS)</span>
+                      <span style="font-family:var(--mono);font-size:var(--fs-micro);letter-spacing:var(--ls-micro);color:var(--txt2)">AS SET IN MENU — ON-DEVICE EDITS (SETTINGS.BIN)</span>
                     </div>
                     <div style="padding:8px 10px;display:flex;flex-direction:column;gap:2px">
                       <sc-for list="{{menuOvrRows}}" as="o">
@@ -428,9 +422,19 @@
                         </div>
                       </sc-for>
                       <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body);margin-top:6px">{{menuOvrNote}}</span>
+                      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px">
+                        <button onClick="{{onMenuOvrMerge}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt);cursor:pointer" style-hover="border-color:var(--txt3)">MERGE INTO config.txt</button>
+                        <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body)">Writes these values into the editor below as key = value lines. SAVE TO CLOCK then makes config.txt the source of truth for them.</span>
+                      </div>
                     </div>
                   </div>
                 </sc-if>
+                <textarea ref="{{refCfgEditor}}" onInput="{{onCfgInput}}" spellCheck="false" placeholder="Click READ CLOCK DRIVE and pick config.txt on the mounted CLOCK drive to edit it here…" style="width:100%;height:320px;resize:vertical;font-family:var(--mono);font-size:var(--fs-data-sm);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:10px;line-height:1.55;white-space:pre;overflow:auto"></textarea>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <button onClick="{{onCfgSave}}" disabled="{{cfgSaveDisabled}}" style="{{cfgSaveStyle}}">SAVE TO CLOCK</button>
+                  <button onClick="{{onCfgRevert}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="border-color:var(--txt3);color:var(--txt)">REVERT</button>
+                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body)">Serial config is write-only. Read config.txt <b style="font-weight:600">and SETTINGS.BIN</b> (the on-device menu-edit store) via the CLOCK drive (Chromium only). Write-back is off by default; re-plug or reboot the clock to reload it.</span>
+                </div>
               </div>
             </section>
 
@@ -1248,7 +1252,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                   <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">07 · SIGNAL PATH — pccd PREFILTER</span>
                   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                     <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:{{spChipCol}}">{{spChipTxt}}</span>
-                    <div style="display:flex;align-items:center" title="MODEL = synthetic stream · REAL = this clock's pre-gate samples via pccd"><button onClick="{{onSpModel}}" style="{{spModelStyle}}">MODEL</button><button onClick="{{onSpReal}}" style="{{spRealStyle}}">REAL</button></div>
+                    <div style="display:flex;align-items:center;gap:8px" title="MODEL = a synthetic demo stream · THIS CLOCK = your clock's actual pre-gate samples from pccd"><span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">SOURCE</span><div style="display:flex;align-items:center"><button onClick="{{onSpModel}}" style="{{spModelStyle}}">MODEL</button><button onClick="{{onSpReal}}" style="{{spRealStyle}}">THIS CLOCK</button></div></div>
                     <button onClick="{{onSpReset}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt2);background:transparent;border:1px solid var(--line2);padding:3px 9px;cursor:pointer">RESET → RECOMMENDED</button>
                   </div>
                 </div>
@@ -1629,6 +1633,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=242"></script>
+<script type="module" src="js/app-controller.js?v=243"></script>
 </body>
 </html>

@@ -250,9 +250,9 @@ int    emu_ee_sfile_state(void){ return (int)ee_sfile_state; }/* 0 no file / 1 o
 int    emu_ee_next(void){ return (int)ee_next; }              /* append cursor (skip-to-blank checks) */
 int    emu_menu_dirty(void){ return menu_dirty; }
 int    emu_menu_val(void){ return (int)menu_val; }   /* raw editor value (display renders unit forms) */
-void   emu_menu_reset(void){ menu_reset_pending = 1; menu_reset_step(); }   /* factory-reset the menu store */
-int    emu_menu_reset_pending(void){ return menu_reset_pending; }           /* SYS>RESET confirm sets this */
-void   emu_menu_reset_step(void){ menu_reset_step(); }                      /* service it (the main loop does this on hardware) */
+void   emu_factory_reset(void){ factory_reset_pending = 1; factory_reset_step(); }   /* factory-reset the menu store */
+int    emu_factory_reset_pending(void){ return factory_reset_pending; }           /* SYS>RESET confirm sets this */
+void   emu_factory_reset_step(void){ factory_reset_step(); }                      /* service it (the main loop does this on hardware) */
 /* Menu-commit-gate regression harness (the PPS-latch bug). The gate in menu_poll only fires when the
  * display UART is idle (huart2.gState READY — zero-init RESET here, so it must be armed) AND no real
  * $PMTXTS emit is pending. pps_record_pending latches high on any PPS-locked clock, so the gate must
