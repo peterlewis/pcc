@@ -65,9 +65,9 @@ class Component extends DcLite {
     sigMedian: true, sigFilter: 'all',
     posWindow: 1800,
     globeTerm: true, globeTrails: true, globeLabels: false, globeGrat: true, globeRotate: true, globeClock: true,
-    // MAP has its own toggle state so it stops silently driving the hidden GLOBE (and vice-versa);
-    // TERMINATOR gives the map the day/night control the globe already had.
-    mapTerm: true, mapTrails: true, mapLabels: false, mapGrat: true,
+    // GROUND TRACK: one tab, two projections of the same scene — the globe* layer toggles drive
+    // both (the old separate map* set existed only because the views were separate tabs).
+    groundProj: 'globe',
     wxOffline: false, wxInterval: 'off',
     monPaused: false, monAutoscroll: true, monFilter: '',
     hdrBar: false, rebootArm: false,
@@ -107,7 +107,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=99'), import('./charts.js?v=107'), import('./realdev.js?v=115'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=100'), import('./charts.js?v=107'), import('./realdev.js?v=116'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -146,7 +146,7 @@ class Component extends DcLite {
         if (this.els.emuLat && !this.els.emuLat.value) this.els.emuLat.value = est.lat.toFixed(4);
         if (this.els.emuLon && !this.els.emuLon.value) this.els.emuLon.value = est.lon.toFixed(4);
       }).catch((e) => console.error('[pcc] emu init failed:', e));
-      CH.loadLand().then((l) => { this.land = l; this.landTried = true; if (this.state.section === 'globe') this.drawChart('globe'); });
+      CH.loadLand().then((l) => { this.land = l; this.landTried = true; if (this.state.section === 'ground') this.drawChart(this.state.groundProj === 'flat' ? 'map' : 'globe'); });
       this.ready = true;
       this.onTickStats();
       for (const k of Object.keys(this.els)) this.initEl(k, this.els[k]);
@@ -195,7 +195,7 @@ class Component extends DcLite {
   // (modules, tests and room wiring all stay intact).
   get DATALINK_SHOW() { return false; }
   get SECTIONS() {
-    const s = ['connect', 'devmodes', 'devbright', 'devconfig', 'devadvanced', 'devupdates', 'display', 'satellites', 'signal', 'position', 'timing', 'globe', 'map', 'monitor', 'export'];
+    const s = ['connect', 'devmodes', 'devbright', 'devconfig', 'devadvanced', 'devupdates', 'display', 'satellites', 'signal', 'position', 'timing', 'ground', 'archive', 'monitor', 'export'];
     if (this.DATALINK_SHOW) s.push('datalink');
     return s;
   }
@@ -1687,7 +1687,7 @@ class Component extends DcLite {
         }
         this.driveEmu();
         this.allFaces((f) => f.render(now));
-        if (s.section === 'globe' && s.phase === 'app' && (s.globeRotate || this._globeDrag)) {
+        if (s.section === 'ground' && s.groundProj !== 'flat' && s.phase === 'app' && (s.globeRotate || this._globeDrag)) {
           // Long computed trails (24h ≈ 24k points) are costly to reproject each frame, so throttle
           // the rotating globe to ~18 fps and step 3× per redraw — smooth spin, a third of the cost.
           const heavy = s.globeTrails && s.skyTrailAge > 5400 && this.appMode() === 'simulation' && !this._globeDrag;
@@ -1848,11 +1848,14 @@ class Component extends DcLite {
     const s = this.state.section;
     if (s === 'display') this.drawChart('gammaCurve');
     else if (s === 'satellites') this.drawChart('sky');
-    else if (s === 'signal') { this.drawChart('cn0elev'); this.drawChart('cn0time'); this.fetchArchive(); this.drawChart('archSky'); }
+    else if (s === 'signal') { this.drawChart('cn0elev'); this.drawChart('cn0time'); }
     else if (s === 'position') { this.drawChart('posScatter'); this.drawChart('dop'); this.drawChart('cont'); }
+    else if (s === 'archive') { this.fetchArchive(); this.drawChart('archSky'); }
     else if (s === 'timing') { this.drawChart('phase'); this.drawChart('stair'); this.drawChart('ppmtemp'); this.drawChart('adev'); this.spMaybeAutoSource(); this.drawChart('signalPath'); this.spKick(); this.fetchArchive(); this.drawChart('archOffset'); this.drawChart('archAux'); }
-    else if (s === 'globe' && !this.state.globeRotate) this.drawChart('globe');
-    else if (s === 'map') this.drawChart('map');
+    else if (s === 'ground') {
+      if (this.state.groundProj === 'flat') this.drawChart('map');
+      else if (!this.state.globeRotate) this.drawChart('globe');   // rotating globe repaints on its own driver
+    }
   }
 
   drawChart(name) {
@@ -1910,7 +1913,9 @@ class Component extends DcLite {
     if (name === 'cn0time') {
       const fil = st.sigFilter;
       const top = S.sats.filter((x) => x.el > 0 && (fil === 'all' || x.constId === fil)).sort((a, b) => b.cn0 - a.cn0).slice(0, 8);
-      return CH.drawCn0Time(el, T, top.map((x) => ({ tok: x.tok, pts: S.cn0Hist.get(x.key) || [] })), 1800, nowS);
+      // One live WINDOW across the strip charts (SIGNAL + POSITION) — a dropout here lines up
+      // with the DOP spike and position jump at the same instant on the POSITION tab.
+      return CH.drawCn0Time(el, T, top.map((x) => ({ tok: x.tok, pts: S.cn0Hist.get(x.key) || [] })), st.posWindow, nowS);
     }
     if (name === 'posScatter') return CH.drawPosScatter(el, T, this._pos.pts, this._pos, nowS);
     if (name === 'dop') return CH.drawDop(el, T, S.dopHist, st.posWindow, nowS);
@@ -1953,7 +1958,8 @@ class Component extends DcLite {
         land: this.land, sats: S.sats, gtrails: gcut(S.gtrails),
         sun: this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon),
         moon: this.SIM.moonPos(Date.now(), S.obs.lat, S.obs.lon), obs: S.obs,
-        opts: { terminator: st.mapTerm, trails: st.mapTrails, labels: st.mapLabels, graticule: st.mapGrat, trailAge: st.skyTrailAge },
+        // GROUND TRACK is one tab with two projections — one layer-toggle set drives both.
+        opts: { terminator: st.globeTerm, trails: st.globeTrails, labels: st.globeLabels, graticule: st.globeGrat, trailAge: st.skyTrailAge },
         dark: st.theme === 'dark',
       });
     }
@@ -2241,7 +2247,7 @@ class Component extends DcLite {
   get ROOMS() {
     return {
       display: ['display'],
-      sky: ['satellites', 'signal', 'position', 'globe', 'map', 'export'], // weather moved to the Display room
+      sky: ['satellites', 'signal', 'position', 'ground', 'archive', 'export'], // GLOBE+MAP merged (one tab, two projections); the daemon archive got its own tab
       timing: ['timing'],
       device: ['connect', 'devmodes', 'devbright', 'devconfig', 'devadvanced', 'devupdates'], // Monitor is a slide-up drawer, not a room/tab
       datalink: ['datalink'],   // program a vintage Timex Datalink watch by light (its own room)
@@ -3506,16 +3512,16 @@ class Component extends DcLite {
     const vis = S ? S.sats.filter((x) => x.visible) : [];
     const cnt = (id) => vis.filter((x) => x.constId === id).length;
     return {
-      cbGTerm: this.cb(st.globeTerm), oGTerm: () => this.setState({ globeTerm: !st.globeTerm }, () => this.drawChart('globe')),
-      cbGTrails: this.cb(st.globeTrails), oGTrails: () => this.setState({ globeTrails: !st.globeTrails }, () => this.drawChart('globe')),
-      cbGLabels: this.cb(st.globeLabels), oGLabels: () => this.setState({ globeLabels: !st.globeLabels }, () => this.drawChart('globe')),
-      cbGGrat: this.cb(st.globeGrat), oGGrat: () => this.setState({ globeGrat: !st.globeGrat }, () => this.drawChart('globe')),
+      cbGTerm: this.cb(st.globeTerm), oGTerm: () => this.setState({ globeTerm: !st.globeTerm }, () => this.drawGround()),
+      cbGTrails: this.cb(st.globeTrails), oGTrails: () => this.setState({ globeTrails: !st.globeTrails }, () => this.drawGround()),
+      cbGLabels: this.cb(st.globeLabels), oGLabels: () => this.setState({ globeLabels: !st.globeLabels }, () => this.drawGround()),
+      cbGGrat: this.cb(st.globeGrat), oGGrat: () => this.setState({ globeGrat: !st.globeGrat }, () => this.drawGround()),
+      gtGlobeOn: st.groundProj !== 'flat', gtFlatOn: st.groundProj === 'flat',
+      ssProjGlobe: this.seg(st.groundProj !== 'flat', true), ssProjFlat: this.seg(st.groundProj === 'flat', false),
+      onProjGlobe: () => this.setState({ groundProj: 'globe' }, () => this.drawGround()),
+      onProjFlat: () => this.setState({ groundProj: 'flat' }, () => this.drawGround()),
       // MAP's own toggles — independent state, and they redraw the MAP (the visible surface), not
       // the off-screen globe the shared handlers used to repaint a beat late.
-      cbMTerm: this.cb(st.mapTerm), oMTerm: () => this.setState({ mapTerm: !st.mapTerm }, () => this.drawChart('map')),
-      cbMTrails: this.cb(st.mapTrails), oMTrails: () => this.setState({ mapTrails: !st.mapTrails }, () => this.drawChart('map')),
-      cbMLabels: this.cb(st.mapLabels), oMLabels: () => this.setState({ mapLabels: !st.mapLabels }, () => this.drawChart('map')),
-      cbMGrat: this.cb(st.mapGrat), oMGrat: () => this.setState({ mapGrat: !st.mapGrat }, () => this.drawChart('map')),
       cbGRot: this.cb(st.globeRotate), oGRot: () => this.setState({ globeRotate: !st.globeRotate }),
       cbGClock: this.cb(st.globeClock), oGClock: () => this.setState({ globeClock: !st.globeClock }),
       globeClockOn: st.globeClock,
@@ -3832,6 +3838,9 @@ class Component extends DcLite {
     };
   }
   setArchRange(r) { this.setState({ archRange: r }); this._arch = null; this.fetchArchive(); }
+  // Repaint whichever GROUND TRACK projection is live (the other canvas is unmounted; its draw
+  // no-ops on the zero-size guard, so calling both would be harmless — this just names the intent).
+  drawGround() { this.drawChart(this.state.groundProj === 'flat' ? 'map' : 'globe'); }
   rvArchive() {
     const hi = this.state.bridgeInfo && this.state.bridgeInfo.history;
     const range = this.state.archRange || '24h';
@@ -3840,6 +3849,7 @@ class Component extends DcLite {
     const days = hi ? hi.days : 0;
     return {
       archShown: !!hi,
+      archAbsent: !hi,   // ARCHIVE tab honest empty state: no recorder behind this connection
       archCaption: hi ? ('ARCHIVE · RECORDED BY pccd · ' + days + (days === 1 ? ' DAY' : ' DAYS') + ' ON DISK' +
         (this._arch && this._arch.t && this._arch.t.length ? '' : ' · FETCHING…')) : '',
       archR6Style: chip('6h'), archR24Style: chip('24h'), archR7Style: chip('7d'), archRAllStyle: chip('all'),

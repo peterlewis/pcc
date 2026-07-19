@@ -197,8 +197,8 @@
             <button onClick="{{go_satellites}}" style="{{subStyle_satellites}}">SATELLITES</button>
             <button onClick="{{go_signal}}" style="{{subStyle_signal}}">SIGNAL</button>
             <button onClick="{{go_position}}" style="{{subStyle_position}}">POSITION</button>
-            <button onClick="{{go_globe}}" style="{{subStyle_globe}}">GLOBE</button>
-            <button onClick="{{go_map}}" style="{{subStyle_map}}">MAP</button>
+            <button onClick="{{go_ground}}" style="{{subStyle_ground}}">GROUND TRACK</button>
+            <button onClick="{{go_archive}}" style="{{subStyle_archive}}">ARCHIVE</button>
             <button onClick="{{go_export}}" style="{{subStyle_export}}">EXPORT</button>
           </div>
         </sc-if>
@@ -1093,12 +1093,12 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
             <section style="background:var(--panel);border:1px solid var(--line)">
               <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
                 <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">C/N₀ OVER TIME — PER PRN</span>
-                <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">TOP 8 BY SIGNAL · 30 MIN</span>
+                <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">TOP 8 BY SIGNAL</span>
               </div>
               <div style="padding:12px">
                 <canvas ref="{{refCn0time}}" style="width:100%;height:250px;display:block"></canvas>
               </div>
-              <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid var(--line)">
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border-top:1px solid var(--line)">
                 <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">CONSTELLATION</span>
                 <div style="display:flex;border:1px solid var(--line)">
                   <button onClick="{{oFilAll}}" style="{{ssFilAll}}">ALL</button>
@@ -1107,15 +1107,15 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                   <button onClick="{{oFilE}}" style="{{ssFilE}}">GAL</button>
                   <button onClick="{{oFilC}}" style="{{ssFilC}}">BDS</button>
                 </div>
+                <span style="flex:1"></span>
+                <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)" title="One live window shared by this chart and the POSITION charts">WINDOW</span>
+                <div style="display:flex;border:1px solid var(--line)">
+                  <button onClick="{{oPwin15}}" style="{{ssPwin15}}">15M</button>
+                  <button onClick="{{oPwin30}}" style="{{ssPwin30}}">30M</button>
+                  <button onClick="{{oPwin1h}}" style="{{ssPwin1h}}">1H</button>
+                </div>
               </div>
             </section>
-              <sc-if value="{{archShown}}">
-              <section style="background:var(--panel);border:1px solid var(--line)">
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:27px;padding:4px 11px;background:var(--strip);border-bottom:1px solid var(--line);flex-wrap:wrap"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">ARCHIVE — SIGNAL</span><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button onClick="{{onArchR6}}" style="{{archR6Style}}">6H</button><button onClick="{{onArchR24}}" style="{{archR24Style}}">24H</button><button onClick="{{onArchR7}}" style="{{archR7Style}}">7D</button><button onClick="{{onArchRAll}}" style="{{archRAllStyle}}">ALL</button></div></div><div style="padding:6px 12px 0;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3)">{{archCaption}}</div>
-                <div style="padding:8px 12px 8px"><canvas ref="{{refArchSky}}" style="width:100%;height:200px;display:block"></canvas></div>
-                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">RECORDED BY pccd (ONE SNAPSHOT PER 60 s). C/N0 MEAN (RED), MAX (DASHED), SATS USED (AMBER, RIGHT SCALE).</div>
-              </section>
-              </sc-if>
           </div>
         </sc-if>
 
@@ -1130,13 +1130,13 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 <canvas ref="{{refPosScatter}}" style="width:100%;height:500px;display:block"></canvas>
               </div>
               <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid var(--line)">
-                <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">WINDOW</span>
+                <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)" title="One live window shared by these charts and SIGNAL's C/N₀ over time">WINDOW</span>
                 <div style="display:flex;border:1px solid var(--line)">
                   <button onClick="{{oPwin15}}" style="{{ssPwin15}}">15M</button>
                   <button onClick="{{oPwin30}}" style="{{ssPwin30}}">30M</button>
                   <button onClick="{{oPwin1h}}" style="{{ssPwin1h}}">1H</button>
                 </div>
-                <span style="font-family:var(--mono);font-size:var(--fs-nano);color:var(--txt3)">EACH FIX = ONE SAMPLE · AGE-FADED</span>
+                <span style="font-family:var(--mono);font-size:var(--fs-nano);color:var(--txt3)">EACH FIX = ONE SAMPLE · AGE-FADED · SHARED WITH SIGNAL</span>
               </div>
             </section>
             <div style="display:flex;flex-direction:column;gap:14px">
@@ -1380,26 +1380,44 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
           </div>
         </sc-if>
 
-        <sc-if value="{{sec_globe}}" hint-placeholder-val="{{false}}">
-          <div data-screen-label="Globe" class="pcc-cards" style="animation:pcc-in var(--t-room) var(--ease-ui) both;padding:14px;display:grid;grid-template-columns:1fr minmax(280px,330px);gap:14px;align-items:start;max-width:1560px">
+        <sc-if value="{{sec_ground}}" hint-placeholder-val="{{false}}">
+          <div data-screen-label="Ground track" class="pcc-cards" style="animation:pcc-in var(--t-room) var(--ease-ui) both;padding:14px;display:grid;grid-template-columns:1fr minmax(280px,330px);gap:14px;align-items:start;max-width:1560px">
             <section style="background:var(--panel);border:1px solid var(--line)">
-              <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
-                <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">07 · GLOBE</span>
-                <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">ORTHOGRAPHIC · DRAG TO ROTATE</span>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
+                <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">07 · GROUND TRACK</span>
+                <div style="display:flex;align-items:center;gap:10px">
+                  <sc-if value="{{gtGlobeOn}}" hint-placeholder-val="{{true}}"><span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">ORTHOGRAPHIC · DRAG TO ROTATE</span></sc-if>
+                  <sc-if value="{{gtFlatOn}}" hint-placeholder-val="{{false}}"><span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">WORLD · EQUIRECTANGULAR</span></sc-if>
+                  <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">PROJECTION</span>
+                  <div style="display:flex;border:1px solid var(--line)">
+                    <button onClick="{{onProjGlobe}}" style="{{ssProjGlobe}}">GLOBE</button>
+                    <button onClick="{{onProjFlat}}" style="{{ssProjFlat}}">FLAT</button>
+                  </div>
+                </div>
               </div>
-              <div style="position:relative;padding:10px">
-                <canvas ref="{{refGlobe}}" style="width:100%;height:560px;display:block;cursor:grab"></canvas>
-                <sc-if value="{{globeClockOn}}" hint-placeholder-val="{{false}}">
-                  <div style="position:absolute;top:20px;right:22px;font-family:var(--mono);font-size:var(--fs-data-sm);letter-spacing:.1em;color:var(--txt2)">{{gClock}}</div>
-                </sc-if>
-              </div>
+              <sc-if value="{{gtGlobeOn}}" hint-placeholder-val="{{true}}">
+                <div style="position:relative;padding:10px">
+                  <canvas ref="{{refGlobe}}" style="width:100%;height:560px;display:block;cursor:grab"></canvas>
+                  <sc-if value="{{globeClockOn}}" hint-placeholder-val="{{false}}">
+                    <div style="position:absolute;top:20px;right:22px;font-family:var(--mono);font-size:var(--fs-data-sm);letter-spacing:.1em;color:var(--txt2)">{{gClock}}</div>
+                  </sc-if>
+                </div>
+              </sc-if>
+              <sc-if value="{{gtFlatOn}}" hint-placeholder-val="{{false}}">
+                <div style="position:relative;padding:10px">
+                  <canvas ref="{{refMap}}" style="width:100%;aspect-ratio:2/1;display:block"></canvas>
+                  <div style="position:absolute;top:20px;right:22px;font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.1em;color:var(--txt2)">{{gSub}}</div>
+                </div>
+              </sc-if>
               <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 12px;border-top:1px solid var(--line)">
                 <button onClick="{{oGTerm}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbGTerm}}"></span>TERMINATOR</button>
                 <button onClick="{{oGTrails}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbGTrails}}"></span>TRAILS</button>
                 <button onClick="{{oGLabels}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbGLabels}}"></span>LABELS</button>
                 <button onClick="{{oGGrat}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbGGrat}}"></span>GRATICULE</button>
-                <button onClick="{{oGRot}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbGRot}}"></span>AUTO-ROTATE</button>
-                <button onClick="{{oGClock}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbGClock}}"></span>CLOCK OVERLAY</button>
+                <sc-if value="{{gtGlobeOn}}" hint-placeholder-val="{{true}}">
+                  <button onClick="{{oGRot}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbGRot}}"></span>AUTO-ROTATE</button>
+                  <button onClick="{{oGClock}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbGClock}}"></span>CLOCK OVERLAY</button>
+                </sc-if>
               </div>
             </section>
             <div style="display:flex;flex-direction:column;gap:14px">
@@ -1416,31 +1434,37 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
                   <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">NOTES</span>
                 </div>
-                <div style="padding:10px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.7">SATELLITES AT SUB-SATELLITE POINTS · TRAILS = GROUND TRACKS · OBSERVER MARKED GREEN.<br>{{landNote}}</div>
+                <div style="padding:10px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.7">SATELLITES AT SUB-SATELLITE POINTS · TRAILS = GROUND TRACKS · SUN GOLD · MOON COOL · OBSERVER GREEN.<br>TRAIL DEPTH FOLLOWS THE SKYPLOT TRAIL CONTROL.<br>{{landNote}}</div>
               </section>
             </div>
           </div>
         </sc-if>
 
-        <sc-if value="{{sec_map}}" hint-placeholder-val="{{false}}">
-          <div data-screen-label="Map" style="animation:pcc-in var(--t-room) var(--ease-ui) both;padding:14px;max-width:1560px">
-            <section style="background:var(--panel);border:1px solid var(--line)">
-              <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
-                <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">08 · MAP</span>
-                <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">GROUND TRACKS — WORLD · EQUIRECTANGULAR</span>
-              </div>
-              <div style="position:relative;padding:10px">
-                <canvas ref="{{refMap}}" style="width:100%;aspect-ratio:2/1;display:block"></canvas>
-                <div style="position:absolute;top:20px;right:22px;font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.1em;color:var(--txt2)">{{gSub}}</div>
-              </div>
-              <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 12px;border-top:1px solid var(--line)">
-                <button onClick="{{oMTerm}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbMTerm}}"></span>TERMINATOR</button>
-                <button onClick="{{oMTrails}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbMTrails}}"></span>TRAILS</button>
-                <button onClick="{{oMLabels}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbMLabels}}"></span>LABELS</button>
-                <button onClick="{{oMGrat}}" style="display:flex;align-items:center;gap:7px;background:transparent;border:0;padding:0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbMGrat}}"></span>GRATICULE</button>
-                <span style="margin-left:auto;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3)">SATELLITES AT SUB-SATELLITE POINTS · SUN GOLD · MOON COOL · OBSERVER GREEN</span>
-              </div>
-            </section>
+        <sc-if value="{{sec_archive}}" hint-placeholder-val="{{false}}">
+          <div data-screen-label="Archive" style="animation:pcc-in var(--t-room) var(--ease-ui) both;padding:14px;max-width:1560px">
+            <sc-if value="{{archShown}}">
+              <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
+                  <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">08 · SKY ARCHIVE</span>
+                  <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">DAEMON · AGGREGATE</span>
+                </div>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:27px;padding:4px 11px;background:var(--strip);border-bottom:1px solid var(--line);flex-wrap:wrap"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">RANGE</span><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button onClick="{{onArchR6}}" style="{{archR6Style}}">6H</button><button onClick="{{onArchR24}}" style="{{archR24Style}}">24H</button><button onClick="{{onArchR7}}" style="{{archR7Style}}">7D</button><button onClick="{{onArchRAll}}" style="{{archRAllStyle}}">ALL</button></div></div><div style="padding:6px 12px 0;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3)">{{archCaption}}</div>
+                <div style="padding:8px 12px 8px"><canvas ref="{{refArchSky}}" style="width:100%;height:280px;display:block"></canvas></div>
+                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">RECORDED BY pccd (ONE SNAPSHOT PER 60 s). C/N0 MEAN (RED), MAX (DASHED), SATS USED (AMBER, RIGHT SCALE). AGGREGATE ONLY — THE RECORDER KEEPS NO PER-SATELLITE TRACK YET.</div>
+              </section>
+            </sc-if>
+            <sc-if value="{{archAbsent}}" hint-placeholder-val="{{false}}">
+              <section style="background:var(--panel);border:1px solid var(--line)">
+                <div style="padding:var(--pad-panel-y) var(--pad-panel-x) 0"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">08 · SKY ARCHIVE</span></div>
+                <div style="margin:12px;padding:12px;background:var(--well);border:1px solid var(--line2)">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                    <span style="width:8px;height:8px;background:var(--none)"></span>
+                    <span style="font-family:var(--mono);font-size:var(--fs-label);font-weight:700;letter-spacing:.08em;color:var(--none)">NO RECORDER</span>
+                  </div>
+                  <div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3);line-height:1.7">The archive reads the pccd bridge daemon's flight log. Connect through pccd to record and browse past sky conditions.</div>
+                </div>
+              </section>
+            </sc-if>
           </div>
         </sc-if>
 
@@ -1682,6 +1706,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=260"></script>
+<script type="module" src="js/app-controller.js?v=261"></script>
 </body>
 </html>

@@ -204,7 +204,7 @@ export function createRealDevice(session) {
                 let ch = S.cn0Hist.get(key);
                 if (!ch) { ch = []; S.cn0Hist.set(key, ch); }
                 ch.push({ t: tSec, v: cn0 });
-                if (ch.length > 1800) ch.shift();
+                if (ch.length > 3600) ch.shift();   // 1 h of 1 Hz — must cover the largest live WINDOW preset
             }
         }
         // SESSION statistics — the sim.tick recorder, mirrored at the same 1 Hz gate:

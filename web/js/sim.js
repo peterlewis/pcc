@@ -392,7 +392,7 @@ export function createSession(opts = {}) {
       let h = S.cn0Hist.get(s.key);
       if (!h) { h = []; S.cn0Hist.set(s.key, h); }
       h.push({ t: tAbs, v: s.cn0 });
-      if (h.length > 1800) h.shift();
+      if (h.length > 3600) h.shift();   // 1 h of 1 Hz — must cover the largest live WINDOW preset
       if (tAbs % 30 === 0) {
         let tr = S.trails.get(s.key);
         if (!tr) { tr = []; S.trails.set(s.key, tr); }
