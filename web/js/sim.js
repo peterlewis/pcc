@@ -259,7 +259,7 @@ export function createSession(opts = {}) {
     obs, sats: [], t0, scenario: 'locked', connected: false,
     fix: { valid: false, lat: obs.lat, lon: obs.lon, alt: obs.alt, hdop: 1.0, pdop: 1.7, vdop: 1.4, sats: 0, type: 0 },
     posHist: [], dopHist: [], fixHist: [], cn0Hist: new Map(), trails: new Map(), gtrails: new Map(),
-    pps: { list: [], samples: [], seq: 4211, dropped: 0, calerr: 0, ppm: 0, sincecal: 0, temp: 31.2, lastEdge: 0, flags: 7 },
+    pps: { list: [], samples: [], tempHist: [], seq: 4211, dropped: 0, calerr: 0, ppm: 0, sincecal: 0, temp: 31.2, lastEdge: 0, flags: 7 },
     nmeaLog: [], nmeaRate: 0, ttff: 26.8, passes: 0, obsCount: 0, peakEl: 0,
     bins: new Set(), stats: {},
     weather: { temp: 18.6, app: 17.4, rh: 64, mslp: 1013.4, wind: 4.2, gust: 7.1, dir: 238, precip: 0.0, cloud: 83, code: 'OVERCAST', offline: false, asOf: 0 },
@@ -318,6 +318,13 @@ export function createSession(opts = {}) {
       const systick = LOAD - Math.round(frac * (LOAD + 1));
       P.list.push({ t: tAbs, us: phaseUs });
       if (P.list.length > 1800) P.list.shift();
+      // Continuous die-temp record (10 s decimation): drift samples land only per calibration,
+      // but temp is a continuous quantity — its trace must not freeze when calibration goes quiet.
+      if (!P.tempT || tAbs - P.tempT >= 10) {
+        P.tempHist.push({ t: tAbs, temp: P.temp });
+        if (P.tempHist.length > 360) P.tempHist.shift();
+        P.tempT = tAbs;
+      }
       if (!light) {
         return { seq: P.seq, epoch: tAbs, subms, systick, load: LOAD, calerr: P.calerr, sincecal: Math.floor(P.sincecal), temp: Math.round(P.temp), flags: P.flags };
       }
@@ -494,6 +501,7 @@ export function createSession(opts = {}) {
       if (Array.isArray(S.fixHist)) S.fixHist.length = 0;
       if (S.pps && Array.isArray(S.pps.list)) S.pps.list.length = 0;   // → TIMING KPIs go honest (no stale stream)
       if (S.pps && Array.isArray(S.pps.samples)) S.pps.samples.length = 0;  // drift-vs-temp scatter reads this ungated
+      if (S.pps && Array.isArray(S.pps.tempHist)) S.pps.tempHist.length = 0;
       S.fixAgeT = 0;      // don't leave this sim's fix timestamp for a later Connected session to inherit
       prerolled = false;  // let the NEXT connect() re-preroll — else a restarted sim shows empty charts
     },

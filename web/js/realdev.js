@@ -112,6 +112,7 @@ export function createRealDevice(session) {
         // fit. The TIMING room now ALSO gates its render on appMode (rvTiming/renderChart), so Standby
         // is honest even if a buffer somehow survives — but clearing on every leave is still the rule.
         if (S.pps && Array.isArray(S.pps.samples)) S.pps.samples.length = 0;
+        if (S.pps && Array.isArray(S.pps.tempHist)) S.pps.tempHist.length = 0;   // continuous temp trace leaves with the device
         ppsLastCalerr = null;
         S.star = null;   // $PMSTAR transit list — real-device data, leaves with the device
         S.stab = null;   // $PMADEV/$PMHDEV stability ladders — likewise
@@ -266,6 +267,16 @@ export function createRealDevice(session) {
             P.samples.push({ t: ts, temp: r.temp, ppm: r.ppm });
             if (P.samples.length > 200) P.samples.shift();
             ppsLastCalerr = r.calerr;
+        }
+
+        // Continuous die-temp record (10 s decimation). $PMTXTS carries temp EVERY second, but
+        // drift samples land only per calibration — without this the amber temp trace froze the
+        // moment calibration went quiet while the ppm staircase (hold semantics) marched on.
+        if (!P.tempT || ts - P.tempT >= 10) {
+            if (!Array.isArray(P.tempHist)) P.tempHist = [];
+            P.tempHist.push({ t: ts, temp: r.temp });
+            if (P.tempHist.length > 360) P.tempHist.shift();
+            P.tempT = ts;
         }
 
         P.seq = r.seq;

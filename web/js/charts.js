@@ -461,13 +461,17 @@ export function drawPhase(canvas, tok, list, spanSec, now, holdSince) {
 }
 
 // ---------------------------------------------------------------- ppm staircase + temp
-export function drawStair(canvas, tok, samples, spanSec, now, tempNow) {
+export function drawStair(canvas, tok, samples, spanSec, now, tempNow, tempHist, liveT) {
   const { ctx, w, h } = c2d(canvas);
   clear(ctx, w, h, tok);
   const fr = frame(ctx, w, h, tok, { ml: 40 });
   const inWin = samples.filter((p) => now - p.t <= spanSec);
-  if (!inWin.length) { xTimeTicks(ctx, tok, fr, h, spanSec); return; }
-  const ppms = inWin.map((p) => p.ppm), temps = inWin.map((p) => p.temp);
+  // Temp is a CONTINUOUS quantity with its own decimated record (tempHist); the drift samples
+  // land only per calibration. Falling back to the cal samples keeps old callers drawing.
+  const tWin = (tempHist && tempHist.length ? tempHist : samples).filter((p) => now - p.t <= spanSec);
+  if (!inWin.length && !tWin.length) { xTimeTicks(ctx, tok, fr, h, spanSec); return; }
+  const ppms = inWin.length ? inWin.map((p) => p.ppm) : [0];
+  const temps = tWin.length ? tWin.map((p) => p.temp) : [tempNow || 25];
   const pLo = Math.min(...ppms) - 0.4, pHi = Math.max(...ppms) + 0.4;
   const tLo = Math.min(...temps) - 0.5, tHi = Math.max(...temps, tempNow) + 0.5;
   const split = 0.62;
@@ -476,21 +480,25 @@ export function drawStair(canvas, tok, samples, spanSec, now, tempNow) {
   ctx.strokeStyle = tok.line; ctx.globalAlpha = 0.7;
   ctx.beginPath(); ctx.moveTo(fr.m.l + 1, fr.m.t + fr.ih * (split + 0.03)); ctx.lineTo(fr.m.l + fr.iw - 1, fr.m.t + fr.ih * (split + 0.03)); ctx.stroke();
   ctx.globalAlpha = 1;
-  // staircase
   ctx.save(); ctx.beginPath(); ctx.rect(fr.m.l, fr.m.t, fr.iw, fr.ih); ctx.clip();
-  ctx.strokeStyle = tok.led; ctx.lineWidth = 1.4; ctx.beginPath();
-  let px = null, py = null;
-  for (const p of inWin) {
-    const x = fr.X(1 - (now - p.t) / spanSec), y = Yp(p.ppm);
-    if (px == null) ctx.moveTo(x, y);
-    else { ctx.lineTo(x, py); ctx.lineTo(x, y); }
-    px = x; py = y;
+  // staircase — hold semantics: the last calibration value extends to the last LIVE edge (not
+  // blindly to `now`), so a dead stream stops both traces at the same honest moment.
+  if (inWin.length) {
+    ctx.strokeStyle = tok.led; ctx.lineWidth = 1.4; ctx.beginPath();
+    let px = null, py = null;
+    for (const p of inWin) {
+      const x = fr.X(1 - (now - p.t) / spanSec), y = Yp(p.ppm);
+      if (px == null) ctx.moveTo(x, y);
+      else { ctx.lineTo(x, py); ctx.lineTo(x, y); }
+      px = x; py = y;
+    }
+    const holdT = liveT ? Math.min(now, liveT) : now;
+    if (px != null) ctx.lineTo(fr.X(1 - Math.max(0, now - holdT) / spanSec), py);
+    ctx.stroke();
   }
-  if (px != null) ctx.lineTo(fr.X(1), py);
-  ctx.stroke();
-  // temp
-  ctx.strokeStyle = tok.acq; ctx.beginPath();
-  inWin.forEach((p, i) => {
+  // temp — the continuous record, drawn as measured (no hold needed at 10 s cadence)
+  ctx.strokeStyle = tok.acq; ctx.lineWidth = 1; ctx.beginPath();
+  tWin.forEach((p, i) => {
     const x = fr.X(1 - (now - p.t) / spanSec), y = Yt(p.temp);
     i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
   });
