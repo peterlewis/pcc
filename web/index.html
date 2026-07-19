@@ -57,17 +57,19 @@
                swung over the seam and sits behind the time half, which keeps ticking — a physically
                closed Mk IV still shows time on the board facing you (the firmware has no fold
                sensor). Clicking the closed clock unfolds it; the fold button beside it does both. -->
-          <div data-dockbar="1" onClick="{{onHdrDockClick}}" title="{{hdrDockTitle}}" style="{{hdrDockStyle}}">
-            <!-- The fold wrapper mirrors the entry's nested-rotation rig (linkWrap around dateHalf):
-                 the inner 180° date-board flip is about the element centre, the FOLD pivots on the
-                 seam — two origins, so two elements. The time half sits above it (z) so the closing
-                 leaf tucks BEHIND the face and never occludes the running clock. -->
-            <div ref="{{refHdrFoldWrap}}" style="display:flex;position:relative;z-index:0;transform-origin:100% 50%">
-              <div ref="{{refHdrDateHalf}}" style="position:relative;width:353px;height:46px;background:var(--inset);border:1px solid var(--clock-bezel);transform:rotate(180deg)">
+          <div data-dockbar="1" onClick="{{onHdrDockClick}}" title="{{hdrDockTitle}}" style="position:relative;height:46px">
+            <!-- The dock is a little STAGE (absolute children), because the clock has two docked
+                 poses: OPEN (flat line: date left of time, hinge plate horizontal on the seam) and
+                 CLOSED (the desk pose: date stacked above time, hinge plate vertical at their left —
+                 the entry splash at header scale, both rows ticking). The fold between them is the
+                 entry fold reversed: an IN-PLANE cartwheel about the seam pins (the hinge axis
+                 points at the viewer — never a 3D turn). refHdrFoldWrap is the rotating carrier. -->
+            <div ref="{{refHdrFoldWrap}}" style="position:absolute;left:0;top:0;width:0;height:0">
+              <div ref="{{refHdrDateHalf}}" style="position:absolute;left:0;top:0;width:353px;height:46px;background:var(--inset);border:1px solid var(--clock-bezel);transform:rotate(180deg)">
                 <canvas ref="{{refHdrDate}}" style="position:absolute"></canvas>
               </div>
             </div>
-            <div ref="{{refHdrTimeHalf}}" style="position:relative;z-index:1;width:353px;height:46px;background:var(--inset);border:1px solid var(--clock-bezel);border-left:0">
+            <div ref="{{refHdrTimeHalf}}" style="position:absolute;left:353px;top:0;width:353px;height:46px;background:var(--inset);border:1px solid var(--clock-bezel)">
               <canvas ref="{{refHdrTime}}" style="position:absolute"></canvas>
             </div>
             <div ref="{{refHdrLink}}" style="position:absolute;left:337px;top:0;width:32px;height:16px;background:var(--inset);border:1px solid var(--clock-bezel);border-radius:8px">
@@ -1652,6 +1654,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=249"></script>
+<script type="module" src="js/app-controller.js?v=251"></script>
 </body>
 </html>

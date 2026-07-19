@@ -1194,72 +1194,111 @@ class Component extends DcLite {
     }));
   }
 
-  // Closing the docked clock IS closing the hinge, and it is the OPEN RUN BACKWARDS along the
-  // hinge's own 180°: flat (180°) back through the desk pose (90°) to shut (0°) — never past
-  // 180°, no hyperextension. Seen from the front that retrace is a page-turn about the vertical
-  // seam axis (rotateY): the date leaf turns away from the viewer, thins to edge-on exactly at
-  // the desk pose (the LUT switches there, hidden in the edge), and lands back-to-back BEHIND
-  // the time board — whose display stays outward and ticking, never occluded (a physically
-  // closed Mk IV keeps showing time on the board that faces you; the firmware has no fold
-  // sensor). Then board + hinge plate + header slide left into the one-board clamshell. Reopen
-  // is the same page-turn forward. The rotation rides refHdrFoldWrap (the fold pivots the seam;
-  // the board's own 180° flip pivots its centre — two origins, two elements, the entry's
-  // nested-rotation rig). Degrades to an instant pose swap when animation is unavailable.
+  // Closing the docked clock IS closing the hinge, and it is THE ENTRY FOLD RUN BACKWARDS —
+  // in-plane, about the seam pins, the hinge axis pointing at the viewer (never a 3D turn: the
+  // Mk IV has no such axis). The reverse of stacked->flat is flat->STACKED, so the closed dock
+  // is the DESK POSE: date row above time row, both ticking, hinge plate vertical at their left
+  // — the entry splash at header scale. Nothing is ever hidden.
+  //
+  // The reverse arc swings the leaf ABOVE the hinge and the header sits at the viewport top, so
+  // the fold does what a person would: TAKE THE CLOCK OFF THE SHELF, FOLD IT, PUT IT BACK.
+  //   beat 0  lift-out — the dock descends into the room (clearance = one board length)
+  //   beat 1  cartwheel, first 90° — the leaf rises to vertical; the LUT switches at the top
+  //   beat 2  cartwheel, second 90° + the double-hinge row-step — the leaf lays down one row up;
+  //           its 180° of turn cancels the board's mounting flip exactly as the hardware's does
+  //   beat 3  the stacked clock flies back onto the shelf, scaled to the 46px budget
+  // Reopen is the same four beats mirrored. Degrades to an instant pose swap when animation is
+  // unavailable, like every fold in the app.
   async foldHdrClock(toClosed) {
     if (this._hdrFolding) return;
     const pose = toClosed ? 'closed' : 'open';
     if (this.state.hdrPose === pose) return;
-    const E = this.els, wrap = E.hdrFoldWrap, th = E.hdrTimeHalf, link = E.hdrLink;
-    if (!this.canAnimate() || !wrap || !th) {
+    const E = this.els, M = this.MM;
+    const wrap = E.hdrFoldWrap, dh = E.hdrDateHalf, th = E.hdrTimeHalf;
+    const dock = E.dockSlot ? E.dockSlot.querySelector('[data-dockbar]') : null;
+    if (!this.canAnimate() || !wrap || !dh || !th || !dock) {
       this.setState({ hdrPose: pose, hdrPoseAuto: false }); this.sizeHdrBar(); return;
     }
     this._hdrFolding = true;
     const ease = 'cubic-bezier(.5,.03,.16,1)';
     const face = () => this.faces.hdrDate;
-    const Wk = wrap.getBoundingClientRect().width || 0;
-    const linkL = parseFloat(link && link.style.left) || 0;   // seam-riding plate: left = Wk - 12k
     const anims = [];
     const play = (el, kf, opts) => { const a = el.animate(kf, opts); anims.push(a); return a; };
-    const stage = (from, to) => play(wrap, [{ transform: 'rotateY(' + from + 'deg)' }, { transform: 'rotateY(' + to + 'deg)' }],
-      { duration: 340, easing: ease, fill: 'forwards' });
     try {
       if (toClosed) {
-        // Flat (180° open) -> desk pose (90°): the leaf turns away, thinning toward edge-on.
-        await this.settle(stage(0, -90), 360);
-        if (face()) face().setInverted(false);                 // the hinge switch, hidden in the edge
-        // Desk pose -> shut (0°): the leaf completes the turn and lies back-to-back behind the face.
-        await this.settle(stage(-90, -180), 360);
-        // Settle: the empty leaf slot closes — board, hinge plate and header slide left together.
-        wrap.style.display = 'none';
-        play(th, [{ transform: 'translateX(' + Wk + 'px)' }, { transform: 'translateX(0px)' }],
-          { duration: 230, easing: 'ease-out', fill: 'forwards' });
-        if (link) play(link, [{ left: linkL + 'px' }, { left: (linkL - Wk) + 'px' }],
-          { duration: 230, easing: 'ease-out', fill: 'forwards' });
-        await this.sleep(240);
+        const Wk = parseFloat(dh.style.width) || 0, Hk = parseFloat(dh.style.height) || 0;
+        const kOpen = Hk / M.H;
+        const k2 = Math.min(46 / (2 * M.H), 2 * Wk / M.W);          // closed scale; statics re-land exact
+        const s = k2 / kOpen, D = Wk + 24;
+        dock.style.zIndex = '80'; dock.style.transformOrigin = '0 0';
+        wrap.style.transformOrigin = Wk + 'px ' + (Hk / 2) + 'px';   // the seam pivot
+        // beat 0 — off the shelf
+        await this.settle(play(dock, [{ transform: 'translateY(0px)' }, { transform: 'translateY(' + D + 'px)' }],
+          { duration: 260, easing: 'ease-out', fill: 'forwards' }), 280);
+        // beat 1 — the leaf rises to vertical
+        await this.settle(play(wrap, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(90deg)' }],
+          { duration: 340, easing: ease, fill: 'forwards' }), 360);
+        if (face()) face().setInverted(false);                       // the hinge switch, at the top of the arc
+        // beat 2 — the leaf lays down one row above the time board (the double-hinge row-step)
+        await this.settle(play(wrap, [{ transform: 'rotate(90deg)' }, { transform: 'translateY(' + (-Hk) + 'px) rotate(180deg)' }],
+          { duration: 340, easing: ease, fill: 'forwards' }), 360);
+        // beat 3 — back onto the shelf: the stacked assembly (top-left at dock-local (Wk,−Hk)) flies
+        // to the dock origin at the closed scale; the dock's layout width narrows in step.
+        const tx = -s * Wk, ty = s * Hk;
+        play(dock, [{ transform: 'translateY(' + D + 'px)' },
+                    { transform: 'translate(' + tx + 'px,' + ty + 'px) scale(' + s + ')' }],
+          { duration: 320, easing: ease, fill: 'forwards' });
+        play(dock, [{ width: (2 * Wk) + 'px' }, { width: (M.W * k2) + 'px' }],
+          { duration: 320, easing: ease, fill: 'forwards' });
+        await this.sleep(340);
       } else {
-        // Reverse: make room first (board slides right), then the page-turn forward — the leaf
-        // unfurls from behind the face, edge-on at the desk pose, flat into the line.
-        if (face()) face().setInverted(false);
-        wrap.style.display = '';
-        const hold = play(wrap, [{ transform: 'rotateY(-180deg)' }, { transform: 'rotateY(-180deg)' }],
+        const Wc = parseFloat(dh.style.width) || 0, Hc = parseFloat(dh.style.height) || 0;
+        const k2 = Hc / M.H;
+        const avail = this.hdrDockAvail();
+        const kOpen = Math.min(46 / M.H, Math.max(avail === null ? 2 * Wc : avail, 0) / (2 * M.W));
+        const Wk = M.W * kOpen, Hk = M.H * kOpen;
+        const S = kOpen / k2, D = Wk + 24;
+        dock.style.zIndex = '80'; dock.style.transformOrigin = '0 0';
+        // beat 0 — off the shelf, growing to open scale: the stacked mini flies out to where the
+        // big unfold will happen (its top-left lands at dock-local (Wk, D−Hk)).
+        await this.settle(play(dock, [{ transform: 'translate(0px,0px) scale(1)' },
+                                      { transform: 'translate(' + Wk + 'px,' + (D - Hk) + 'px) scale(' + S + ')' }],
+          { duration: 320, easing: ease, fill: 'forwards' }), 340);
+        // One-tick swap to the open-statics rig, held in the folded pose at the same spot — the
+        // paint is pixel-equivalent, so no flash: open layout + wrap folded + dock descended.
+        for (const a of anims.splice(0)) { try { a.cancel(); } catch (e) {} }
+        dock.style.width = (2 * Wk) + 'px'; dock.style.height = Hk + 'px';
+        dh.style.left = '0px'; dh.style.top = '0px'; dh.style.width = Wk + 'px'; dh.style.height = Hk + 'px'; dh.style.transform = 'rotate(180deg)';
+        th.style.left = Wk + 'px'; th.style.top = '0px'; th.style.width = Wk + 'px'; th.style.height = Hk + 'px';
+        if (E.hdrDate) this.sizeFaceCanvas('hdrDate', E.hdrDate, dh, kOpen, 7.0175);
+        if (E.hdrTime) this.sizeFaceCanvas('hdrTime', E.hdrTime, th, kOpen, 7.0175);
+        if (E.hdrLink) { const L = E.hdrLink; L.style.left = (Wk - 12 * kOpen) + 'px'; L.style.top = '0px';
+          L.style.width = (24 * kOpen) + 'px'; L.style.height = (12 * kOpen) + 'px'; L.style.borderRadius = (6 * kOpen) + 'px'; }
+        wrap.style.transformOrigin = Wk + 'px ' + (Hk / 2) + 'px';
+        const holdW = play(wrap, [{ transform: 'translateY(' + (-Hk) + 'px) rotate(180deg)' },
+                                  { transform: 'translateY(' + (-Hk) + 'px) rotate(180deg)' }], { duration: 1, fill: 'forwards' });
+        const holdD = play(dock, [{ transform: 'translateY(' + D + 'px)' }, { transform: 'translateY(' + D + 'px)' }],
           { duration: 1, fill: 'forwards' });
-        play(th, [{ transform: 'translateX(-' + Wk + 'px)' }, { transform: 'translateX(0px)' }],
-          { duration: 230, easing: 'ease-out', fill: 'forwards' });
-        if (link) play(link, [{ left: (linkL - Wk) + 'px' }, { left: linkL + 'px' }],
-          { duration: 230, easing: 'ease-out', fill: 'forwards' });
-        await this.sleep(240);
-        hold.cancel();
-        await this.settle(stage(-180, -90), 360);
-        if (face()) face().setInverted(true);                  // back to the mounted-inverted LUT
-        await this.settle(stage(-90, 0), 360);
+        await this.raf2();
+        // beat 1 — the leaf rises back to vertical
+        holdW.cancel();
+        await this.settle(play(wrap, [{ transform: 'translateY(' + (-Hk) + 'px) rotate(180deg)' }, { transform: 'rotate(90deg)' }],
+          { duration: 340, easing: ease, fill: 'forwards' }), 360);
+        if (face()) face().setInverted(true);                        // back to the flat-mounting LUT
+        // beat 2 — the leaf lays down into the line
+        await this.settle(play(wrap, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(0deg)' }],
+          { duration: 340, easing: ease, fill: 'forwards' }), 360);
+        // beat 3 — back onto the shelf
+        holdD.cancel();
+        await this.settle(play(dock, [{ transform: 'translateY(' + D + 'px)' }, { transform: 'translateY(0px)' }],
+          { duration: 280, easing: 'ease-out', fill: 'forwards' }), 300);
       }
     } finally {
       // Land the final pose through the ONE writer of dock statics, then drop the transients.
+      this._hdrFolding = false;
       this.setState({ hdrPose: pose, hdrPoseAuto: false });
       this.sizeHdrBar();
       for (const a of anims) { try { a.cancel(); } catch (e) {} }
-      th.style.transform = '';
-      this._hdrFolding = false;
     }
   }
 
@@ -1362,35 +1401,62 @@ class Component extends DcLite {
     // (a real NEGATIVE avail is meaningful: the header is genuinely too tight -> k=0 -> auto-collapse)
     if (this._hdrFolding) return;           // a fold is choreographing the dock — don't fight it
     const closed = this.state.hdrPose === 'closed';
-    const boards = closed ? 1 : 2;          // the closed clamshell is one board long
-    const k = Math.min(46 / M.H, Math.max(avail, 0) / (boards * M.W));
-    if (M.H * k < this.HDR_MIN_H) {
-      // No room for a legible miniature. First fallback is PHYSICAL: fold the clock shut (half the
-      // width). Only when even the closed clamshell won't fit legibly does the dock hide entirely.
+    // OPEN = the flat line (2 boards wide, 1 row tall). CLOSED = the desk pose (1 board wide,
+    // 2 rows tall — the entry splash at header scale, both rows ticking). Height budget is 46px
+    // either way, so the closed rows are half-height; width budget is what the header spares.
+    const k = closed
+      ? Math.min(46 / (2 * M.H), Math.max(avail, 0) / M.W)
+      : Math.min(46 / M.H, Math.max(avail, 0) / (2 * M.W));
+    const legible = closed ? 2 * M.H * k >= this.HDR_MIN_H : M.H * k >= this.HDR_MIN_H;
+    if (!legible) {
+      // No room for a legible miniature. First fallback is PHYSICAL: fold to the desk pose (half
+      // the width). Only when even that won't fit legibly does the dock hide entirely.
       if (!closed) {
-        const kC = Math.min(46 / M.H, Math.max(avail, 0) / M.W);
-        if (M.H * kC >= this.HDR_MIN_H) { this.setState({ hdrPose: 'closed', hdrPoseAuto: true }); return; }
+        const kC = Math.min(46 / (2 * M.H), Math.max(avail, 0) / M.W);
+        if (2 * M.H * kC >= this.HDR_MIN_H) { this.setState({ hdrPose: 'closed', hdrPoseAuto: true }); return; }
       }
       if (!this.state.hdrAutoHide) this.setState({ hdrAutoHide: true });
       return;
     }
-    const H = M.H * k, Wk = M.W * k, Hk = H;
+    const Wk = M.W * k, Hk = M.H * k;
     if (dock.dataset.pose === this.state.hdrPose &&
         Math.abs((parseFloat(E.hdrTimeHalf.style.width) || 0) - Wk) < 0.5) return;   // already this pose+size — no write, no RO echo
     dock.dataset.pose = this.state.hdrPose;
-    dock.style.height = Hk + 'px';
-    if (E.hdrFoldWrap) E.hdrFoldWrap.style.display = closed ? 'none' : '';   // the folded leaf lives inside the clamshell
-    for (const el of [E.hdrDateHalf, E.hdrTimeHalf]) { el.style.width = Wk + 'px'; el.style.height = Hk + 'px'; }
-    if (E.hdrDate) this.sizeFaceCanvas('hdrDate', E.hdrDate, E.hdrDateHalf, k, 7.0175);
-    if (E.hdrTime) this.sizeFaceCanvas('hdrTime', E.hdrTime, E.hdrTimeHalf, k, 7.0175);
+    dock.style.width = (closed ? Wk : 2 * Wk) + 'px';
+    dock.style.height = (closed ? 2 * Hk : Hk) + 'px';
+    dock.style.transform = ''; dock.style.zIndex = '';
+    dock.style.cursor = closed ? 'pointer' : '';
+    const dh = E.hdrDateHalf, th = E.hdrTimeHalf, wrap = E.hdrFoldWrap;
+    for (const el of [dh, th]) { el.style.width = Wk + 'px'; el.style.height = Hk + 'px'; }
+    if (wrap) { wrap.style.display = ''; wrap.style.transform = ''; }
+    if (closed) {
+      // Desk pose: date directly above time, left edges shared — the entry stage's own layout.
+      dh.style.left = '0px'; dh.style.top = '0px'; dh.style.transform = '';            // stacked mounting: no flip
+      th.style.left = '0px'; th.style.top = Hk + 'px';
+      if (this.faces.hdrDate) this.faces.hdrDate.setInverted(false);                   // stacked LUT
+    } else {
+      // Flat line: date left of time, the board's 180° mounting flip on, hinge on the seam.
+      dh.style.left = '0px'; dh.style.top = '0px'; dh.style.transform = 'rotate(180deg)';
+      th.style.left = Wk + 'px'; th.style.top = '0px';
+      if (this.faces.hdrDate) this.faces.hdrDate.setInverted(true);                    // flat LUT
+    }
+    if (E.hdrDate) this.sizeFaceCanvas('hdrDate', E.hdrDate, dh, k, 7.0175);
+    if (E.hdrTime) this.sizeFaceCanvas('hdrTime', E.hdrTime, th, k, 7.0175);
     if (E.hdrLink) {
       const L = E.hdrLink;
-      // The plate rides the seam: between the boards when open, on the closed edge when folded shut.
-      L.style.left = ((closed ? 0 : Wk) - 12 * k) + 'px'; L.style.top = '0px';
-      L.style.width = (24 * k) + 'px'; L.style.height = (12 * k) + 'px'; L.style.borderRadius = (6 * k) + 'px';
       const pd = 3.2 * k, bw = 1;   // pins scale with the bar (no px floor) — matches the display face
-      const pinEl = (el, cx) => { if (!el) return; el.style.left = (cx - bw - pd / 2) + 'px'; el.style.top = (6 * k - bw - pd / 2) + 'px'; el.style.width = pd + 'px'; el.style.height = pd + 'px'; };
-      pinEl(E.hdrPinA, 6 * k); pinEl(E.hdrPinB, 18 * k);
+      const pinEl = (el, cx, cy) => { if (!el) return; el.style.left = (cx - bw - pd / 2) + 'px'; el.style.top = (cy - bw - pd / 2) + 'px'; el.style.width = pd + 'px'; el.style.height = pd + 'px'; };
+      if (closed) {
+        // Vertical plate straddling the row seam at the shared left edge — exactly the entry's.
+        L.style.left = '0px'; L.style.top = (Hk - 12 * k) + 'px';
+        L.style.width = (12 * k) + 'px'; L.style.height = (24 * k) + 'px'; L.style.borderRadius = (6 * k) + 'px';
+        pinEl(E.hdrPinA, 6 * k, 6 * k); pinEl(E.hdrPinB, 6 * k, 18 * k);
+      } else {
+        // Horizontal plate on the mid-line seam.
+        L.style.left = (Wk - 12 * k) + 'px'; L.style.top = '0px';
+        L.style.width = (24 * k) + 'px'; L.style.height = (12 * k) + 'px'; L.style.borderRadius = (6 * k) + 'px';
+        pinEl(E.hdrPinA, 6 * k, 6 * k); pinEl(E.hdrPinB, 18 * k, 6 * k);
+      }
     }
   }
 
@@ -2370,8 +2436,8 @@ class Component extends DcLite {
       // The glyph (a hinged pair of leaves) is static SVG markup: dc-lite bindings must stay on
       // HTML-namespace attributes — an SVG-attribute binding kills the template compile downstream.
       hdrDockTitle: st.hdrPose === 'closed' ? 'Closed clock — click to unfold' : '',
-      // perspective gives the page-turn fold its depth; harmless at rest (no 3D transform applied).
-      hdrDockStyle: 'position:relative;height:46px;display:flex;perspective:900px' + (st.hdrPose === 'closed' ? ';cursor:pointer' : ''),
+      // (dock layout style is STATIC markup: a bound style attr would rewrite on every render and
+      // clobber sizeHdrBar's inline width/transform writes — cursor is set by sizeHdrBar instead)
       onHdrFold: () => this.foldHdrClock(st.hdrPose !== 'closed'),
       onHdrDockClick: () => { if (this.state.hdrPose === 'closed') this.foldHdrClock(false); },
       onEntryClick: () => this.beginFold(),
