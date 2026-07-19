@@ -1194,15 +1194,17 @@ class Component extends DcLite {
     }));
   }
 
-  // Closing the docked clock IS closing the hinge, and it is the ENTRY FOLD RUN BACKWARDS: the
-  // same two 90° stages beginFold performs, reversed, with the LUT switch at the crossing. The
-  // leaf first rises off the line to the stacked pose (the pose the app opened with), then
-  // continues down BEHIND the time board (z-under — the running clock is never occluded), and the
-  // clamshell settles as a one-board bar, still ticking (a physically closed Mk IV keeps showing
-  // time on the board that faces you; the firmware has no fold sensor). Reopen is the reverse.
-  // Rotation rides refHdrFoldWrap (fold pivots the seam) around the date half's own centre-180°
-  // flip — the entry's nested-rotation rig at header scale. Degrades to an instant pose swap when
-  // animation is unavailable, like every fold in the app.
+  // Closing the docked clock IS closing the hinge, and it is the OPEN RUN BACKWARDS along the
+  // hinge's own 180°: flat (180°) back through the desk pose (90°) to shut (0°) — never past
+  // 180°, no hyperextension. Seen from the front that retrace is a page-turn about the vertical
+  // seam axis (rotateY): the date leaf turns away from the viewer, thins to edge-on exactly at
+  // the desk pose (the LUT switches there, hidden in the edge), and lands back-to-back BEHIND
+  // the time board — whose display stays outward and ticking, never occluded (a physically
+  // closed Mk IV keeps showing time on the board that faces you; the firmware has no fold
+  // sensor). Then board + hinge plate + header slide left into the one-board clamshell. Reopen
+  // is the same page-turn forward. The rotation rides refHdrFoldWrap (the fold pivots the seam;
+  // the board's own 180° flip pivots its centre — two origins, two elements, the entry's
+  // nested-rotation rig). Degrades to an instant pose swap when animation is unavailable.
   async foldHdrClock(toClosed) {
     if (this._hdrFolding) return;
     const pose = toClosed ? 'closed' : 'open';
@@ -1218,14 +1220,14 @@ class Component extends DcLite {
     const linkL = parseFloat(link && link.style.left) || 0;   // seam-riding plate: left = Wk - 12k
     const anims = [];
     const play = (el, kf, opts) => { const a = el.animate(kf, opts); anims.push(a); return a; };
-    const stage = (from, to) => play(wrap, [{ transform: 'rotate(' + from + 'deg)' }, { transform: 'rotate(' + to + 'deg)' }],
+    const stage = (from, to) => play(wrap, [{ transform: 'rotateY(' + from + 'deg)' }, { transform: 'rotateY(' + to + 'deg)' }],
       { duration: 340, easing: ease, fill: 'forwards' });
     try {
       if (toClosed) {
-        // Stage 1 — flat -> stacked: the leaf rises to vertical (the entry pose, revisited).
+        // Flat (180° open) -> desk pose (90°): the leaf turns away, thinning toward edge-on.
         await this.settle(stage(0, -90), 360);
-        if (face()) face().setInverted(false);                 // the hinge switch, at the crossing
-        // Stage 2 — stacked -> shut: the leaf descends behind the time board (z-under).
+        if (face()) face().setInverted(false);                 // the hinge switch, hidden in the edge
+        // Desk pose -> shut (0°): the leaf completes the turn and lies back-to-back behind the face.
         await this.settle(stage(-90, -180), 360);
         // Settle: the empty leaf slot closes — board, hinge plate and header slide left together.
         wrap.style.display = 'none';
@@ -1235,11 +1237,11 @@ class Component extends DcLite {
           { duration: 230, easing: 'ease-out', fill: 'forwards' });
         await this.sleep(240);
       } else {
-        // Reverse: make room first (board slides right), then the leaf swings up from behind the
-        // face and lays down into the line — the entry fold itself, at header scale.
+        // Reverse: make room first (board slides right), then the page-turn forward — the leaf
+        // unfurls from behind the face, edge-on at the desk pose, flat into the line.
         if (face()) face().setInverted(false);
         wrap.style.display = '';
-        const hold = play(wrap, [{ transform: 'rotate(-180deg)' }, { transform: 'rotate(-180deg)' }],
+        const hold = play(wrap, [{ transform: 'rotateY(-180deg)' }, { transform: 'rotateY(-180deg)' }],
           { duration: 1, fill: 'forwards' });
         play(th, [{ transform: 'translateX(-' + Wk + 'px)' }, { transform: 'translateX(0px)' }],
           { duration: 230, easing: 'ease-out', fill: 'forwards' });
@@ -2368,7 +2370,8 @@ class Component extends DcLite {
       // The glyph (a hinged pair of leaves) is static SVG markup: dc-lite bindings must stay on
       // HTML-namespace attributes — an SVG-attribute binding kills the template compile downstream.
       hdrDockTitle: st.hdrPose === 'closed' ? 'Closed clock — click to unfold' : '',
-      hdrDockStyle: 'position:relative;height:46px;display:flex' + (st.hdrPose === 'closed' ? ';cursor:pointer' : ''),
+      // perspective gives the page-turn fold its depth; harmless at rest (no 3D transform applied).
+      hdrDockStyle: 'position:relative;height:46px;display:flex;perspective:900px' + (st.hdrPose === 'closed' ? ';cursor:pointer' : ''),
       onHdrFold: () => this.foldHdrClock(st.hdrPose !== 'closed'),
       onHdrDockClick: () => { if (this.state.hdrPose === 'closed') this.foldHdrClock(false); },
       onEntryClick: () => this.beginFold(),
