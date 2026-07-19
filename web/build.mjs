@@ -96,6 +96,13 @@ html = html.replace(scriptRe, () => `<script>\n${safeBundle}\n</script>`);
 const opens = (html.match(/<script[ >]/g) || []).length, closes = (html.match(/<\/script/g) || []).length;
 if (opens !== closes) throw new Error(`inline <script> truncation: ${opens} <script> vs ${closes} </script> — a </script> leaked into the bundle`);
 
+// 2c. Bake the build stamp into the page itself. A long-lived tab survives a pccd overlay
+//     refresh (files swap on disk under it) and keeps running stale JS with no way to know;
+//     the app compares this baked stamp against the SERVED build-info.json and offers a
+//     reload when they differ. Dev serving of raw web/ has no stamp → the check stays off.
+const BUILT_AT = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+html = html.replace(/<meta charset="utf-8">/i, (m) => m + `\n<script>window.__PCC_BUILT=${JSON.stringify(BUILT_AT)};</script>`);
+
 // 3. Emit docs/ — the deployable tree.
 rmSync(docs, { recursive: true, force: true });
 mkdirSync(docs, { recursive: true });
@@ -131,7 +138,7 @@ const buildInfo = {
   dateVersion: ((verD.match(/VERSION_STRING\s+"([^"]+)"/) || [])[1] || '').trim(),  // date board versions on its own train (0.0.1→0.0.2)
   fwSha: sh('git rev-parse HEAD', fwDir),
   fwBranch: sh('git config -f .gitmodules submodule.web/emu/firmware.branch', resolve(web, '..')) || 'rollup',
-  builtAt: new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC',
+  builtAt: BUILT_AT,   // must equal the page's baked window.__PCC_BUILT — the stale-tab check compares them
   emcc: hasEmcc ? ((sh('emcc --version').match(/\d+\.\d+\.\d+(?:-\w+)?/) || [])[0] || '') : '',
   tzrules: existsSync(resolve(web, 'emu', 'tzrules.bin')) ? statSync(resolve(web, 'emu', 'tzrules.bin')).size : 0,
   tzmap: existsSync(resolve(web, 'emu', 'tzmap.bin')) ? statSync(resolve(web, 'emu', 'tzmap.bin')).size : 0,

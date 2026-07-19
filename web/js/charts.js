@@ -188,6 +188,13 @@ export function drawSky(canvas, tok, data, opts) {
     else { ctx.globalAlpha = 0.75; ctx.strokeRect(x - size / 2, y - size / 2, size, size); ctx.globalAlpha = 1; }
     if (opts.labels) { ctx.fillStyle = tok.txt3; ctx.fillText(s.key, x + size / 2 + 3, y + 3); }
   }
+
+  // Connected recording depth (opts.accNote): the trail buffer is younger than the TRAIL
+  // window — state the recorded depth so a short ribbon reads as honest, not broken.
+  if (opts.accNote) {
+    ctx.font = F9; ctx.fillStyle = tok.txt3; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(opts.accNote, 8, h - 8);
+  }
 }
 
 // ---------------------------------------------------------------- generic XY frame

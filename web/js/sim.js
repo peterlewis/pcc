@@ -472,7 +472,16 @@ export function createSession(opts = {}) {
       return { trails, gtrails, step };
     },
     setScenario(s) { S.scenario = s; },
-    connect() { S.connected = true; doPreroll(); },
+    connect() {
+      S.connected = true;
+      // Each simulation is its own session: recorder counters restart, and Started
+      // reflects THIS run (minus the preroll the charts are seeded with) — a stopped
+      // and restarted sim must not inherit the last run's passes or page-load epoch.
+      S.t0 = Math.floor(Date.now() / 1000) - preroll;
+      S.passes = 0; S.obsCount = 0; S.peakEl = 0;
+      S.bins.clear(); risenPrev.clear();
+      doPreroll();
+    },
     disconnect() {
       S.connected = false; S.fix.valid = false; S.fix.type = 0; S.fix.sats = 0; S.sats = [];
       // Clear every history buffer the sim populated, so LEAVING a simulation doesn't leave ghost

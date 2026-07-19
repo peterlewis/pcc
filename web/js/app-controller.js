@@ -57,6 +57,7 @@ class Component extends DcLite {
     cuckoo: localStorage.getItem('pccweb.cuckoo') || 'off',
     tzOverride: 'auto', matrixFreq: '1.6',
     skyHeatmap: false, skyHorizon: false, skyTrails: true, skyLabels: true,
+    appStale: false,   // the served app moved under this tab (pccd overlay refresh / Pages deploy) — offer a reload
     // SPAN (s): how much ribbon each sat drags in the sky/map/globe views. With 12 h of
     // restored history a full 90 min per sat reads as clutter, so default mid (45 min); 5400 = MAX
     // (the fade horizon / the full trail buffer — pre-control behaviour, bit-for-bit).
@@ -106,7 +107,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=98'), import('./charts.js?v=106'), import('./realdev.js?v=114'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=99'), import('./charts.js?v=107'), import('./realdev.js?v=115'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -1812,6 +1813,11 @@ class Component extends DcLite {
     // reload (or an accidental unplug) doesn't erase hours of collected sky. Kind-separated buckets.
     this._skySaveTick = (this._skySaveTick || 0) + 1;
     if (this._skySaveTick >= 30 && this.session && this.session.S.connected) { this._skySaveTick = 0; this.saveSkyHistory(); }
+    // Stale-tab watch: every 10 min, compare the page's baked build stamp against the SERVED
+    // build-info.json. A pccd overlay refresh (or Pages deploy behind the daemon) swaps the files
+    // on disk while this tab keeps running the old JS — this is the only way the tab finds out.
+    this._appStaleTick = (this._appStaleTick || 0) + 1;
+    if (this._appStaleTick >= 600) { this._appStaleTick = 0; this.checkAppStale(); }
     this.vbat = 4.021 + 0.013 * Math.sin(Date.now() / 60000);
     if (this.state.diag === 'satview') this.allFaces((f) => f.setModeCtx({ gps: String(this.session.S.fix.sats) }));
     if (this.state.diag === 'vbat') this.allFaces((f) => f.setModeCtx({ vbat: this.vbat }));
@@ -1880,11 +1886,25 @@ class Component extends DcLite {
       // long line trails) live on MAP + GLOBE, not here.
       const heatLong = !!comp;
       const lineAge = heatLong ? Math.min(cut, 2700) : cut;
+      // Connected honesty: a real clock's trail reaches back only to this tab's connect (nothing
+      // models a real sky, and the daemon archive has no per-sat record yet). When the recorded
+      // depth is younger than the TRAIL window, say so on the plot instead of looking broken.
+      let accNote = '';
+      if (!comp && S.real && st.skyTrails) {
+        let oldest = nowS;
+        for (const tr of S.trails.values()) if (tr.length && tr[0].t < oldest) oldest = tr[0].t;
+        if (nowS - oldest < cut * 0.95) {
+          const m = Math.max(0, Math.round((nowS - oldest) / 60));
+          const rec = m < 60 ? m + ' MIN' : (m / 60).toFixed(m % 60 ? 1 : 0) + ' H';
+          const win = cut >= 3600 ? (cut / 3600) + ' H' : Math.round(cut / 60) + ' MIN';
+          accNote = 'TRAIL RECORDS LIVE · ' + rec + ' OF ' + win + ' SO FAR';
+        }
+      }
       return CH.drawSky(el, T, {
         sats: S.sats, trails, now: nowS,
         sun: this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon),
         moon: this.SIM.moonPos(Date.now(), S.obs.lat, S.obs.lon),
-      }, { heatmap: st.skyHeatmap, horizon: st.skyHorizon, trails: st.skyTrails, labels: st.skyLabels, trailAge: cut, heatLong, lineAge });
+      }, { heatmap: st.skyHeatmap, horizon: st.skyHorizon, trails: st.skyTrails, labels: st.skyLabels, trailAge: cut, heatLong, lineAge, accNote });
     }
     if (name === 'cn0elev') return CH.drawCn0Elev(el, T, S.sats, st.sigMedian);
     if (name === 'cn0time') {
@@ -1894,7 +1914,7 @@ class Component extends DcLite {
     }
     if (name === 'posScatter') return CH.drawPosScatter(el, T, this._pos.pts, this._pos, nowS);
     if (name === 'dop') return CH.drawDop(el, T, S.dopHist, st.posWindow, nowS);
-    if (name === 'cont') return CH.drawContinuity(el, T, S.fixHist, 1800, nowS, S.ttff, S.t0);
+    if (name === 'cont') return CH.drawContinuity(el, T, S.fixHist, st.posWindow, nowS, S.ttff, S.t0);
     // Standby draws the ABSENT state, never a leftover buffer — same rule (and reason) as rvTiming's
     // `standby` gate. adevData() already gates itself on appMode; these three read S.pps directly.
     // REVIEW is the one legitimate "data with no live state": reconstructReview rebuilds S.pps from the
@@ -2707,6 +2727,7 @@ class Component extends DcLite {
       ageLabel: S && S.fix.valid && S.fixAgeT ? ((Date.now() - S.fixAgeT) / 1000).toFixed(1) + ' s' : '—',
       ssThemeDark: this.seg(st.theme === 'dark', true), ssThemeLight: this.seg(st.theme === 'light', false),
       onThemeDark: () => this.setTheme('dark'), onThemeLight: () => this.setTheme('light'),
+      appStaleOn: st.appStale, onAppReload: () => { try { location.reload(); } catch (e) {} },
       ssScenLock: this.seg(st.scenario === 'locked', true),
       ssScenAcq: this.seg(st.scenario === 'acquiring', false),
       ssScenNone: this.seg(st.scenario === 'nofix', false),
@@ -3921,6 +3942,20 @@ class Component extends DcLite {
         }).catch(() => {});
       }, 700);
     });
+  }
+
+  // Stale-tab check: the page bakes its build stamp (window.__PCC_BUILT, injected by build.mjs) and
+  // the SERVED build-info.json carries the current one. When they differ, the files under this tab
+  // have moved (pccd REFRESH APP, or a Pages deploy) and the running JS is old — surface the header
+  // RELOAD chip. Dev serving of raw web/ has no baked stamp, so the check stays off there. One-way
+  // latch: once stale, always stale until the reload actually happens.
+  checkAppStale() {
+    if (!window.__PCC_BUILT || this.state.appStale) return;
+    fetch('build-info.json?ts=' + Date.now(), { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((bi) => {
+        if (bi && bi.builtAt && bi.builtAt !== window.__PCC_BUILT) this.setState({ appStale: true });
+      }).catch(() => {});   // offline / file:// — nothing to compare, stay quiet
   }
 
   // Identify the served web app by its manifest hash (exactly what pccd's refresh compares) and say whether

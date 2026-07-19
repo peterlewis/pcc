@@ -128,6 +128,9 @@
           </div>
         </sc-if>
       </div>
+      <sc-if value="{{appStaleOn}}" hint-placeholder-val="{{false}}">
+        <button onClick="{{onAppReload}}" title="The served app was updated under this tab. Reload to run the current build." style="align-self:center;margin-right:12px;font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.08em;color:var(--amber,#e8a64a);background:transparent;border:1px solid var(--amber,#e8a64a);border-radius:var(--r-1);padding:6px 10px;cursor:pointer">APP UPDATED — RELOAD</button>
+      </sc-if>
       <button onClick="{{onToggleDrawer}}" title="Serial monitor" style="{{drawerBtnStyle}}"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 3.5L5 6 2 8.5M6.5 9h4"></path></svg>MONITOR</button>
       <div style="display:flex;align-items:center;padding:0 16px;border-left:1px solid var(--line-soft)">
         <div style="display:flex;border:1px solid var(--line)">
@@ -973,7 +976,7 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 </div>
                 <span style="flex:1"></span>
                 <div style="display:flex;align-items:center;gap:10px;transition:opacity .15s;{{spanDim}}">
-                  <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)" title="How far back trails and the heatmap reach">SPAN</span>
+                  <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)" title="How far back each satellite's trail reaches. Also sets trail depth on GLOBE and MAP. Connected clocks accumulate trail live from the moment this tab connects.">TRAIL</span>
                   <div style="display:flex;border:1px solid var(--line)">
                     <button onClick="{{oTrail45}}" style="{{ssTrail45}}">45M</button>
                     <button onClick="{{oTrail1h}}" style="{{ssTrail1h}}">1H</button>
@@ -1679,6 +1682,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=259"></script>
+<script type="module" src="js/app-controller.js?v=260"></script>
 </body>
 </html>

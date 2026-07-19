@@ -72,6 +72,7 @@ export function createRealDevice(session) {
 
     const gtrailLast = new Map(); // sat.key → last wall-clock ms a ground-trail point was appended
     const trailLast = new Map();  // sat.key → last wall-clock ms a polar az/el trail point was appended
+    const risenReal = new Set();  // sat.key currently above the horizon — rise edges count passes
     let ingesting = false;        // are we CONSUMING this transport? (set on connect, cleared on every leave)
     let obsSeeded = false;        // adopt the device's own fix as the observer once per connection
     let obsAtConnect = null;      // pre-connect observer, restored on disconnect
@@ -117,6 +118,10 @@ export function createRealDevice(session) {
         S.fixAgeT = 0;   // freshness stamp is per-session — never bleed a prior fix/sim value
         lastRxT = 0;     // RX-staleness watchdog resets with the session
         lastHistT = 0; lastCn0T = 0;
+        // The departed device's session statistics leave with it (a later sim starts honest).
+        S.passes = 0; S.obsCount = 0; S.peakEl = 0;
+        if (S.bins && S.bins.clear) S.bins.clear();
+        risenReal.clear();
         // Restore the observer we adopted from the device fix back to whatever it
         // was before connecting, so the sim resumes from the honest default.
         if (obsAtConnect) { S.obs.lat = obsAtConnect.lat; S.obs.lon = obsAtConnect.lon; S.obsUserSet = !!obsAtConnect.userSet; obsAtConnect = null; }
@@ -201,6 +206,20 @@ export function createRealDevice(session) {
                 ch.push({ t: tSec, v: cn0 });
                 if (ch.length > 1800) ch.shift();
             }
+        }
+        // SESSION statistics — the sim.tick recorder, mirrored at the same 1 Hz gate:
+        // a rise edge counts a pass, peak elevation and 10°×10° coverage bins update,
+        // one observation per visible sat per second. Without this the RECORDED PASSES
+        // panel sat at zero on a connected clock while the simulation counted fine.
+        if (sampleCn0) {
+            const vis = out.filter((s) => s.visible);
+            for (const s of vis) {
+                if (!risenReal.has(s.key)) { risenReal.add(s.key); S.passes += 1; }
+                S.peakEl = Math.max(S.peakEl, s.el);
+                S.bins.add(Math.floor(s.az / 10) + ':' + Math.floor(Math.max(0, s.el) / 10));
+            }
+            for (const k of [...risenReal]) if (!vis.find((s) => s.key === k)) risenReal.delete(k);
+            S.obsCount += vis.length;
         }
         if (sampleCn0) lastCn0T = tSec;
         S.sats = out;
@@ -541,6 +560,12 @@ export function createRealDevice(session) {
             if (Array.isArray(S.dopHist)) S.dopHist.length = 0;
             if (Array.isArray(S.fixHist)) S.fixHist.length = 0;
             lastHistT = 0; lastCn0T = 0;
+            // SESSION recorder starts at zero for THIS connection — a prior sim's counts
+            // must never headline a real session — and Started means connect, not page load.
+            S.passes = 0; S.obsCount = 0; S.peakEl = 0;
+            if (S.bins && S.bins.clear) S.bins.clear();
+            risenReal.clear();
+            S.t0 = Math.floor(Date.now() / 1000);
             // Allow one observer seed from the device's first fix; remember the current observer
             // (and whether it was a deliberate user pin) so disconnect() can restore it. Clearing
             // obsUserSet here is essential: without it a manual pin set earlier (e.g. in a prior
