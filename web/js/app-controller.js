@@ -117,6 +117,8 @@ class Component extends DcLite {
         if (JSON.stringify(next) !== JSON.stringify(this.state.bridgeInfo || null)) this.setState({ bridgeInfo: next });
         // First time we see a bridge this session, check GitHub once for a newer pccd (prompts in UPDATES).
         if (next && !this._pccdChecked) { this._pccdChecked = true; setTimeout(() => this.checkPccdUpdate(false), 600); }
+        // ...and, for a web-refresh-capable daemon, compare the served app to the latest on Pages.
+        if (next && next.webrefresh && !this._appChecked) { this._appChecked = true; setTimeout(() => this.checkAppFromPages(), 750); }
         // Keep the archive panels fed: self-healing (a first fetch can race module/bridge readiness)
         // and cheap (fetchArchive caches for 60 s and no-ops without a recorder).
         if (next && next.history) this.fetchArchive();
@@ -3467,6 +3469,31 @@ class Component extends DcLite {
     });
   }
 
+  // Identify the served web app by its manifest hash (exactly what pccd's refresh compares) and say whether
+  // it matches the latest on Pages. GitHub Pages is CORS-open, so the compare runs client-side. Sets
+  // this._appId (the running app's short id) and this._pccdWeb (the green UP TO DATE / amber NEW BUILD line).
+  checkAppFromPages() {
+    if (!(window.crypto && crypto.subtle)) return;   // needs a secure context (localhost / https — both are)
+    const digest12 = async (text) => {
+      const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+      return [...new Uint8Array(b)].slice(0, 6).map((x) => x.toString(16).padStart(2, '0')).join('');
+    };
+    Promise.all([
+      fetch('app-manifest.sha256', { cache: 'no-store' }).then((r) => (r.ok ? r.text() : null)).catch(() => null),
+      fetch('https://peterlewis.github.io/pcc/app-manifest.sha256', { cache: 'no-store' }).then((r) => (r.ok ? r.text() : null)).catch(() => null),
+    ]).then(async ([mineTxt, pagesTxt]) => {
+      if (!mineTxt) return;                          // served app carries no manifest (pre-0.6 build) → show nothing
+      this._appId = await digest12(mineTxt);
+      if (pagesTxt) {
+        const latest = await digest12(pagesTxt);
+        this._pccdWeb = (this._appId === latest)
+          ? { s: 'UP TO DATE — #' + this._appId, c: 'var(--lock)' }
+          : { s: 'NEW BUILD ON PAGES — REFRESH', c: 'var(--acq)' };
+      }
+      this.setState({});
+    }).catch(() => {});
+  }
+
   // Ask pccd to pull the latest web app from Pages (verified) and swap its served overlay — no relaunch,
   // so the bridge stays up. On success the served files changed; reload to load them. Web-only fixes reach
   // the locally-installed daemon this way BETWEEN releases (daemon features still need a real release).
@@ -3518,6 +3545,7 @@ class Component extends DcLite {
       // actually understands pccd:web-refresh (/health webrefresh) — a pre-0.6 daemon hides it, not errors.
       pccdCanWeb: !!(bri && bri.webrefresh && !this._pccdWebBusy),
       pccdWebState: (this._pccdWeb || {}).s || '', pccdWebC: (this._pccdWeb || {}).c || 'var(--txt3)',
+      pccdAppLine: this._appId ? ((bi && bi.builtAt ? bi.builtAt + ' · ' : '') + '#' + this._appId) : '—',
       onPccdWebRefresh: () => this.refreshPccdApp(),
       fwVer: bi ? bi.version + ' — WASM, BUILT FROM SOURCE' + (bi.dateVersion ? ' · DATE BOARD ' + bi.dateVersion.replace(/^Version\s*/i, '').trim() : '') : 'BUILT FROM SOURCE (run build.mjs for provenance)',
       fwSrc: bi ? 'clock4 @ ' + bi.fwSha.slice(0, 7) + ' (' + bi.fwBranch + ')' : 'web/emu/firmware submodule',

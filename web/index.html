@@ -560,7 +560,8 @@
               </sc-if>
               <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">UPDATE NOW: pccd DOWNLOADS AND VERIFIES THE LATEST RELEASE (SHA-256 + SELF-TEST), SWAPS ITSELF, AND RELAUNCHES. THE APP RECONNECTS.</div>
               <sc-if value="{{pccdCanWeb}}">
-              <div style="display:flex;align-items:center;gap:14px;padding:12px;flex-wrap:wrap;border-top:1px solid var(--line)">
+              <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px;border-top:1px solid var(--line)"><span style="font-size:var(--fs-data-sm);color:var(--txt2)">App</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt);text-align:right">{{pccdAppLine}}</span></div>
+              <div style="display:flex;align-items:center;gap:14px;padding:0 12px 12px;flex-wrap:wrap">
                 <button onClick="{{onPccdWebRefresh}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:7px 16px;background:transparent;border:1px solid var(--line2);color:var(--txt);cursor:pointer" style-hover="border-color:var(--txt3)">REFRESH APP FROM PAGES</button>
                 <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.04em;color:{{pccdWebC}}">{{pccdWebState}}</span>
               </div>
@@ -1628,6 +1629,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=241"></script>
+<script type="module" src="js/app-controller.js?v=242"></script>
 </body>
 </html>
