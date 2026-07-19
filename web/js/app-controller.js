@@ -20,6 +20,8 @@ const CONFIG_DEFAULTS = configToState(DEFAULT_CONFIG);
 class Component extends DcLite {
   state = {
     phase: 'boot', entryVisible: true, docked: false, drawerOpen: false, hdrPose: 'open',
+    facePose: (typeof localStorage !== 'undefined' && localStorage.getItem('pccweb.facePose')) || 'flat',
+    fullFace: false,
     section: 'display', theme: 'dark', scenario: 'locked',
     mode: 'time',
     // Clock-behaviour defaults (dateFormat, weekdayFmt, timeRow, modesEnabled, astroFmt, colon,
@@ -157,6 +159,7 @@ class Component extends DcLite {
     this.onKey = (e) => {
       const t0 = e.target, tag0 = t0 && t0.tagName;
       const typing = tag0 === 'INPUT' || tag0 === 'TEXTAREA' || tag0 === 'SELECT' || (t0 && t0.isContentEditable);
+      if (e.key === 'Escape' && this.state.fullFace) { e.preventDefault(); this.exitFullFace(); return; }
       if ((e.key === 'Enter' || e.key === ' ') && this.state.phase === 'entry') { e.preventDefault(); this.beginFold(); return; }
       // 1..9,0 jump to nav item 1..10 (0 -> item 10 / Export), in the app only and
       // never while typing in a field.
@@ -1311,7 +1314,9 @@ class Component extends DcLite {
     // Width comes from the DOM parent chain, NOT the dispWrap ref — on remount the canvas
     // ref fires before dispWrap re-attaches, but the canvas's own parent holders are always
     // in the DOM with a real width. This makes sizing independent of ref-callback order.
-    const wrap = E.dispDateHalf && E.dispDateHalf.parentElement && E.dispDateHalf.parentElement.parentElement;
+    // Chain: dateHalf > foldWrap (0×0 rotation anchor) > dispBar (absolute stage) > dispWrap.
+    const wrap = E.dispDateHalf && E.dispDateHalf.parentElement && E.dispDateHalf.parentElement.parentElement &&
+      E.dispDateHalf.parentElement.parentElement.parentElement;
     if (!E.dispDateHalf || !E.dispTimeHalf || !wrap || wrap.clientWidth < 2) {
       if ((retry || 0) < 30 && this.state.section === 'display') {
         cancelAnimationFrame(this._dispRAF);
@@ -1320,37 +1325,176 @@ class Component extends DcLite {
       return;
     }
     const M = this.MM;
+    if (this._faceFolding) return;          // a pose fold is choreographing the bar — don't fight it
     const avail = Math.max(120, wrap.clientWidth - 4);
-    const k = avail / (2 * M.W); // fill the available width; on phones this drops below 1 so the wide bar fits
+    const kFlat = avail / (2 * M.W); // fill the available width; on phones this drops below 1 so the wide bar fits
+    // AUTO-POSE: on narrow layouts the 20-digit line goes sub-legible while the desk pose is twice
+    // the digit height in the same width — prefer STACKED there unless the user chose explicitly.
+    if (!this._facePoseUser && this.state.section === 'display') {
+      const wantStack = M.H * kFlat < 56;
+      const cur = this.state.facePose;
+      if (wantStack && cur !== 'stacked') { this.setState({ facePose: 'stacked' }); return; }
+      if (!wantStack && cur === 'stacked' && !((typeof localStorage !== 'undefined') && localStorage.getItem('pccweb.facePose'))) { this.setState({ facePose: 'flat' }); return; }
+    }
+    const stacked = this.state.facePose === 'stacked';
+    // Desk-pose digits earn a bump over the line (that is the pose's point) but stay bounded so a
+    // desktop stack doesn't balloon: min(full width, 1.4× the flat scale).
+    const k = stacked ? Math.min(avail / M.W, 1.4 * kFlat) : kFlat;
     const Wk = M.W * k, Hk = M.H * k;
-    for (const el of [E.dispDateHalf, E.dispTimeHalf]) { el.style.width = Wk + 'px'; el.style.height = Hk + 'px'; }
-    // No column-gap: the two halves butt flush so their 1px borders meet as a single seam —
-    // exactly like the entry/fold face. Adding a gap here made the docked face 1px wider at
-    // the seam than the freshly-opened one ("extra pixel once put into place").
-    if (E.dispBar) E.dispBar.style.columnGap = '0px';
-    if (E.dispDate) this.sizeFaceCanvas('dispDate', E.dispDate, E.dispDateHalf, k, 7.0175);
-    if (E.dispTime) this.sizeFaceCanvas('dispTime', E.dispTime, E.dispTimeHalf, k, 7.0175);
+    const bar = E.dispBar, dh = E.dispDateHalf, th = E.dispTimeHalf, fw = E.dispFoldWrap;
+    for (const el of [dh, th]) { el.style.width = Wk + 'px'; el.style.height = Hk + 'px'; }
+    if (bar) { bar.style.width = (stacked ? Wk : 2 * Wk) + 'px'; bar.style.height = (stacked ? 2 * Hk : Hk) + 'px'; bar.style.transform = ''; }
+    if (fw) { fw.style.display = ''; fw.style.transform = ''; }
+    if (stacked) {
+      // The desk pose: date directly above time, shared left edge — the entry stage's own layout.
+      dh.style.left = '0px'; dh.style.top = '0px'; dh.style.transform = '';
+      th.style.left = '0px'; th.style.top = Hk + 'px';
+      if (this.faces.dispDate) this.faces.dispDate.setInverted(false);
+    } else {
+      dh.style.left = '0px'; dh.style.top = '0px'; dh.style.transform = 'rotate(180deg)';
+      th.style.left = Wk + 'px'; th.style.top = '0px';
+      if (this.faces.dispDate) this.faces.dispDate.setInverted(true);
+    }
+    if (E.dispDate) this.sizeFaceCanvas('dispDate', E.dispDate, dh, k, 7.0175);
+    if (E.dispTime) this.sizeFaceCanvas('dispTime', E.dispTime, th, k, 7.0175);
+    if (E.dispShadow) {
+      // The contact pool under the object, whatever its pose — the entry's floorShadow, kept.
+      const pw = (stacked ? Wk : 2 * Wk) + 16;
+      E.dispShadow.style.width = pw + 'px';
+      E.dispShadow.style.left = 'calc(50% - ' + (pw / 2) + 'px)';
+    }
     // Reveal only now the bar is at its computed size. The markup ships it visibility:hidden
     // at the 620px MAX default; showing it before this line is what let it flash "far too
     // large then snap back" on any layout whose computed width is under that default.
     if (E.dispBar) E.dispBar.style.visibility = 'visible';
     if (E.dispLink) {
       const L = E.dispLink;
-      L.style.left = (Wk - 12 * k) + 'px'; // centre the hinge on the flush seam (border-box boundary at Wk)
-      L.style.top = '0px';
-      L.style.width = (24 * k) + 'px';
-      L.style.height = (12 * k) + 'px';
-      L.style.borderRadius = (6 * k) + 'px';
       const pd = 3.2 * k;   // pins scale with the bar (no px floor) — a min clamp made them chunky when small
       // dispLink has a 1px border; its abs-positioned pins anchor to the CONTENT box
       // (inside that border), which shoves the pair 1px off the seam — the left dot ends
       // up closer to the hinge than the right. Subtract the border so the two dots sit
       // exactly symmetric about the seam (and centred vertically).
       const bw = 1;
-      const pinEl = (el, cx) => { if (!el) return; el.style.left = (cx - bw - pd / 2) + 'px'; el.style.top = (6 * k - bw - pd / 2) + 'px'; el.style.width = pd + 'px'; el.style.height = pd + 'px'; };
-      pinEl(E.dispPinA, 6 * k);
-      pinEl(E.dispPinB, 18 * k);
+      const pinEl = (el, cx, cy) => { if (!el) return; el.style.left = (cx - bw - pd / 2) + 'px'; el.style.top = (cy - bw - pd / 2) + 'px'; el.style.width = pd + 'px'; el.style.height = pd + 'px'; };
+      if (stacked) {
+        // Vertical plate straddling the row seam at the shared left edge — the entry's own hinge.
+        L.style.left = '0px'; L.style.top = (Hk - 12 * k) + 'px';
+        L.style.width = (12 * k) + 'px'; L.style.height = (24 * k) + 'px'; L.style.borderRadius = (6 * k) + 'px';
+        pinEl(E.dispPinA, 6 * k, 6 * k); pinEl(E.dispPinB, 6 * k, 18 * k);
+      } else {
+        L.style.left = (Wk - 12 * k) + 'px'; // centre the hinge on the flush seam (border-box boundary at Wk)
+        L.style.top = '0px';
+        L.style.width = (24 * k) + 'px'; L.style.height = (12 * k) + 'px'; L.style.borderRadius = (6 * k) + 'px';
+        pinEl(E.dispPinA, 6 * k, 6 * k); pinEl(E.dispPinB, 18 * k, 6 * k);
+      }
     }
+  }
+
+  // The FACE hero's pose fold — the same four beats as the header's, at hero scale: lift out of
+  // the slot into the room, the in-plane cartwheel about the seam (LUT switch at the top of the
+  // arc, the leaf's 180° cancelling the mounting flip), then settle back into the slot in the new
+  // pose. sizeDispBar owns both poses' statics and lands the result.
+  async foldFacePose(toStacked) {
+    if (this._faceFolding) return;
+    const pose = toStacked ? 'stacked' : 'flat';
+    if (this.state.facePose === pose) return;
+    const E = this.els, M = this.MM;
+    const wrap = E.dispFoldWrap, dh = E.dispDateHalf, th = E.dispTimeHalf, bar = E.dispBar;
+    this._facePoseUser = true;
+    try { localStorage.setItem('pccweb.facePose', pose); } catch (e) {}
+    if (!this.canAnimate() || !wrap || !dh || !th || !bar || this.state.section !== 'display') {
+      this.setState({ facePose: pose }); this.sizeDispBar(); return;
+    }
+    this._faceFolding = true;
+    const ease = 'cubic-bezier(.5,.03,.16,1)';
+    const face = () => this.faces.dispDate;
+    const anims = [];
+    const play = (el, kf, opts) => { const a = el.animate(kf, opts); anims.push(a); return a; };
+    try {
+      const Wk = parseFloat(dh.style.width) || 0, Hk = parseFloat(dh.style.height) || 0;
+      bar.style.zIndex = '60'; bar.style.transformOrigin = '0 0';
+      wrap.style.transformOrigin = Wk + 'px ' + (Hk / 2) + 'px';
+      if (toStacked) {
+        const D = Math.max(60, Wk + 24 - (bar.getBoundingClientRect().top - 60));   // clearance above the seam for the rising leaf
+        await this.settle(play(bar, [{ transform: 'translateY(0px)' }, { transform: 'translateY(' + D + 'px)' }],
+          { duration: 260, easing: 'ease-out', fill: 'forwards' }), 280);
+        await this.settle(play(wrap, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(90deg)' }],
+          { duration: 340, easing: ease, fill: 'forwards' }), 360);
+        if (face()) face().setInverted(false);
+        await this.settle(play(wrap, [{ transform: 'rotate(90deg)' }, { transform: 'translateY(' + (-Hk) + 'px) rotate(180deg)' }],
+          { duration: 340, easing: ease, fill: 'forwards' }), 360);
+        // settle home: the stacked assembly (top-left at bar-local (Wk,−Hk)) glides to the bar origin.
+        await this.settle(play(bar, [{ transform: 'translateY(' + D + 'px)' },
+                                     { transform: 'translate(' + (-Wk) + 'px,' + Hk + 'px)' }],
+          { duration: 300, easing: ease, fill: 'forwards' }), 320);
+      } else {
+        // Reverse: out into the room, unfold, glide home flat.
+        const D = Wk + 24;
+        if (face()) face().setInverted(false);
+        const holdW = play(wrap, [{ transform: 'translateY(' + (-Hk) + 'px) rotate(180deg)' },
+                                  { transform: 'translateY(' + (-Hk) + 'px) rotate(180deg)' }], { duration: 1, fill: 'forwards' });
+        // pre-swap: lay the bar out FLAT-statics but hold the wrap folded so the paint matches the
+        // stacked rest, then lift out. (Statics swap batched in one tick — no flash.)
+        dh.style.transform = 'rotate(180deg)'; th.style.left = Wk + 'px'; th.style.top = '0px';
+        bar.style.width = (2 * Wk) + 'px'; bar.style.height = Hk + 'px';
+        const holdB = play(bar, [{ transform: 'translate(' + (-Wk) + 'px,' + Hk + 'px)' },
+                                 { transform: 'translate(' + (-Wk) + 'px,' + Hk + 'px)' }], { duration: 1, fill: 'forwards' });
+        await this.raf2();
+        holdB.cancel();
+        await this.settle(play(bar, [{ transform: 'translate(' + (-Wk) + 'px,' + Hk + 'px)' }, { transform: 'translateY(' + D + 'px)' }],
+          { duration: 300, easing: ease, fill: 'forwards' }), 320);
+        holdW.cancel();
+        await this.settle(play(wrap, [{ transform: 'translateY(' + (-Hk) + 'px) rotate(180deg)' }, { transform: 'rotate(90deg)' }],
+          { duration: 340, easing: ease, fill: 'forwards' }), 360);
+        if (face()) face().setInverted(true);
+        await this.settle(play(wrap, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(0deg)' }],
+          { duration: 340, easing: ease, fill: 'forwards' }), 360);
+        await this.settle(play(bar, [{ transform: 'translateY(' + D + 'px)' }, { transform: 'translateY(0px)' }],
+          { duration: 280, easing: 'ease-out', fill: 'forwards' }), 300);
+      }
+    } finally {
+      this._faceFolding = false;
+      this.setState({ facePose: pose });
+      this.sizeDispBar();
+      for (const a of anims) { try { a.cancel(); } catch (e) {} }
+      bar.style.zIndex = '';
+      this._faceFolding = false;
+    }
+  }
+
+  // FULL FACE — the honest fullscreen timepiece. The SAME hero bar (one renderer) flies to fill
+  // the dimmed room; the caption names the state you are looking at (Standby / Connected /
+  // Simulation). Click anywhere or Esc reverses the flight. Reopens the deleted fullscreen ONLY
+  // in this form: no second clock, no unlabelled time.
+  enterFullFace() {
+    if (this.state.fullFace || this.state.section !== 'display') return;
+    const bar = this.els.dispBar; if (!bar) return;
+    const r = bar.getBoundingClientRect(); if (!r.width) return;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const s = Math.min(0.94 * vw / r.width, 0.62 * vh / r.height);
+    const dx = vw / 2 - (r.left + r.width / 2), dy = vh * 0.45 - (r.top + r.height / 2);
+    this._ff = { dx, dy, s };
+    bar.style.zIndex = '95'; bar.style.transformOrigin = '50% 50%';
+    if (this.els.main) { this._ffScroll = this.els.main.scrollTop; this.els.main.style.overflow = 'hidden'; }
+    this.setState({ fullFace: true });
+    const kf = [{ transform: 'none' }, { transform: 'translate(' + dx + 'px,' + dy + 'px) scale(' + s + ')' }];
+    if (this.canAnimate()) this._ffAnim = bar.animate(kf, { duration: 420, easing: 'cubic-bezier(.55,.02,.14,1)', fill: 'forwards' });
+    else bar.style.transform = kf[1].transform;
+  }
+  exitFullFace() {
+    if (!this.state.fullFace) return;
+    const bar = this.els.dispBar, p = this._ff;
+    const land = () => {
+      if (bar) { bar.style.zIndex = ''; bar.style.transform = ''; }
+      if (this.els.main) { this.els.main.style.overflow = ''; if (this._ffScroll != null) this.els.main.scrollTop = this._ffScroll; }
+      this.setState({ fullFace: false });
+    };
+    if (this._ffAnim) { try { this._ffAnim.cancel(); } catch (e) {} this._ffAnim = null; }
+    if (bar && p && this.canAnimate()) {
+      const a = bar.animate([{ transform: 'translate(' + p.dx + 'px,' + p.dy + 'px) scale(' + p.s + ')' }, { transform: 'none' }],
+        { duration: 380, easing: 'cubic-bezier(.55,.02,.14,1)' });
+      a.onfinish = land; a.oncancel = land;
+    } else land();
   }
 
   // The docked menu-bar clock is the SAME clock as the Display bar, just HEIGHT-constrained to
@@ -2607,6 +2751,13 @@ class Component extends DcLite {
       accStatWx: st.wxOffline ? 'UNAVAILABLE' : 'AT FIX',
       faceStatusLine: _modeLbl + ' · ' + _dispName + ' · BRT ' + Math.round(st.brightness * 100) + '% · ' + _pl + ' · ' + (st.utc ? 'UTC' : 'LOCAL'),
       faceRoomCap: _mode === 'connected' ? 'MK IV FACE — LIVE HARDWARE' : _mode === 'simulation' ? 'MK IV FACE — SIMULATION' : 'MK IV FACE — SYSTEM TIME',
+      // POSE (flat line / stacked desk pose) + FULL FACE — Act III of the presentation grammar.
+      ssPoseFlat: this.seg(st.facePose !== 'stacked', true), ssPoseStack: this.seg(st.facePose === 'stacked', false),
+      onPoseFlat: () => this.foldFacePose(false), onPoseStack: () => this.foldFacePose(true),
+      onFullFace: () => this.enterFullFace(),
+      fullFaceOn: !!st.fullFace,
+      ffCaption: (_mode === 'connected' ? 'LIVE HARDWARE' : _mode === 'simulation' ? 'SIMULATION' : 'SYSTEM TIME — STANDBY') + ' · CLICK OR ESC TO CLOSE',
+      onFullFaceExit: () => this.exitFullFace(),
       // Hardware calibration overlay — drag the board furniture on the face, read the mm here.
       hwCalibrateOn: !!st.hwCalibrate,
       hwCalShow: false,   // furniture positions are baked to gospel defaults — hide the calibrate entry (flip to re-enable)

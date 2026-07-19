@@ -609,6 +609,8 @@
               <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
                 <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">01 · {{faceRoomCap}}</span>
                 <span style="flex:1"></span>
+                <div style="display:flex;align-items:center;gap:8px" title="FLAT = the 20-digit line · STACKED = the desk pose, date over time"><span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">POSE</span><div style="display:flex;border:1px solid var(--line)"><button onClick="{{onPoseFlat}}" style="{{ssPoseFlat}}">FLAT</button><button onClick="{{onPoseStack}}" style="{{ssPoseStack}}">STACKED</button></div></div>
+                <button onClick="{{onFullFace}}" title="The clock fills the room — click or Esc returns" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.12em;color:var(--txt3);background:transparent;border:1px solid var(--line2);border-radius:var(--r-1);padding:6px 11px;cursor:pointer" style-hover="color:var(--txt2);border-color:var(--txt3)">FULL FACE</button>
                 <button onClick="{{onShowcase}}" style="{{scBtnStyle}}" style-hover="color:var(--txt2);border-color:var(--txt3)">{{scLabel}}</button>
                 <button onClick="{{onReplay}}" title="Replay the opening fold" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.12em;color:var(--txt3);background:transparent;border:1px solid var(--line2);border-radius:var(--r-1);padding:6px 11px;cursor:pointer" style-hover="color:var(--txt2);border-color:var(--txt3)">REPLAY FOLD</button>
                 <sc-if value="{{hwCalShow}}" hint-placeholder-val="{{false}}">
@@ -624,11 +626,16 @@
               </div>
               <div style="padding:18px 14px 8px">
                 <div ref="{{refDispWrap}}" style="position:relative;display:flex;justify-content:center">
-                  <div ref="{{refDispBar}}" style="position:relative;display:flex;box-shadow:0 12px 26px -14px rgba(0,0,0,.55);visibility:hidden">
-                    <div ref="{{refDispDateHalf}}" style="position:relative;width:620px;height:160px;background:var(--inset);border:1px solid var(--clock-bezel);transform:rotate(180deg)">
-                      <canvas ref="{{refDispDate}}" style="position:absolute"></canvas>
+                  <!-- The contact pool from the entry (refFloorShadow) lives here too: the one cue that
+                       says the clock is a thing resting on a surface, not a panel painted on one. -->
+                  <div ref="{{refDispShadow}}" style="position:absolute;left:0;bottom:-14px;height:30px;opacity:.9;background:radial-gradient(closest-side, rgba(0,0,0,.5), transparent 74%);pointer-events:none"></div>
+                  <div ref="{{refDispBar}}" style="position:relative;visibility:hidden">
+                    <div ref="{{refDispFoldWrap}}" style="position:absolute;left:0;top:0;width:0;height:0">
+                      <div ref="{{refDispDateHalf}}" style="position:absolute;left:0;top:0;width:620px;height:160px;background:var(--inset);border:1px solid var(--clock-bezel);transform:rotate(180deg)">
+                        <canvas ref="{{refDispDate}}" style="position:absolute"></canvas>
+                      </div>
                     </div>
-                    <div ref="{{refDispTimeHalf}}" style="position:relative;width:620px;height:160px;background:var(--inset);border:1px solid var(--clock-bezel)">
+                    <div ref="{{refDispTimeHalf}}" style="position:absolute;left:620px;top:0;width:620px;height:160px;background:var(--inset);border:1px solid var(--clock-bezel)">
                       <canvas ref="{{refDispTime}}" style="position:absolute"></canvas>
                     </div>
                     <div ref="{{refDispLink}}" style="position:absolute;left:574px;top:0;width:91px;height:46px;background:var(--inset);border:1px solid var(--clock-bezel);border-radius:23px">
@@ -1649,11 +1656,19 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
 
         <!-- @@PANELS -->
 
+        <!-- FULL FACE — the honest fullscreen timepiece. The room dims; the SAME hero bar (one
+             renderer, no copy) flies to fill the view; the caption states which of the three states
+             you are looking at. Click anywhere or press Esc to send the clock back to its slot. -->
+        <sc-if value="{{fullFaceOn}}" hint-placeholder-val="{{false}}">
+          <div onClick="{{onFullFaceExit}}" title="Close full face" style="position:fixed;inset:0;z-index:90;background:rgba(4,5,7,.93);cursor:pointer"></div>
+          <div style="position:fixed;left:0;right:0;bottom:6%;z-index:96;text-align:center;font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt3);pointer-events:none">{{ffCaption}}</div>
+        </sc-if>
+
       </main>
     </div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=253"></script>
+<script type="module" src="js/app-controller.js?v=256"></script>
 </body>
 </html>
