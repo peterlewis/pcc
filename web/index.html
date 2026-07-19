@@ -675,14 +675,6 @@
                       THESE DRIVE THE BUILT-IN FIRMWARE'S MENU, NOT THE CONNECTED CLOCK'S. ITS OWN MENU IS THE TWO BUTTONS ON ITS DATE BOARD.
                     </div>
                   </sc-if>
-                  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center">
-                    <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">CUCKOO</span>
-                    <div style="display:flex;border:1px solid var(--line)">
-                      <button onClick="{{onCkOff}}" style="{{ssCkOff}}">OFF</button>
-                      <button onClick="{{onCkHr}}" style="{{ssCkHr}}">HOURLY</button>
-                      <button onClick="{{onCkQt}}" style="{{ssCkQt}}">QUARTERS</button>
-                    </div>
-                  </div>
                 </div>
                 <div style="display:flex;align-items:center;justify-content:flex-end;padding:9px 2px 2px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.14em;color:var(--txt3)">
                   <span>{{sourceTag}}</span>
@@ -1722,6 +1714,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=263"></script>
+<script type="module" src="js/app-controller.js?v=264"></script>
 </body>
 </html>
