@@ -47,9 +47,11 @@ class Component extends DcLite {
     // behind a chip by default so the panel leads with the readout, not a party trick. Session-only.
     drillOpen: false,
     // SIGNAL PATH explainer knobs (TIMING room). Defaults = the shipped recommended values (PF_REC);
-    // session-only — this is a tuning explainer, not a persisted preference. seed drives the model
-    // stream; freeze halts the sweep for inspection.
-    sp: { K: PF_REC.k, window: PF_REC.window, group: PF_REC.group, floorUs: PF_REC.floorUs, corrRatio: PF_REC.corrRatio, seed: 0x9e37, freeze: false, source: 'model' },
+    // session-only — this is a tuning explainer, not a persisted preference. seed drives the sample
+    // stream; freeze halts the sweep for inspection. source is DERIVED (spSyncSource), never chosen:
+    // 'real' when a pccd connection streams raw samples, 'model' (sample data) only while a
+    // simulation runs, 'none' otherwise — the panel shows an honest absence instead of a demo.
+    sp: { K: PF_REC.k, window: PF_REC.window, group: PF_REC.group, floorUs: PF_REC.floorUs, corrRatio: PF_REC.corrRatio, seed: 0x9e37, freeze: false, source: 'none' },
     showcase: false,
     // CUCKOO: scheduled showcase flourishes off the displayed time — 'off' | 'hour' (the full
     // minute-long cycle at the top of the hour) | 'quarter' (that, plus a short heartbeat chime
@@ -1851,7 +1853,7 @@ class Component extends DcLite {
     else if (s === 'signal') { this.drawChart('cn0elev'); this.drawChart('cn0time'); }
     else if (s === 'position') { this.drawChart('posScatter'); this.drawChart('dop'); this.drawChart('cont'); }
     else if (s === 'archive') { this.fetchArchive(); this.drawChart('archSky'); }
-    else if (s === 'timing') { this.drawChart('phase'); this.drawChart('stair'); this.drawChart('ppmtemp'); this.drawChart('adev'); this.spMaybeAutoSource(); this.drawChart('signalPath'); this.spKick(); this.fetchArchive(); this.drawChart('archOffset'); this.drawChart('archAux'); }
+    else if (s === 'timing') { this.drawChart('phase'); this.drawChart('stair'); this.drawChart('ppmtemp'); this.drawChart('adev'); this.spSyncSource(); this.drawChart('signalPath'); this.spKick(); this.fetchArchive(); this.drawChart('archOffset'); this.drawChart('archAux'); }
     else if (s === 'ground') {
       if (this.state.groundProj === 'flat') this.drawChart('map');
       else if (!this.state.globeRotate) this.drawChart('globe');   // rotating globe repaints on its own driver
@@ -1932,7 +1934,11 @@ class Component extends DcLite {
     if (name === 'archOffset') return CH.drawArchiveOffset(el, T, this._arch && this._arch.t);
     if (name === 'archAux') return CH.drawArchiveAux(el, T, this._arch && this._arch.t);
     if (name === 'archSky') return CH.drawArchiveSky(el, T, this._arch && this._arch.s);
-    if (name === 'signalPath') return CH.drawSignalPath(el, T, this._spPf || this.spCompute(), { K: this.state.sp.K, window: this.state.sp.window, reduced: this.reduced, nowIdx: this._spNow });
+    if (name === 'signalPath') {
+      const pf = this._spPf || this.spCompute();
+      if (!pf) return;   // no honest source (standby, or connection without a raw feed) — the absent state owns the panel
+      return CH.drawSignalPath(el, T, pf, { K: this.state.sp.K, window: this.state.sp.window, reduced: this.reduced, nowIdx: this._spNow });
+    }
     // Ground tracks carry no timestamps (gtrails = plain points at ~45 s cadence), so the TRAIL
     // length control maps to a tail slice: 45 s per point, full buffer (40 pts) at MAX.
     const gcut = (g) => {
@@ -3681,7 +3687,9 @@ class Component extends DcLite {
   spEnsureStream() {
     const sp = this.state.sp;
     // REAL: this clock's pre-gate samples fetched from pccd GET /raw (>=16 needed to arm the gate).
-    // MODEL: a seeded synthetic stream, calibrated to the archive's measured jitter when present.
+    // MODEL (sample data, simulation only): a seeded synthetic stream, calibrated when possible.
+    // NONE: no honest source — the panel shows its absent state instead of a demo.
+    if (sp.source === 'none') { this._spStream = null; this._spPf = null; this._spCal = {}; this._spStreamKey = 'none'; return; }
     const useReal = sp.source === 'real' && this._spRaw && this._spRaw.length >= 16;
     const key = useReal ? ('real:' + this._spRawStamp)
       : ('model:' + sp.seed + ':' + this.spCalibJitter().us.toFixed(1));
@@ -3700,37 +3708,36 @@ class Component extends DcLite {
   }
   spCompute() {
     this.spEnsureStream();
+    if (!this._spStream) { this._spPf = null; return null; }
     const sp = this.state.sp;
     this._spPf = runPrefilter(this._spStream, { window: sp.window, group: sp.group, k: sp.K, floorUs: sp.floorUs });
     return this._spPf;
   }
   // Fetch this clock's pre-gate raw samples from the bridge (GET /raw). `auto` = triggered by the
   // room-enter auto-select (don't fall back to MODEL on a transient fetch error).
-  spFetchRaw(auto) {
+  spFetchRaw() {
     const hi = this.state.bridgeInfo;
-    if (!this.realdev || !hi || !(hi.raw > 0)) { if (this.state.sp.source === 'real' && !auto) this.spSetSource('model', true); return; }
+    if (!this.realdev || !hi || !(hi.raw > 0)) return;
     if (this._spRawBusy) return;
     this._spRawBusy = true;
     this.realdev.fetchBridgeRaw(600).then((rows) => {
       this._spRawBusy = false;
       this._spRaw = rows; this._spRawStamp = Date.now();
       if (this.state.sp.source === 'real') { this._spStreamKey = null; this._spSwept = false; this.spCompute(); this.drawChart('signalPath'); this.spKick(); this.setState({}); }
-    }).catch(() => { this._spRawBusy = false; if (this.state.sp.source === 'real' && !auto) this.spSetSource('model', true); });
+    }).catch(() => { this._spRawBusy = false; });   // no fallback: sample data never stands in for a real clock
   }
-  spSetSource(src, isUser) {
-    if (src === 'real' && !(this.state.bridgeInfo && this.state.bridgeInfo.raw >= 16)) return;   // unavailable
-    if (isUser) this._spSourceUserSet = true;
-    this.setState({ sp: Object.assign({}, this.state.sp, { source: src }) });
+  // The source is DERIVED, never chosen: a connected clock's raw samples when pccd streams them,
+  // SAMPLE DATA only while a simulation runs, otherwise none (honest absence). Re-derived on every
+  // timing-room draw, so connect/disconnect/sim transitions land within a tick.
+  spSyncSource() {
+    const mode = this.appMode();
+    const eff = (mode === 'connected' && this.state.bridgeInfo && this.state.bridgeInfo.raw >= 16) ? 'real'
+      : (mode === 'simulation' ? 'model' : 'none');
+    if (this.state.sp.source === eff) return;
+    this.setState({ sp: Object.assign({}, this.state.sp, { source: eff }) });
     this._spStreamKey = null; this._spSwept = false;
-    if (src === 'real') this.spFetchRaw(!isUser);
-    this.spCompute(); this.drawChart('signalPath'); this.spKick(); this.setState({});
-  }
-  // Room-enter default: if this clock is streaming raw samples and the user hasn't chosen, show REAL.
-  spMaybeAutoSource() {
-    if (this._spSourceUserSet) return;
-    const avail = this.state.bridgeInfo && this.state.bridgeInfo.raw >= 16;
-    if (avail && this.state.sp.source !== 'real') this.spSetSource('real', false);
-    else if (!avail && this.state.sp.source === 'real') this.spSetSource('model', false);
+    if (eff === 'real') this.spFetchRaw();
+    this.spCompute(); this.drawChart('signalPath'); this.spKick();
   }
   spKick() {
     // The COMPLETE frame is always shown by default (_spNow=479). This runs the ONE-TIME fill sweep as
@@ -3779,12 +3786,15 @@ class Component extends DcLite {
   }
   rvSignalPath() {
     if (!this._spPf) this.spCompute();
-    const sp = this.state.sp, pf = this._spPf, st = pf.stats;
+    // pf is legitimately null when there is no honest source (spOn=false paints the absent state);
+    // every binding below must still resolve or the WHOLE rv assembly dies and the app stops rendering.
+    const sp = this.state.sp, pf = this._spPf;
+    const st = pf ? pf.stats : { rawRms: null, cleanRms: null, reduction: 0, rejected: 0, total: 0, kept: 0, groupsOut: 0 };
     const cal = this._spCal || { us: 10, calibrated: false };
     const fmt = (x, d = 0) => (x == null ? '—' : x.toFixed(d));
     // latest gate half-width (K·σ) at the newest sample, and whether σ is floored there
     let gateUs = null, floored = false;
-    for (let i = pf.perSample.length - 1; i >= 0; i--) { const p = pf.perSample[i]; if (p.gated) { gateUs = sp.K * p.sigma; floored = p.sigma <= sp.floorUs + 1e-9; break; } }
+    if (pf) for (let i = pf.perSample.length - 1; i >= 0; i--) { const p = pf.perSample[i]; if (p.gated) { gateUs = sp.K * p.sigma; floored = p.sigma <= sp.floorUs + 1e-9; break; } }
     // one slider row's binding bundle
     const recKey = (key) => (key === 'K' ? 'k' : key);   // state uses K; PF_REC uses k. others match.
     const knob = (key, min, max, step) => ({
@@ -3800,15 +3810,18 @@ class Component extends DcLite {
     const kF = knob('floorUs', PF_RANGE.floorUs[0], PF_RANGE.floorUs[1], 1);
     const kC = knob('corrRatio', PF_RANGE.corrRatio[0], PF_RANGE.corrRatio[1], 1);
     // Chip reflects the data ACTUALLY shown (cal.live = real device samples in the stream), never
-    // what was merely selected — so a "real" label can't sit over model data.
-    const realAvail = !!(this.state.bridgeInfo && this.state.bridgeInfo.raw >= 16);
+    // what was merely selected — so a "real" label can't sit over sample data.
     let chip;
-    if (cal.live) chip = { txt: 'THIS CLOCK — pccd RAW SAMPLES · ' + (cal.n || 0) + ' HELD', col: 'var(--lock)' };
+    if (sp.source === 'none') chip = { txt: 'NO SOURCE', col: 'var(--txt3)' };
+    else if (cal.live) chip = { txt: 'THIS CLOCK — pccd RAW SAMPLES · ' + (cal.n || 0) + ' HELD', col: 'var(--lock)' };
     else if (sp.source === 'real') chip = { txt: 'THIS CLOCK — LOADING pccd RAW SAMPLES', col: 'var(--acq)' };
-    else if (cal.calibrated) chip = { txt: "MODEL · CALIBRATED TO THIS CLOCK'S JITTER σ≈" + Math.round(cal.us) + 'µs', col: 'var(--lock)' };
-    else chip = { txt: 'MODEL · NOMINAL JITTER', col: 'var(--acq)' };
-    const segStyle = (on) => 'font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;padding:3px 10px;cursor:pointer;background:transparent;border:1px solid ' + (on ? 'var(--txt3);color:var(--txt)' : 'var(--line);color:var(--txt3)');
+    else if (cal.calibrated) chip = { txt: "SAMPLE DATA · SYNTHETIC, JITTER MATCHED TO THIS CLOCK'S RECORD σ≈" + Math.round(cal.us) + 'µs', col: 'var(--acq)' };
+    else chip = { txt: 'SAMPLE DATA · SYNTHETIC, NOMINAL JITTER', col: 'var(--acq)' };
     const realSel = sp.source === 'real';
+    // Absent state: no real feed and no simulation — say why, per cause.
+    const spAbsentMsg = this.appMode() === 'connected'
+      ? 'THIS CONNECTION CARRIES NO RAW-SAMPLE FEED. THE pccd BRIDGE RECORDS PRE-GATE SAMPLES; DIRECT WEB SERIAL DOES NOT.'
+      : "NO SOURCE. CONNECT THROUGH THE pccd BRIDGE FOR THIS CLOCK'S RAW SAMPLES, OR START A SIMULATION TO EXPLORE THE FILTER ON SAMPLE DATA.";
     return {
       spRawRms: fmt(st.rawRms, 1), spCleanRms: fmt(st.cleanRms, 1),
       spReduction: st.reduction ? '×' + st.reduction.toFixed(1) : '—',
@@ -3819,11 +3832,9 @@ class Component extends DcLite {
       spChipTxt: chip.txt, spChipCol: chip.col,
       spCaption: cal.live
         ? "THIS CLOCK'S PRE-GATE OFFSET SAMPLES FROM pccd (GET /raw, IN-MEMORY, LAST ~10 MIN). THE KNOBS RE-FILTER YOUR OWN SAMPLES WITH THE SHIPPED pccd MATH (pf_push). REFRESH PULLS THE LATEST WINDOW."
-        : 'SYNTHETIC OFFSET MODEL. THE GATE AND TRIMMED-MEAN MATH IS THE SHIPPED pccd ALGORITHM (pccd.c pf_push), SO THE KNOB LESSONS HOLD. CONNECT A CLOCK VIA pccd FOR THE REAL SOURCE.',
-      // source toggle (MODEL | REAL); REAL enabled only when the bridge streams raw samples
-      spModelStyle: segStyle(!realSel), spRealStyle: segStyle(realSel) + (realAvail ? '' : ';opacity:.4;cursor:not-allowed'),
-      onSpModel: () => this.spSetSource('model', true), onSpReal: () => this.spSetSource('real', true),
-      spRefreshLabel: realSel ? 'REFRESH' : 'RESEED MODEL',
+        : 'SAMPLE DATA — A SYNTHETIC OFFSET STREAM, SHOWN ONLY WHILE SIMULATING. THE GATE AND TRIMMED-MEAN MATH IS THE SHIPPED pccd ALGORITHM (pccd.c pf_push), SO THE KNOB LESSONS HOLD. A CONNECTED CLOCK REPLACES THIS WITH ITS OWN SAMPLES.',
+      spOn: sp.source !== 'none', spAbsent: sp.source === 'none', spAbsentMsg,
+      spRefreshLabel: realSel ? 'REFRESH' : 'RESEED SAMPLE',
       onSpRefresh: () => (realSel ? this.spFetchRaw(false) : this.spReseed()),
       spConfig: this.spConfigText(),
       // knob rows: value (rec-coloured), input attrs, handlers, REC label

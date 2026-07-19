@@ -1293,10 +1293,14 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                   <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">07 · SIGNAL PATH — pccd PREFILTER</span>
                   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                     <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:{{spChipCol}}">{{spChipTxt}}</span>
-                    <div style="display:flex;align-items:center;gap:8px" title="MODEL = a synthetic demo stream · THIS CLOCK = your clock's actual pre-gate samples from pccd"><span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">SOURCE</span><div style="display:flex;align-items:center"><button onClick="{{onSpModel}}" style="{{spModelStyle}}">MODEL</button><button onClick="{{onSpReal}}" style="{{spRealStyle}}">THIS CLOCK</button></div></div>
                     <button onClick="{{onSpReset}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt2);background:transparent;border:1px solid var(--line2);padding:3px 9px;cursor:pointer">RESET → RECOMMENDED</button>
                   </div>
                 </div>
+                <sc-if value="{{spAbsent}}" hint-placeholder-val="{{false}}">
+                  <div style="margin:12px;padding:12px;background:var(--well);border:1px solid var(--line2);font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3);line-height:1.7">{{spAbsentMsg}}</div>
+                </sc-if>
+                <sc-if value="{{spOn}}" hint-placeholder-val="{{false}}">
+                <div>
                 <div style="padding:6px 12px 0;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3)">RAW PPS OFFSETS IN, ONE TRIMMED MEAN OUT PER GROUP. A MAD GATE DROPS OUTLIERS, A TRIMMED MEAN OF {{spGVal}} CUTS SCATTER ~√{{spGVal}}.</div>
                 <!-- readout band -->
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));border-bottom:1px solid var(--line-soft);border-top:1px solid var(--line-soft);margin-top:8px">
@@ -1366,6 +1370,8 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px 2px"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">chrony.conf</span><button onClick="{{onSpCopy}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt2);background:transparent;border:1px solid var(--line2);padding:3px 9px;cursor:pointer">COPY</button></div>
                 <div style="margin:0 12px;padding:8px 10px;background:var(--well);border:1px solid var(--line2);font-family:var(--mono);font-size:var(--fs-label);color:var(--txt);white-space:pre;overflow-x:auto;line-height:1.7">{{spConfig}}</div>
                 <div style="padding:8px 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">{{spCaption}}</div>
+                </div>
+                </sc-if>
               </section>
 
               <sc-if value="{{archShown}}">
@@ -1706,6 +1712,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=261"></script>
+<script type="module" src="js/app-controller.js?v=262"></script>
 </body>
 </html>
