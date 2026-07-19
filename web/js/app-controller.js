@@ -1221,85 +1221,91 @@ class Component extends DcLite {
     const pose = toClosed ? 'closed' : 'open';
     if (this.state.hdrPose === pose) return;
     const E = this.els, M = this.MM;
-    const wrap = E.hdrFoldWrap, dh = E.hdrDateHalf, th = E.hdrTimeHalf, link = E.hdrLink;
+    const wrap = E.hdrFoldWrap, inner = E.hdrFoldInner, dh = E.hdrDateHalf, th = E.hdrTimeHalf, link = E.hdrLink;
     const dock = E.dockSlot ? E.dockSlot.querySelector('[data-dockbar]') : null;
-    if (!this.canAnimate() || !wrap || !dh || !th || !dock) {
+    if (!this.canAnimate() || !wrap || !inner || !dh || !th || !dock) {
       this.setState({ hdrPose: pose, hdrPoseAuto: false }); this.sizeHdrBar(); return;
     }
     this._hdrFolding = true;
-    const ease = 'cubic-bezier(.5,.03,.16,1)';
+    const ease = 'cubic-bezier(.5,.03,.16,1)', easeMove = 'cubic-bezier(.55,.02,.14,1)';
     const face = () => this.faces.hdrDate;
     const anims = [];
     const play = (el, kf, opts) => { const a = el.animate(kf, opts); anims.push(a); return a; };
-    // The TRUE pivot is the pin line at the TOP edge of the boards on the seam — rotating the leaf
-    // 180° about that corner lands it stacked above the time row with no compensating translate,
-    // and the PLATE co-rotates 90° in place about the same point (a two-pin linkage turns the
-    // plate at half the leaf's rate — this is what makes the hinge read as a hinge). The whole
-    // close is ONE overlapped gesture, not stop-start beats: the cartwheel begins while the
-    // lift-out is still landing, and the glide home begins while the leaf is still settling.
+    // THE ENTRY'S LINKAGE, copied: the leaf rotates 90° about the DATE-SIDE pin (inner wrap) while
+    // the outer wrap — CARRYING THE PLATE — rotates 90° about the TIME-SIDE pin. The plate never
+    // animates on its own; it rides the outer wrap, exactly like the original unfold. The glide
+    // home is MEASURED from the leaf's landed position, so the linkage's true geometry (not an
+    // approximation) decides where things are at every frame.
+    const O0 = dock.getBoundingClientRect();   // the dock's rest frame, captured before any transform
     try {
       if (toClosed) {
         const Wk = parseFloat(dh.style.width) || 0, Hk = parseFloat(dh.style.height) || 0;
-        const kOpen = Hk / M.H, pk = 6 * kOpen;
-        const k2 = Math.min(46 / (2 * M.H), 2 * Wk / M.W);          // closed scale; statics re-land exact
-        const s = k2 / kOpen, D = Wk + 24;
+        const kk = Hk / M.H, pin = 6 * kk;
+        const k2 = Math.min(46 / (2 * M.H), 2 * Wk / M.W);
+        const s = (M.W * k2) / Wk, D = Wk + 24;
         dock.style.zIndex = '80'; dock.style.transformOrigin = '0 0';
-        wrap.style.transformOrigin = Wk + 'px ' + pk + 'px';         // the pin line on the seam
-        if (link) link.style.transformOrigin = '50% 0%';             // plate turns about its pin line
+        wrap.style.transformOrigin = (Wk + pin) + 'px ' + pin + 'px';    // time-side pin
+        inner.style.transformOrigin = (Wk - pin) + 'px ' + pin + 'px';   // date-side pin
         play(dock, [{ transform: 'translateY(0px)' }, { transform: 'translateY(' + D + 'px)' }],
-          { duration: 220, easing: 'cubic-bezier(.55,.02,.14,1)', fill: 'forwards' });
-        play(wrap, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(180deg)' }],
-          { duration: 540, delay: 140, easing: ease, fill: 'forwards' });
-        if (link) play(link, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(90deg)' }],
-          { duration: 540, delay: 140, easing: ease, fill: 'forwards' });
-        this.sleep(140 + 270).then(() => face() && face().setInverted(false));   // the switch, at the top of the arc
-        const tx = -s * Wk, ty = s * Hk;
+          { duration: 220, easing: easeMove, fill: 'forwards' });
+        play(wrap, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(90deg)' }],
+          { duration: 560, delay: 140, easing: ease, fill: 'forwards' });
+        play(inner, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(90deg)' }],
+          { duration: 500, delay: 320, easing: ease, fill: 'forwards' });
+        this.sleep(520).then(() => face() && face().setInverted(false));  // the switch, at the top of the arc
+        await this.sleep(840);
+        // Glide home, measured: wherever the linkage actually put the stack, take it to the origin.
+        const S = dh.getBoundingClientRect();
+        const px = S.left - O0.left, py = S.top - D - O0.top;
         play(dock, [{ transform: 'translateY(' + D + 'px)' },
-                    { transform: 'translate(' + tx + 'px,' + ty + 'px) scale(' + s + ')' }],
-          { duration: 300, delay: 600, easing: ease, fill: 'forwards' });
+                    { transform: 'translate(' + (-s * px) + 'px,' + (-s * py) + 'px) scale(' + s + ')' }],
+          { duration: 300, easing: ease, fill: 'forwards' });
         play(dock, [{ width: (2 * Wk) + 'px' }, { width: (M.W * k2) + 'px' }],
-          { duration: 300, delay: 600, easing: ease, fill: 'forwards' });
-        await this.sleep(920);
+          { duration: 300, easing: ease, fill: 'forwards' });
+        await this.sleep(320);
       } else {
-        const Wc = parseFloat(dh.style.width) || 0, Hc = parseFloat(dh.style.height) || 0;
-        const k2 = Hc / M.H;
+        const Wc = parseFloat(dh.style.width) || 0;
+        const C = dh.getBoundingClientRect();   // the closed mini's leaf, at rest
         const avail = this.hdrDockAvail();
         const kOpen = Math.min(46 / M.H, Math.max(avail === null ? 2 * Wc : avail, 0) / (2 * M.W));
-        const Wk = M.W * kOpen, Hk = M.H * kOpen, pk = 6 * kOpen;
-        const S = kOpen / k2, D = Wk + 24;
+        const Wk = M.W * kOpen, Hk = M.H * kOpen, pin = 6 * kOpen, D = Wk + 24;
         dock.style.zIndex = '80'; dock.style.transformOrigin = '0 0';
-        // Off the shelf, growing to open scale: the stacked mini flies to where the unfold happens.
-        await this.settle(play(dock, [{ transform: 'translate(0px,0px) scale(1)' },
-                                      { transform: 'translate(' + Wk + 'px,' + (D - Hk) + 'px) scale(' + S + ')' }],
-          { duration: 300, easing: ease, fill: 'forwards' }), 320);
-        // One-tick swap to the open-statics rig, held in the folded pose at the same spot — the
-        // paint is pixel-equivalent, so no flash: open layout + wrap folded + dock descended.
-        for (const a of anims.splice(0)) { try { a.cancel(); } catch (e) {} }
-        dock.style.width = (2 * Wk) + 'px'; dock.style.height = Hk + 'px';
+        if (face()) face().setInverted(false);
+        // ONE synchronous block: open statics at full scale + both wraps held folded (INLINE
+        // transforms — reflected by forced layout, unlike pending WAAPI) + a dock transform that
+        // pixel-matches the closed mini's rest. No intermediate paint.
+        dock.style.width = Wc + 'px'; dock.style.height = parseFloat(dh.style.height) * 2 + 'px';
         dh.style.left = '0px'; dh.style.top = '0px'; dh.style.width = Wk + 'px'; dh.style.height = Hk + 'px'; dh.style.transform = 'rotate(180deg)';
         th.style.left = Wk + 'px'; th.style.top = '0px'; th.style.width = Wk + 'px'; th.style.height = Hk + 'px';
         if (E.hdrDate) this.sizeFaceCanvas('hdrDate', E.hdrDate, dh, kOpen, 7.0175);
         if (E.hdrTime) this.sizeFaceCanvas('hdrTime', E.hdrTime, th, kOpen, 7.0175);
-        if (E.hdrLink) { const L = E.hdrLink; L.style.left = (Wk - 12 * kOpen) + 'px'; L.style.top = '0px';
-          L.style.width = (24 * kOpen) + 'px'; L.style.height = (12 * kOpen) + 'px'; L.style.borderRadius = (6 * kOpen) + 'px';
-          L.style.transformOrigin = '50% 0%'; }
-        wrap.style.transformOrigin = Wk + 'px ' + pk + 'px';
-        const holdW = play(wrap, [{ transform: 'rotate(180deg)' }, { transform: 'rotate(180deg)' }], { duration: 1, fill: 'forwards' });
-        const holdL = link ? play(link, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(90deg)' }], { duration: 1, fill: 'forwards' }) : null;
-        const holdD = play(dock, [{ transform: 'translateY(' + D + 'px)' }, { transform: 'translateY(' + D + 'px)' }],
-          { duration: 1, fill: 'forwards' });
+        if (link) { link.style.left = (Wk - 12 * kOpen) + 'px'; link.style.top = '0px';
+          link.style.width = (24 * kOpen) + 'px'; link.style.height = (12 * kOpen) + 'px'; link.style.borderRadius = (6 * kOpen) + 'px'; }
+        wrap.style.transformOrigin = (Wk + pin) + 'px ' + pin + 'px'; wrap.style.transform = 'rotate(90deg)';
+        inner.style.transformOrigin = (Wk - pin) + 'px ' + pin + 'px'; inner.style.transform = 'rotate(90deg)';
+        dock.style.transform = 'none';
+        const L0 = dh.getBoundingClientRect();  // forced layout, no paint yet
+        const sc = C.width / L0.width;
+        const tx = (C.left - O0.left) - sc * (L0.left - O0.left), ty = (C.top - O0.top) - sc * (L0.top - O0.top);
+        dock.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + sc + ')';
         await this.raf2();
-        // The unfold — one gesture: leaf 180° back, plate 90° back, shelf-return overlapping the tail.
-        holdW.cancel(); if (holdL) holdL.cancel();
-        play(wrap, [{ transform: 'rotate(180deg)' }, { transform: 'rotate(0deg)' }],
-          { duration: 540, easing: ease, fill: 'forwards' });
-        if (link) play(link, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(0deg)' }],
-          { duration: 540, easing: ease, fill: 'forwards' });
-        this.sleep(270).then(() => face() && face().setInverted(true));   // back to the flat-mounting LUT
-        await this.sleep(460);
-        holdD.cancel();
-        await this.settle(play(dock, [{ transform: 'translateY(' + D + 'px)' }, { transform: 'translateY(0px)' }],
-          { duration: 280, easing: 'cubic-bezier(.55,.02,.14,1)', fill: 'forwards' }), 300);
+        // Fly out to full scale, descended; the dock's layout width grows in step.
+        play(dock, [{ transform: dock.style.transform }, { transform: 'translateY(' + D + 'px)' }],
+          { duration: 300, easing: ease, fill: 'forwards' });
+        play(dock, [{ width: Wc + 'px' }, { width: (2 * Wk) + 'px' }],
+          { duration: 300, easing: ease, fill: 'forwards' });
+        await this.sleep(310);
+        // The unfold — the entry's own order: leaf first, wrap (with the plate) following.
+        wrap.style.transform = ''; inner.style.transform = '';
+        play(inner, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(0deg)' }],
+          { duration: 500, easing: ease, fill: 'forwards' });
+        play(wrap, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(0deg)' }],
+          { duration: 560, delay: 180, easing: ease, fill: 'forwards' });
+        this.sleep(340).then(() => face() && face().setInverted(true));
+        await this.sleep(760);
+        play(dock, [{ transform: 'translateY(' + D + 'px)' }, { transform: 'translateY(0px)' }],
+          { duration: 280, easing: easeMove, fill: 'forwards' });
+        await this.sleep(300);
       }
     } finally {
       // Land the final pose through the ONE writer of dock statics, then drop the transients.
@@ -1315,9 +1321,10 @@ class Component extends DcLite {
     // Width comes from the DOM parent chain, NOT the dispWrap ref — on remount the canvas
     // ref fires before dispWrap re-attaches, but the canvas's own parent holders are always
     // in the DOM with a real width. This makes sizing independent of ref-callback order.
-    // Chain: dateHalf > foldWrap (0×0 rotation anchor) > dispBar (absolute stage) > dispWrap.
+    // Chain: dateHalf > foldInner > foldWrap (0×0 rotation anchors) > dispBar (absolute stage) > dispWrap.
     const wrap = E.dispDateHalf && E.dispDateHalf.parentElement && E.dispDateHalf.parentElement.parentElement &&
-      E.dispDateHalf.parentElement.parentElement.parentElement;
+      E.dispDateHalf.parentElement.parentElement.parentElement &&
+      E.dispDateHalf.parentElement.parentElement.parentElement.parentElement;
     if (!E.dispDateHalf || !E.dispTimeHalf || !wrap || wrap.clientWidth < 2) {
       if ((retry || 0) < 30 && this.state.section === 'display') {
         cancelAnimationFrame(this._dispRAF);
@@ -1346,6 +1353,7 @@ class Component extends DcLite {
     for (const el of [dh, th]) { el.style.width = Wk + 'px'; el.style.height = Hk + 'px'; }
     if (bar) { bar.style.width = (stacked ? Wk : 2 * Wk) + 'px'; bar.style.height = (stacked ? 2 * Hk : Hk) + 'px'; bar.style.transform = ''; }
     if (fw) { fw.style.display = ''; fw.style.transform = ''; }
+    if (E.dispFoldInner) E.dispFoldInner.style.transform = '';
     if (stacked) {
       // The desk pose: date directly above time, shared left edge — the entry stage's own layout.
       dh.style.left = '0px'; dh.style.top = '0px'; dh.style.transform = '';
@@ -1400,72 +1408,89 @@ class Component extends DcLite {
     const pose = toStacked ? 'stacked' : 'flat';
     if (this.state.facePose === pose) return;
     const E = this.els, M = this.MM;
-    const wrap = E.dispFoldWrap, dh = E.dispDateHalf, th = E.dispTimeHalf, bar = E.dispBar;
+    const wrap = E.dispFoldWrap, inner = E.dispFoldInner, dh = E.dispDateHalf, th = E.dispTimeHalf, bar = E.dispBar;
     this._facePoseUser = true;
     try { localStorage.setItem('pccweb.facePose', pose); } catch (e) {}
-    if (!this.canAnimate() || !wrap || !dh || !th || !bar || this.state.section !== 'display') {
+    if (!this.canAnimate() || !wrap || !inner || !dh || !th || !bar || this.state.section !== 'display') {
       this.setState({ facePose: pose }); this.sizeDispBar(); return;
     }
     this._faceFolding = true;
-    const ease = 'cubic-bezier(.5,.03,.16,1)';
+    const ease = 'cubic-bezier(.5,.03,.16,1)', easeMove = 'cubic-bezier(.55,.02,.14,1)';
     const face = () => this.faces.dispDate;
     const link = E.dispLink;
     const anims = [];
     const play = (el, kf, opts) => { const a = el.animate(kf, opts); anims.push(a); return a; };
-    // Same linkage physics as the header fold: the pivot is the PIN LINE at the top edge of the
-    // boards on the seam (rotating the leaf 180° about that corner lands it stacked — no
-    // compensating translate), the PLATE co-rotates 90° about the same point (half the leaf's
-    // rate — a two-pin linkage's true motion), and the whole fold is ONE overlapped gesture.
+    // The entry's linkage, same as the header fold: leaf 90° about the DATE-SIDE pin (inner wrap),
+    // outer wrap — carrying the plate — 90° about the TIME-SIDE pin. The plate rides the wrap.
+    // The glide home is MEASURED, with the flex-centred bar's recentering folded into the target.
     try {
-      const Wk = parseFloat(dh.style.width) || 0, Hk = parseFloat(dh.style.height) || 0;
-      const pk = 6 * (Hk / M.H);
-      bar.style.zIndex = '60'; bar.style.transformOrigin = '0 0';
-      wrap.style.transformOrigin = Wk + 'px ' + pk + 'px';
-      if (link) link.style.transformOrigin = '50% 0%';
       if (toStacked) {
-        const D = Math.max(60, Wk + 24 - (bar.getBoundingClientRect().top - 60));   // clearance above the seam for the rising leaf
+        const Wk = parseFloat(dh.style.width) || 0, Hk = parseFloat(dh.style.height) || 0;
+        const kk = Hk / M.H, pin = 6 * kk;
+        const avail = Math.max(120, (bar.parentElement ? bar.parentElement.clientWidth : 2 * Wk) - 4);
+        const kS = Math.min(avail / M.W, 1.4 * kk);       // stacked scale, same law as sizeDispBar
+        const s = kS / kk, WS = M.W * kS;
+        const O0 = bar.getBoundingClientRect();
+        const D = Math.max(60, Wk + 24 - (O0.top - 60));   // clearance above the seam for the rising leaf
+        bar.style.zIndex = '60'; bar.style.transformOrigin = '0 0';
+        wrap.style.transformOrigin = (Wk + pin) + 'px ' + pin + 'px';    // time-side pin
+        inner.style.transformOrigin = (Wk - pin) + 'px ' + pin + 'px';   // date-side pin
         play(bar, [{ transform: 'translateY(0px)' }, { transform: 'translateY(' + D + 'px)' }],
-          { duration: 220, easing: 'cubic-bezier(.55,.02,.14,1)', fill: 'forwards' });
-        play(wrap, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(180deg)' }],
-          { duration: 540, delay: 140, easing: ease, fill: 'forwards' });
-        if (link) play(link, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(90deg)' }],
-          { duration: 540, delay: 140, easing: ease, fill: 'forwards' });
-        this.sleep(140 + 270).then(() => face() && face().setInverted(false));
-        // glide home: the stacked assembly (left edge on the seam, one row up) settles to the bar origin.
+          { duration: 220, easing: easeMove, fill: 'forwards' });
+        play(wrap, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(90deg)' }],
+          { duration: 560, delay: 140, easing: ease, fill: 'forwards' });
+        play(inner, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(90deg)' }],
+          { duration: 500, delay: 320, easing: ease, fill: 'forwards' });
+        this.sleep(520).then(() => face() && face().setInverted(false));
+        await this.sleep(840);
+        // Measured glide: take the landed stack to where the stacked statics will paint it —
+        // the bar recentres when its width narrows, so the target shifts right by half the delta.
+        const S = dh.getBoundingClientRect();
+        const px = S.left - O0.left, py = S.top - D - O0.top;
+        const tx = (2 * Wk - WS) / 2 - s * px, ty = -s * py;
         play(bar, [{ transform: 'translateY(' + D + 'px)' },
-                   { transform: 'translate(' + (-Wk) + 'px,' + (Hk - 2 * pk) + 'px)' }],
-          { duration: 300, delay: 600, easing: ease, fill: 'forwards' });
-        await this.sleep(920);
+                   { transform: 'translate(' + tx + 'px,' + ty + 'px) scale(' + s + ')' }],
+          { duration: 300, easing: ease, fill: 'forwards' });
+        await this.sleep(320);
       } else {
-        // Reverse: out into the room, unfold in one gesture, glide home flat.
-        const D = Wk + 24;
+        // Reverse: swap to flat statics held folded (pixel-matched to the stacked rest), fly out,
+        // unfold — leaf first, wrap with the plate following — then glide home flat.
+        const C = dh.getBoundingClientRect();   // the stacked rest's leaf
+        const avail = Math.max(120, (bar.parentElement ? bar.parentElement.clientWidth : 240) - 4);
+        const kF = avail / (2 * M.W);
+        const Wk = M.W * kF, Hk = M.H * kF, pin = 6 * kF, D = Wk + 24;
+        bar.style.zIndex = '60'; bar.style.transformOrigin = '0 0';
         if (face()) face().setInverted(false);
-        const holdW = play(wrap, [{ transform: 'rotate(180deg)' }, { transform: 'rotate(180deg)' }], { duration: 1, fill: 'forwards' });
-        const holdL = link ? play(link, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(90deg)' }], { duration: 1, fill: 'forwards' }) : null;
-        // pre-swap: lay the bar out FLAT-statics but hold the wrap folded so the paint matches the
-        // stacked rest, then lift out. (Statics swap batched in one tick — no flash.)
-        dh.style.transform = 'rotate(180deg)'; th.style.left = Wk + 'px'; th.style.top = '0px';
+        // ONE synchronous block, no intermediate paint: flat statics + wraps held folded INLINE
+        // (reflected by forced layout, unlike pending WAAPI) + a bar transform matching the rest.
         bar.style.width = (2 * Wk) + 'px'; bar.style.height = Hk + 'px';
-        if (link) {   // full FLAT plate statics; the held rotate(90) about the pin line paints it vertical
-          const kk = Hk / M.H;
-          link.style.left = (Wk - 12 * kk) + 'px'; link.style.top = '0px';
-          link.style.width = (24 * kk) + 'px'; link.style.height = (12 * kk) + 'px'; link.style.borderRadius = (6 * kk) + 'px';
-        }
-        const holdB = play(bar, [{ transform: 'translate(' + (-Wk) + 'px,' + (Hk - 2 * pk) + 'px)' },
-                                 { transform: 'translate(' + (-Wk) + 'px,' + (Hk - 2 * pk) + 'px)' }], { duration: 1, fill: 'forwards' });
+        dh.style.left = '0px'; dh.style.top = '0px'; dh.style.width = Wk + 'px'; dh.style.height = Hk + 'px'; dh.style.transform = 'rotate(180deg)';
+        th.style.left = Wk + 'px'; th.style.top = '0px'; th.style.width = Wk + 'px'; th.style.height = Hk + 'px';
+        if (E.dispDate) this.sizeFaceCanvas('dispDate', E.dispDate, dh, kF, 7.0175);
+        if (E.dispTime) this.sizeFaceCanvas('dispTime', E.dispTime, th, kF, 7.0175);
+        if (link) { link.style.left = (Wk - 12 * kF) + 'px'; link.style.top = '0px';
+          link.style.width = (24 * kF) + 'px'; link.style.height = (12 * kF) + 'px'; link.style.borderRadius = (6 * kF) + 'px'; }
+        wrap.style.transformOrigin = (Wk + pin) + 'px ' + pin + 'px'; wrap.style.transform = 'rotate(90deg)';
+        inner.style.transformOrigin = (Wk - pin) + 'px ' + pin + 'px'; inner.style.transform = 'rotate(90deg)';
+        bar.style.transform = 'none';
+        const OB = bar.getBoundingClientRect(), L0 = dh.getBoundingClientRect();  // forced layout, no paint
+        const sc = C.width / L0.width;
+        const tx = (C.left - OB.left) - sc * (L0.left - OB.left), ty = (C.top - OB.top) - sc * (L0.top - OB.top);
+        bar.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + sc + ')';
         await this.raf2();
-        holdB.cancel();
-        await this.settle(play(bar, [{ transform: 'translate(' + (-Wk) + 'px,' + (Hk - 2 * pk) + 'px)' }, { transform: 'translateY(' + D + 'px)' }],
-          { duration: 280, easing: ease, fill: 'forwards' }), 300);
-        holdW.cancel(); if (holdL) holdL.cancel();
-        play(wrap, [{ transform: 'rotate(180deg)' }, { transform: 'rotate(0deg)' }],
-          { duration: 540, easing: ease, fill: 'forwards' });
-        if (link) play(link, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(0deg)' }],
-          { duration: 540, easing: ease, fill: 'forwards' });
-        this.sleep(270).then(() => face() && face().setInverted(true));
-        await this.sleep(460);
-        await this.settle(play(bar, [{ transform: 'translateY(' + D + 'px)' }, { transform: 'translateY(0px)' }],
-          { duration: 280, easing: 'cubic-bezier(.55,.02,.14,1)', fill: 'forwards' }), 300);
+        play(bar, [{ transform: bar.style.transform }, { transform: 'translateY(' + D + 'px)' }],
+          { duration: 300, easing: ease, fill: 'forwards' });
+        await this.sleep(310);
+        wrap.style.transform = ''; inner.style.transform = '';
+        play(inner, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(0deg)' }],
+          { duration: 500, easing: ease, fill: 'forwards' });
+        play(wrap, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(0deg)' }],
+          { duration: 560, delay: 180, easing: ease, fill: 'forwards' });
+        this.sleep(340).then(() => face() && face().setInverted(true));
+        await this.sleep(760);
+        play(bar, [{ transform: 'translateY(' + D + 'px)' }, { transform: 'translateY(0px)' }],
+          { duration: 280, easing: easeMove, fill: 'forwards' });
+        await this.sleep(300);
       }
     } finally {
       this._faceFolding = false;
@@ -1473,7 +1498,6 @@ class Component extends DcLite {
       this.sizeDispBar();
       for (const a of anims) { try { a.cancel(); } catch (e) {} }
       bar.style.zIndex = '';
-      this._faceFolding = false;
     }
   }
 
@@ -1592,6 +1616,7 @@ class Component extends DcLite {
     const dh = E.hdrDateHalf, th = E.hdrTimeHalf, wrap = E.hdrFoldWrap;
     for (const el of [dh, th]) { el.style.width = Wk + 'px'; el.style.height = Hk + 'px'; }
     if (wrap) { wrap.style.display = ''; wrap.style.transform = ''; }
+    if (E.hdrFoldInner) E.hdrFoldInner.style.transform = '';
     if (closed) {
       // Desk pose: date directly above time, left edges shared — the entry stage's own layout.
       dh.style.left = '0px'; dh.style.top = '0px'; dh.style.transform = '';            // stacked mounting: no flip

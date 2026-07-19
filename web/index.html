@@ -64,17 +64,23 @@
                  the entry splash at header scale, both rows ticking). The fold between them is the
                  entry fold reversed: an IN-PLANE cartwheel about the seam pins (the hinge axis
                  points at the viewer — never a 3D turn). refHdrFoldWrap is the rotating carrier. -->
-            <div ref="{{refHdrFoldWrap}}" style="position:absolute;left:0;top:0;width:0;height:0">
-              <div ref="{{refHdrDateHalf}}" style="position:absolute;left:0;top:0;width:353px;height:46px;background:var(--inset);border:1px solid var(--clock-bezel);transform:rotate(180deg)">
-                <canvas ref="{{refHdrDate}}" style="position:absolute"></canvas>
+            <!-- The entry's nested rig, copied literally: the OUTER wrap (pivot = the time-side pin)
+                 carries the hinge PLATE and the inner wrap; the INNER wrap (pivot = the date-side
+                 pin) carries the leaf. The plate never animates on its own — it rides the outer
+                 wrap, exactly like the original unfold. -->
+            <div ref="{{refHdrFoldWrap}}" style="position:absolute;left:0;top:0;width:0;height:0;z-index:2">
+              <div ref="{{refHdrFoldInner}}" style="position:absolute;left:0;top:0;width:0;height:0">
+                <div ref="{{refHdrDateHalf}}" style="position:absolute;left:0;top:0;width:353px;height:46px;background:var(--inset);border:1px solid var(--clock-bezel);transform:rotate(180deg)">
+                  <canvas ref="{{refHdrDate}}" style="position:absolute"></canvas>
+                </div>
+              </div>
+              <div ref="{{refHdrLink}}" style="position:absolute;left:337px;top:0;width:32px;height:16px;background:var(--inset);border:1px solid var(--clock-bezel);border-radius:8px">
+                <span ref="{{refHdrPinA}}" style="position:absolute;border-radius:50%;background:radial-gradient(circle at 50% 44%,#25282f 0 34%,#3e434d 34% 52%,#15171b 52%);box-shadow:0 0 0 .5px #2b2f38"></span>
+                <span ref="{{refHdrPinB}}" style="position:absolute;border-radius:50%;background:radial-gradient(circle at 50% 44%,#25282f 0 34%,#3e434d 34% 52%,#15171b 52%);box-shadow:0 0 0 .5px #2b2f38"></span>
               </div>
             </div>
-            <div ref="{{refHdrTimeHalf}}" style="position:absolute;left:353px;top:0;width:353px;height:46px;background:var(--inset);border:1px solid var(--clock-bezel)">
+            <div ref="{{refHdrTimeHalf}}" style="position:absolute;left:353px;top:0;width:353px;height:46px;z-index:1;background:var(--inset);border:1px solid var(--clock-bezel)">
               <canvas ref="{{refHdrTime}}" style="position:absolute"></canvas>
-            </div>
-            <div ref="{{refHdrLink}}" style="position:absolute;left:337px;top:0;width:32px;height:16px;background:var(--inset);border:1px solid var(--clock-bezel);border-radius:8px">
-              <span ref="{{refHdrPinA}}" style="position:absolute;border-radius:50%;background:radial-gradient(circle at 50% 44%,#25282f 0 34%,#3e434d 34% 52%,#15171b 52%);box-shadow:0 0 0 .5px #2b2f38"></span>
-              <span ref="{{refHdrPinB}}" style="position:absolute;border-radius:50%;background:radial-gradient(circle at 50% 44%,#25282f 0 34%,#3e434d 34% 52%,#15171b 52%);box-shadow:0 0 0 .5px #2b2f38"></span>
             </div>
           </div>
           <button onClick="{{onHdrFold}}" title="{{hdrFoldTitle}}" style="align-self:center;width:20px;height:46px;display:flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--line);color:var(--txt3);cursor:pointer;padding:0" style-hover="color:var(--txt);border-color:var(--line2)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1"><path d="M6 1.5v9M6 1.5L1.8 3.4v6.2L6 7.7M6 1.5l4.2 1.9v6.2L6 7.7"></path></svg></button>
@@ -630,17 +636,21 @@
                        says the clock is a thing resting on a surface, not a panel painted on one. -->
                   <div ref="{{refDispShadow}}" style="position:absolute;left:0;bottom:-14px;height:30px;opacity:.9;background:radial-gradient(closest-side, rgba(0,0,0,.5), transparent 74%);pointer-events:none"></div>
                   <div ref="{{refDispBar}}" style="position:relative;visibility:hidden">
-                    <div ref="{{refDispFoldWrap}}" style="position:absolute;left:0;top:0;width:0;height:0">
-                      <div ref="{{refDispDateHalf}}" style="position:absolute;left:0;top:0;width:620px;height:160px;background:var(--inset);border:1px solid var(--clock-bezel);transform:rotate(180deg)">
-                        <canvas ref="{{refDispDate}}" style="position:absolute"></canvas>
+                    <!-- Same nested rig as the entry and the dock: outer wrap (time-side pin) carries
+                         the plate + inner wrap; inner wrap (date-side pin) carries the leaf. -->
+                    <div ref="{{refDispFoldWrap}}" style="position:absolute;left:0;top:0;width:0;height:0;z-index:2">
+                      <div ref="{{refDispFoldInner}}" style="position:absolute;left:0;top:0;width:0;height:0">
+                        <div ref="{{refDispDateHalf}}" style="position:absolute;left:0;top:0;width:620px;height:160px;background:var(--inset);border:1px solid var(--clock-bezel);transform:rotate(180deg)">
+                          <canvas ref="{{refDispDate}}" style="position:absolute"></canvas>
+                        </div>
+                      </div>
+                      <div ref="{{refDispLink}}" style="position:absolute;left:574px;top:0;width:91px;height:46px;background:var(--inset);border:1px solid var(--clock-bezel);border-radius:23px">
+                        <span ref="{{refDispPinA}}" style="position:absolute;left:17px;top:17px;width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 50% 44%,#25282f 0 34%,#3e434d 34% 52%,#15171b 52%);box-shadow:0 0 0 .5px #2b2f38"></span>
+                        <span ref="{{refDispPinB}}" style="position:absolute;left:63px;top:17px;width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 50% 44%,#25282f 0 34%,#3e434d 34% 52%,#15171b 52%);box-shadow:0 0 0 .5px #2b2f38"></span>
                       </div>
                     </div>
-                    <div ref="{{refDispTimeHalf}}" style="position:absolute;left:620px;top:0;width:620px;height:160px;background:var(--inset);border:1px solid var(--clock-bezel)">
+                    <div ref="{{refDispTimeHalf}}" style="position:absolute;left:620px;top:0;width:620px;height:160px;z-index:1;background:var(--inset);border:1px solid var(--clock-bezel)">
                       <canvas ref="{{refDispTime}}" style="position:absolute"></canvas>
-                    </div>
-                    <div ref="{{refDispLink}}" style="position:absolute;left:574px;top:0;width:91px;height:46px;background:var(--inset);border:1px solid var(--clock-bezel);border-radius:23px">
-                      <span ref="{{refDispPinA}}" style="position:absolute;left:17px;top:17px;width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 50% 44%,#25282f 0 34%,#3e434d 34% 52%,#15171b 52%);box-shadow:0 0 0 .5px #2b2f38"></span>
-                      <span ref="{{refDispPinB}}" style="position:absolute;left:63px;top:17px;width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 50% 44%,#25282f 0 34%,#3e434d 34% 52%,#15171b 52%);box-shadow:0 0 0 .5px #2b2f38"></span>
                     </div>
                   </div>
                 </div>
@@ -1669,6 +1679,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=258"></script>
+<script type="module" src="js/app-controller.js?v=259"></script>
 </body>
 </html>
