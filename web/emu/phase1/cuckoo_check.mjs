@@ -142,5 +142,27 @@ emu.cfg('cuckoo = banana');
 emu.ckSet(-1, 99);                                  // 99 with cuckoo=off must not start
 chk('unknown value parses to off (force-start refused)', emu.ckActive() === -1);
 
+// ---- cuckoo_preview (serial-only): plays once, never touches the config --------------------
+console.log('preview:');
+emu.cfg('cuckoo = off');
+emu.cfg('cuckoo_preview = nod');
+chk('preview nod plays with cuckoo=off', emu.ckActive() === NOD);
+runPiece(2000);
+emu.cfg('cuckoo_preview = trust');
+chk('preview by piece name plays it', emu.ckActive() === TRUST);
+emu.cfg('cuckoo_preview = carry');                  // preview PREEMPTS a running preview
+chk('a new preview preempts the running one', emu.ckActive() === CARRY);
+runPiece();
+emu.ckSet(-1, 99);                                  // config must still be off (preview never set it)
+chk('preview left the config untouched (still off)', emu.ckActive() === -1);
+emu.cfg('cuckoo = heartbeat');
+emu.cfg('cuckoo_preview = on');
+chk('preview "on" plays the configured piece', emu.ckActive() === HEARTBEAT);
+runPiece();
+emu.cfg('cuckoo_preview = pendulum');               // no PPS in the harness: the nod stands in
+chk('preview pendulum in holdover previews the NOD', emu.ckActive() === NOD);
+runPiece(2000);
+emu.cfg('cuckoo = off');
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
