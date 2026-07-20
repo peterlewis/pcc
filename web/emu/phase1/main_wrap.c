@@ -507,32 +507,35 @@ int emu_colon_mode(void){ return colonMode; }
  * zeroed by the firmware's own colonAnimationSync() at even-second PPS. This is the index the
  * hardware DMA would be reading — NOT a reconstruction from currentTime parity, which flips
  * mid-second (.900 prep, RMC decode) and chopped the animation into segments. */
-/* --- Cuckoo animations (CUCKOO_SPEC.md; cuckoo branch only) ------------------------------
- * The engine's per-segment levels (0..16) let the face render the dwell-dither greyscale the
- * hardware plays, exactly like emu_digit_fade renders the significance fade. emu_cuckoo_set
- * with interval 99 is the test hook: force-start an animation without waiting for a quarter. */
+/* --- Cuckoo flourishes (CUCKOO_SPEC.md v2; cuckoo-v2 branch only) -------------------------
+ * v2 is per-DIGIT: the engine writes ck_bright[row] (0..16) which segbal composes into the
+ * dither duty, exactly like emu_digit_fade renders the significance fade. The face multiplies
+ * its digit rendering by emu_cuckoo_level. emu_cuckoo_set is the test hook: op 99 force-starts
+ * the piece named by `anim` (0 off, 1 carry, 2 heartbeat, 3 pendulum, 4 trust), op 98
+ * force-starts the NOD; any other op just sets the `cuckoo` config value. */
 int emu_cuckoo_active(void){
 #if EMU_HAS_CUCKOO
-  return ck_scan ? 1 : 0;
+  return (ck_anim == 0xFF) ? -1 : (int)ck_anim;  /* -1 idle; else the running piece (0xFE = nod) */
 #else
-  return 0;
+  return -1;
 #endif
 }
 int emu_cuckoo_level(int d, int s){
 #if EMU_HAS_CUCKOO
-  if (!ck_scan) return 16;                       /* idle: the plain face is 'fully lit' */
-  return (d >= 0 && d < CK_DIGITS && s >= 0 && s < 8) ? ck_levels[d][s] : 16;
+  (void)s;                                       /* v2 is per-digit; s kept for ABI stability */
+  if (ck_anim == 0xFF) return 16;                /* idle: the plain face is 'fully lit' */
+  return (d >= 0 && d < CK_ROWS) ? ck_bright[d] : 16;
 #else
   (void)d; (void)s; return 16;
 #endif
 }
-void emu_cuckoo_set(int anim, int interval){
+void emu_cuckoo_set(int anim, int op){
 #if EMU_HAS_CUCKOO
-  if (anim >= 0 && anim < CKA_COUNT) cuckoo_animation = (uint8_t)anim;
-  if (interval == 99) { ck_carry_n = 5; ck_start(cuckoo_animation); }
-  else if (interval >= 0 && interval <= 60) cuckoo_interval = (uint8_t)interval;
+  if (anim >= 0 && anim < CK_PIECES) cuckoo = (uint8_t)anim;
+  if (op == 99 && cuckoo != CK_OFF) { ck_carry_n = 5; ck_start(cuckoo); }
+  else if (op == 98) ck_start(CK_NOD);
 #else
-  (void)anim; (void)interval;
+  (void)anim; (void)op;
 #endif
 }
 
@@ -547,11 +550,8 @@ int emu_colon_civil(void){ return colonMode; }   /* lean branch: one colon mode,
 int emu_colon_alt(void){ return colonMode; }
 #endif
 /* Named mode ids — reference these instead of magic numbers that rot if the enum reorders. */
-#if EMU_HAS_CUCKOO
-int emu_MODE_CUCKOO_SHOWCASE(void){ return MODE_CUCKOO_SHOWCASE; }
-#else
+/* v2 has no showcase mode (deferred with the date-board extension); export kept for ABI. */
 int emu_MODE_CUCKOO_SHOWCASE(void){ return -1; }
-#endif
 int emu_MODE_UNIX(void){ return MODE_UNIX; }
 int emu_MODE_ISO_ORDINAL(void){ return MODE_ISO_ORDINAL; }
 int emu_MODE_ISO_WEEK(void){ return MODE_ISO_WEEK; }
