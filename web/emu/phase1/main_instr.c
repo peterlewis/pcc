@@ -357,7 +357,7 @@ static void astro_update(void){
     c.az = (int16_t)ia;
     c.el = (int16_t)(el < 0 ? el - 0.5 : el + 0.5);
     c.sun_up_today = (sun_times(lat, lon, (double)currentTime,
-                                &rise, &set, &noon, 0, 0, 0) == 0);
+                                &rise, &set, &noon, 0, 0, 0, 0) == 0);
     c.noon_min = (int16_t)astro_local_minutes(noon);     // noon is valid even at the poles
     if (c.sun_up_today) {
       c.rise_min = (int16_t)astro_local_minutes(rise);

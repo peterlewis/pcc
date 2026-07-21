@@ -173,7 +173,7 @@ void emu_tick(void){
 void emu_poll(void){
 #if EMU_HAS_ASTRO
   if (displayMode==MODE_SUN || displayMode==MODE_SUN_AZEL || displayMode==MODE_MOON
-      || displayMode==MODE_GRID || displayMode==MODE_LATLON) astro_update();
+      || displayMode==MODE_GRID || displayMode==MODE_LATLON || displayMode==MODE_DARK) astro_update();
 #endif
 #if EMU_HAS_ALT
   alt_update();
@@ -223,6 +223,18 @@ void   emu_ee_reset(void){ memset(ee_sfile,0xFF,sizeof ee_sfile); ee_load(); ee2
 void   emu_ee_load(void){ ee_load(); ee2_load(); }                            /* re-scan (reboot) */
 int    emu_ee_commit(void){ int r=(int)ee_commit(); if(r) menu_dirty=0; return r; }
 void   emu_ee_apply(void){ menu_apply_overrides(); }
+/* Record a display-mode enable into the override store via the firmware's OWN menu_record_key
+ * path — validates the u64 mode-mask persistence for ordinals >= 32 (ZONE2/RELATIV/HOLD). */
+void   emu_record_mode(int m,int on){ if(m<0||m>=NUM_DISPLAY_MODES) return; config.modes_enabled[m]=on?1:0; menu_record_key(KID_MODE_BASE+m,on?1:0); }
+int    emu_mode_enabled(int m){ return (m>=0 && m<NUM_DISPLAY_MODES) ? config.modes_enabled[m] : -1; }
+/* MODE_DARK twilight-ladder cache read-outs (local minutes-of-day, -1 = n/a). */
+int    emu_astro_set(void){ return astro.set_min; }
+int    emu_astro_noon(void){ return astro.noon_min; }
+int    emu_dark_civ(void){ return astro.civ_dusk_min; }
+int    emu_dark_nau(void){ return astro.nau_dusk_min; }
+int    emu_dark_ast_dusk(void){ return astro.ast_dusk_min; }
+int    emu_dark_ast_dawn(void){ return astro.ast_dawn_min; }
+int    emu_dark_flags(void){ return (astro.dark_tonight?1:0) | (astro.always_dark?2:0); }
 void   emu_ovr_clear(void){ memset((void*)&ovr,0,sizeof ovr); }              /* simulate RAM loss */
 int    emu_ovr_valid(void){ return ovr.valid; }
 void   emu_set_mtime(int fd,int ft){ config.fdate=(unsigned short)fd; config.ftime=(unsigned short)ft; }
@@ -358,6 +370,7 @@ int emu_mode_id(const char* name){
   #if EMU_HAS_STAR
   M(MODE_STAR)
   #endif
+  M(MODE_ZONE2) M(MODE_DARK)
   #undef M
   return -1;
 }
@@ -429,6 +442,8 @@ void emu_boot_cold(unsigned int t){
   config.tolerance_1ms = 1000; config.tolerance_10ms = 10000; config.tolerance_100ms = 100000;
   config.modes_enabled[MODE_ISO8601_STD] = 1;
   latitude = 0.0f; longitude = 0.0f;
+  /* ZONE 2 globals are .data on silicon — power-on restores their initialisers. Mirror that. */
+  loadedZone2[0] = 0; offset2 = 0; zone2_fixed = 0; delayedLoadZone2 = 0; preloadZone2[0] = 0;
   for (int i=0;i<SV_COUNT;i++) satview[i] = 255;   /* nothing in view yet */
   satview_stale = 0;
   /* Tempcomp learned state is .bss/.data on real silicon — a power-on clears it and the startup
@@ -531,8 +546,8 @@ int emu_cuckoo_level(int d, int s){
 }
 void emu_cuckoo_set(int anim, int op){
 #if EMU_HAS_CUCKOO
-  if (anim >= 0 && anim < CK_PIECES) cuckoo = (uint8_t)anim;
-  if (op == 99 && cuckoo != CK_OFF) { ck_carry_n = 5; ck_start(cuckoo); }
+  if (anim >= 0 && anim < CK_PIECES) cuckoo = (uint8_t)anim;   /* 0 off, 1 trust (shipped catalogue) */
+  if (op == 99 && cuckoo != CK_OFF) ck_start(cuckoo);
   else if (op == 98) ck_start(CK_NOD);
 #else
   (void)anim; (void)op;
