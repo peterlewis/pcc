@@ -36,6 +36,9 @@ export const DEFAULT_CONFIG = [
   'MODE_SOLAR = enabled',
   'MODE_STAR = enabled',
   'MODE_ADEV = enabled',
+  'MODE_DARK = enabled',
+  'MODE_ZONE2 = enabled',
+  'zone2 = UTC',                   // give the second-zone mode a real target (else it shows dashes)
 ].join('\n');
 
 export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = DEFAULT_CONFIG } = {}) {

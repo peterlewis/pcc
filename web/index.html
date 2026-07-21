@@ -291,6 +291,7 @@
                       <button onClick="{{oTrSol}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbTrSol}}"></span>SOLAR TIME</button>
                       <button onClick="{{oTrOff}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbTrOff}}"></span>UTC OFFSET</button>
                       <button onClick="{{oTrTz}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbTrTz}}"></span>TZ NAME</button>
+                      <button onClick="{{oTrZone2}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbTrZone2}}"></span>ZONE 2</button>
                     </div>
                   </div>
                 </div>
@@ -310,6 +311,7 @@
                       <button onClick="{{oAstMoon}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbAstMoon}}"></span>MOON PHASE</button>
                       <button onClick="{{oAstGrid}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbAstGrid}}"></span>MAIDENHEAD</button>
                       <button onClick="{{oAstLl}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbAstLl}}"></span>LAT · LON</button>
+                      <button onClick="{{oAstDark}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbAstDark}}"></span>TWILIGHT</button>
                       <button onClick="{{oAstStar}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt)"><span style="{{cbAstStar}}"></span>STAR TRANSIT</button>
                     </div>
                   </div>
@@ -619,9 +621,13 @@
                 <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">01 · {{faceRoomCap}}</span>
                 <span style="flex:1"></span>
                 <div style="display:flex;align-items:center;gap:8px" title="FLAT = the 20-digit line · STACKED = the desk pose, date over time"><span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">POSE</span><div style="display:flex;border:1px solid var(--line)"><button onClick="{{onPoseFlat}}" style="{{ssPoseFlat}}">FLAT</button><button onClick="{{onPoseStack}}" style="{{ssPoseStack}}">STACKED</button></div></div>
-                <button onClick="{{onFullFace}}" title="The clock fills the room — click or Esc returns" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.12em;color:var(--txt3);background:transparent;border:1px solid var(--line2);border-radius:var(--r-1);padding:6px 11px;cursor:pointer" style-hover="color:var(--txt2);border-color:var(--txt3)">FULL FACE</button>
-                <button onClick="{{onShowcase}}" style="{{scBtnStyle}}" style-hover="color:var(--txt2);border-color:var(--txt3)">{{scLabel}}</button>
-                <button onClick="{{onReplay}}" title="Replay the opening fold" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.12em;color:var(--txt3);background:transparent;border:1px solid var(--line2);border-radius:var(--r-1);padding:6px 11px;cursor:pointer" style-hover="color:var(--txt2);border-color:var(--txt3)">REPLAY FOLD</button>
+                <!-- FULL FACE / SHOWCASE / REPLAY FOLD buttons disabled 2026-07-22 (handlers retained, dormant):
+                     - FULL FACE is broken: the dim mask renders OVER the clock and the flying hero clips
+                       instead of scaling to fit the viewport. Principle when revived: ALWAYS show the WHOLE clock.
+                     - SHOWCASE removed at user request (not wanted on this surface).
+                     - REPLAY FOLD is broken (replay of the opening fold).
+                     Re-enable by restoring the three button elements; handlers onFullFace / onShowcase / onReplay
+                     and the FULL FACE overlay below still exist. -->
                 <sc-if value="{{hwCalShow}}" hint-placeholder-val="{{false}}">
                   <button onClick="{{onHwCalibrate}}" style="{{hwCalBtnStyle}}">{{hwCalBtnLabel}}</button>
                 </sc-if>
@@ -1714,6 +1720,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=264"></script>
+<script type="module" src="js/app-controller.js?v=265"></script>
 </body>
 </html>

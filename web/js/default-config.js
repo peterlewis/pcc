@@ -24,6 +24,10 @@ MATRIX_FREQUENCY = 20000
 # Europe/London; Etc/GMT+5 for a fixed offset; Etc/UTC for UTC.
 #ZONE_OVERRIDE = Europe/London
 
+# Second timezone for MODE_ZONE2 (shown on the date row). Same format as ZONE_OVERRIDE:
+# an IANA name (full DST) or a fixed offset (Etc/UTC, Etc/GMT+5). Leave commented for none.
+#zone2 = America/New_York
+
 
 ## display modes — enable every row you want; the buttons cycle the enabled set
 
@@ -65,6 +69,9 @@ MODE_SUN_AZEL = disabled
 MODE_MOON     = disabled
 MODE_GRID     = disabled
 MODE_LATLON   = disabled
+# Observing twilight ladder — civil / nautical / astronomical dusk + a live countdown to
+# astronomical darkness (sun -18°). White nights report NO DARK; needs a position.
+MODE_DARK     = disabled
 
 # Bright-star meridian-transit predictor — paged countdowns to the soonest bright stars
 # crossing your local meridian, e.g. "SIRI  1 35". Needs a position (GPS or fake_longitude).
@@ -150,6 +157,10 @@ MODE_TEMPCOMP = disabled
 # times on the date row ("1s 3.2e-11" ... "1024s 3e-11"). The honest, undisciplined crystal signal.
 MODE_ADEV = disabled
 
+# Second civil timezone on the date row (label screen, then HH:MM:SS with a +1/-1 day
+# marker). Set the zone with the 'zone2' key up by ZONE_OVERRIDE; shows "----" until set.
+MODE_ZONE2 = disabled
+
 
 ## serial output
 # NMEA passthrough over USB: off / rmc / on
@@ -198,9 +209,11 @@ export const MODE_FIELDS = [
   { cfg: 'mode_moon', key: 'moon', group: 'astro' },
   { cfg: 'mode_grid', key: 'grid', group: 'astro' },
   { cfg: 'mode_latlon', key: 'latlon', group: 'astro' },
+  { cfg: 'mode_dark', key: 'dark', group: 'astro' },
   { cfg: 'mode_star', key: 'star', group: 'astro' },
   { cfg: 'mode_tempcomp', key: 'tempcomp', group: 'diag' },
   { cfg: 'mode_adev', key: 'adev', group: 'diag' },
+  { cfg: 'mode_zone2', key: 'zone2', group: 'timerow' },
 ];
 
 // Derive the config-DRIVEN slice of app state from a config.txt (defaults to the golden config).

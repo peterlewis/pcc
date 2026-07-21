@@ -9,7 +9,7 @@ import { TelemetryLog } from './telemetrylog.js?v=4';
 import { prepReview, drawReview, sampleAt, tAtX } from './review.js?v=1';
 import { subSatellitePoint } from './satpass.js?v=1';
 import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=1';
-import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=4';
+import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=5';
 import { REC as PF_REC, RANGE as PF_RANGE, modelStream, runPrefilter } from './prefilter.mjs?v=2';
 
 // config.txt is the single source of truth: the clock-behaviour defaults (enabled modes, colon,
@@ -105,7 +105,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=108'), import('./realdev.js?v=117'), import('./emu-driver.js?v=36'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=1')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=108'), import('./realdev.js?v=117'), import('./emu-driver.js?v=37'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=2')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
       try { localStorage.removeItem('pccweb.cuckoo'); } catch (e) {}   // parked feature's persisted setting — clear the ghost
       this.session = SIM.createSession({ preroll: 1560 });
@@ -2316,11 +2316,15 @@ class Component extends DcLite {
       { key: 'solar', mode: 'MODE_SOLAR', label: 'SOLAR TIME', group: 'TIME ROW' },
       { key: 'offset', mode: 'MODE_SHOW_OFFSET', label: 'UTC OFFSET', group: 'TIME ROW' },
       { key: 'tz', mode: 'MODE_SHOW_TZ_NAME', label: 'TZ NAME', group: 'TIME ROW' },
+      // Second civil timezone on the date row — target set by the zone2 config key.
+      { key: 'zone2', mode: 'MODE_ZONE2', label: 'ZONE 2', group: 'TIME ROW' },
       { key: 'sun', mode: 'MODE_SUN', label: 'SUN RISE/SET', group: 'ASTRO' },
       { key: 'sun_azel', mode: 'MODE_SUN_AZEL', label: 'SUN AZ·EL', group: 'ASTRO' },
       { key: 'moon', mode: 'MODE_MOON', label: 'MOON PHASE', group: 'ASTRO' },
       { key: 'grid', mode: 'MODE_GRID', label: 'MAIDENHEAD', group: 'ASTRO' },
       { key: 'latlon', mode: 'MODE_LATLON', label: 'LAT·LON', group: 'ASTRO' },
+      // Observing twilight ladder — civil/nautical/astronomical dusk + countdown to darkness.
+      { key: 'dark', mode: 'MODE_DARK', label: 'TWILIGHT', group: 'ASTRO' },
       // Bright-star meridian-transit predictor — paged countdowns to culminating stars.
       { key: 'star', mode: 'MODE_STAR', label: 'STAR TRANSIT', group: 'ASTRO' },
       // Tempcomp diagnostic pages (die temp / HSE / LSE / samples+state) — real firmware read-out.
@@ -2898,6 +2902,7 @@ class Component extends DcLite {
       cbAstMoon: this.cb(!!st.modesEnabled.moon), oAstMoon: () => this.toggleMode('moon'),
       cbAstGrid: this.cb(!!st.modesEnabled.grid), oAstGrid: () => this.toggleMode('grid'),
       cbAstLl: this.cb(!!st.modesEnabled.latlon), oAstLl: () => this.toggleMode('latlon'),
+      cbAstDark: this.cb(!!st.modesEnabled.dark), oAstDark: () => this.toggleMode('dark'),   // MODE_DARK — twilight ladder: civil/nautical/astronomical dusk + countdown to darkness
       cbAstStar: this.cb(!!st.modesEnabled.star), oAstStar: () => this.toggleMode('star'),   // MODE_STAR — the NEXT TRANSITS panel needs an enable path (was config-only)
       cbDgTc: this.cb(!!st.modesEnabled.tempcomp), oDgTc: () => this.toggleMode('tempcomp'),   // diagnostic read-out — lives in ADVANCED
       cbDgAdev: this.cb(!!st.modesEnabled.adev), oDgAdev: () => this.toggleMode('adev'),   // MODE_ADEV — Allan-deviation page; parser + ingest existed but had no UI enable
@@ -2908,6 +2913,7 @@ class Component extends DcLite {
       cbTrSol: this.cb(!!st.modesEnabled.solar), oTrSol: () => this.toggleMode('solar'),
       cbTrOff: this.cb(!!st.modesEnabled.offset), oTrOff: () => this.toggleMode('offset'),
       cbTrTz: this.cb(!!st.modesEnabled.tz), oTrTz: () => this.toggleMode('tz'),
+      cbTrZone2: this.cb(!!st.modesEnabled.zone2), oTrZone2: () => this.toggleMode('zone2'),   // MODE_ZONE2 — second civil timezone on the date row
       // Capability note: when a stock clock is connected whose firmware lacks some rollup modes,
       // say so (they still work in the emulator). Empty for the emulator / an unread device = full.
       modesCapNote: (() => {
