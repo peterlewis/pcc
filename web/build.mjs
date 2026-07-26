@@ -94,11 +94,11 @@ let html = readFileSync(resolve(web, 'index.html'), 'utf8');
 
   // Ceilings: hand-authored styling that a component already covers.
   const CEIL = [
-    { key: 'inline style="',            max: 1075, n: count(/style="/g),
+    { key: 'inline style="',            max: 868, n: count(/style="/g),
       fix: 'use a component class from pcc-components.css' },
-    { key: 'background:var(--panel)',   max: 63,   n: count(/background:var\(--panel\)/g),
+    { key: 'background:var(--panel)',   max: 27,   n: count(/background:var\(--panel\)/g),
       fix: 'this is the .mod chassis — use class="mod"' },
-    { key: 'border:1px solid var(--line)', max: 69, n: count(/border:1px solid var\(--line\)/g),
+    { key: 'border:1px solid var(--line)', max: 20, n: count(/border:1px solid var\(--line\)/g),
       fix: 'this is the .mod / .rack edge — use the component' },
     { key: 'background:var(--strip)',   max: 14,   n: count(/background:var\(--strip\)/g),
       fix: 'this is the engraved header — use class="mod__strip"' },
@@ -107,7 +107,7 @@ let html = readFileSync(resolve(web, 'index.html'), 'utf8');
   ];
 
   // Floor: you may not satisfy the ceilings by deleting components.
-  const FLOOR = [{ key: 'class="  [components in use]', min: 456, n: count(/class="/g) }];
+  const FLOOR = [{ key: 'class="  [components in use]', min: 628, n: count(/class="/g) }];
 
   const fail = [], slack = [];
   for (const r of CEIL) {

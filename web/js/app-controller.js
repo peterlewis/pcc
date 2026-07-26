@@ -2828,8 +2828,6 @@ class Component extends DcLite {
       : sim ? 'VIRTUAL GPS' : 'HOST CLOCK · NO DEVICE';
 
     return {
-      // PPS drives the colon: it only pulses when something is actually disciplining us.
-      rackPps: (!standby && pr && pr.hadPps) ? 'on' : 'off',
 
       rkSigV: pv ? pv[0] : dash, rkSigU: pv ? pv[1] : '',
       rkSigS: standby ? 'NO FIX · HOST CLOCK' : (uUs != null ? '±' + (uUs < 1 ? '<1' : uUs) + ' µs' : 'ACQUIRING'),
@@ -3243,7 +3241,6 @@ class Component extends DcLite {
         const real = !!(S && S.real);
         const cfg = (S && S.cfg && S.cfg.modes) ? Object.keys(S.cfg).length : 0;
         return {
-          vRackPps: conn ? 'on' : 'off',
           vLinkSt: conn ? (real ? 'live' : 'sim') : 'absent',
           vLinkV: conn ? '115200' : '—',
           vDeviceS: conn ? (real ? 'MK IV · STM32 CDC' : 'EMULATED · NO HARDWARE') : 'NOT CONNECTED',
@@ -3478,7 +3475,6 @@ class Component extends DcLite {
         const hd = valid ? S.fix.hdop : null;
         return {
           kRackSt: valid ? 'live' : 'absent',
-          kRackPps: valid ? 'on' : 'off',
           kConst: valid ? ('G' + cnt('G') + ' R' + cnt('R') + ' E' + cnt('E') + ' C' + cnt('C')) : 'NO FIX',
           kDopNote: hd == null ? 'NO FIX' : hd < 1 ? 'IDEAL GEOMETRY' : hd < 2 ? 'GOOD GEOMETRY' : hd < 5 ? 'MODERATE' : 'POOR GEOMETRY',
           kLatLon: valid ? (S.obs.lat.toFixed(4) + ', ' + S.obs.lon.toFixed(4)) : 'OBSERVER DEFAULT',
@@ -3601,7 +3597,6 @@ class Component extends DcLite {
       // em-dash and cell 6 carries the reason, rather than the charts implying a stream that isn't
       // there. The colon only pulses when a PPS edge is actually arriving.
       tRackSt: noData ? 'absent' : 'live',
-      tRackPps: noData ? 'off' : 'on',
       tRackProv: noData ? 'NO $PMTXTS · pps=off' : ('DROPPED ' + String(T.drop || 0)),
       fitK0: fit ? fit.k0.toFixed(4) : '—', fitK1: fit ? fit.k1.toFixed(5) : '—', fitK2: fit ? fit.k2.toFixed(6) : '—',
       fitSpread: fit ? fit.spread.toFixed(1) + ' °C' : '—',
