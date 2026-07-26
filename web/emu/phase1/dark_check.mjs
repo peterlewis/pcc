@@ -2,7 +2,8 @@
 // times + a live countdown to astronomical darkness. Wires up sun_times()'s twilight tiers (previously
 // dead, passed NULL) and adds the -18 deg astronomical tier + dawn-by-symmetry.
 //
-// Covers: (a) MODE_DARK is ordinal 34 (needs the u64 mask); (b) the physical ordering sunset < civil <
+// Covers: (a) MODE_DARK is ordinal 27 — it moved down into the astro block when the mode was reflowed
+// into the astro-pack tier, so it no longer needs the u64 mask; (b) the physical ordering sunset < civil <
 // nautical < astronomical dusk (the sun sinks deeper, each tier later in the evening); (c) astronomical
 // dawn is the mirror of dusk about solar noon; (d) the render pages + honest dashes; (e) high-latitude
 // white nights that never reach -18 report NO DARK and dash the astronomical pages; (f) no fix -> dashes;
