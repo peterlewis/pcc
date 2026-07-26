@@ -45,7 +45,10 @@
    ========================================================================== */
 .rack {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  /* minmax(0,1fr) not 1fr: a bare 1fr track has an AUTO minimum, so a long value (a port path,
+     an IANA zone) widens its own cell and the six stop being equal. The rack's whole promise is
+     that cell 4 is always in the same place. */
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   position: relative;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -151,6 +154,9 @@
   font-size: var(--fs-nano); }
 .kv__v { color: var(--txt-hi); white-space: nowrap; }
 .kv__v[data-state="absent"] { color: var(--txt3); }
+.kv__v[data-state="ready"]  { color: var(--lock); }    /* this transport can be used right now */
+.kv__v[data-state="warn"]   { color: var(--acq); }     /* usable, but something must change first */
+.kv__v[data-state="live"]   { color: var(--led); }     /* this transport is the one currently carrying the clock */
 
 /* ---- the control face: depth 2. You operate these. ------------------------- */
 .ctl { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
@@ -229,14 +235,14 @@
 .span-12 { grid-column: span 12; }
 
 @media (max-width: 1180px) {
-  .rack { grid-template-columns: repeat(3, 1fr); }
+  .rack { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .rack__cell:nth-child(3) { border-right: 0; }
   .rack__cell:nth-child(-n+3) { border-bottom: 1px solid var(--line-soft); }
   .rack__colon { display: none; }      /* the colon only means something on one row */
   .span-4, .span-6, .span-8 { grid-column: span 12; }
 }
 @media (max-width: 620px) {
-  .rack { grid-template-columns: repeat(2, 1fr); }
+  .rack { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .rack__cell:nth-child(2n) { border-right: 0; }
   .rack__cell:nth-child(-n+4) { border-bottom: 1px solid var(--line-soft); }
 }

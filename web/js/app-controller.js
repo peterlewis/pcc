@@ -3228,6 +3228,7 @@ class Component extends DcLite {
     const bridgeOk = !!st.bridgeInfo;
     const ctxOk = typeof window !== 'undefined' && window.isSecureContext;
     const chrom = typeof window !== 'undefined' && !!window.chrome;
+    const bridge = !!this.state.bridgeInfo;   // pccd answered its probe — the bridge transport is up
     return {
       cPort: this.portName(S),
       cDevice: conn ? (S.real ? 'Precision Clock Mk IV · STM32 CDC' : 'Emulated Mk IV · no hardware') : '—',
@@ -3256,8 +3257,24 @@ class Component extends DcLite {
           vTransSt: conn ? 'live' : 'absent',
           vTransV: conn ? (real ? 'SERIAL' : 'EMU') : '—',
           vTransS: conn ? (real ? 'WEB SERIAL · USB CDC' : 'IN-BROWSER FIRMWARE') : (chrom ? 'WEB SERIAL AVAILABLE' : 'NEEDS A CHROMIUM BROWSER'),
+
+          // ---- CONNECTING A REAL CLOCK: each transport reports its READINESS AS A VALUE, so the
+          // room answers "can I use this, here, now?" instead of making you read a walkthrough and
+          // work it out. live = this one is carrying the clock; ready = usable now; warn = usable
+          // once something changes; absent = not available in this browser.
+          trWsSt: (conn && real) ? 'live' : (ctxOk && chrom ? 'ready' : 'absent'),
+          trWsV: (conn && real) ? 'CONNECTED'
+            : !chrom ? 'UNAVAILABLE — NOT CHROMIUM'
+            : !ctxOk ? 'UNAVAILABLE — NEEDS HTTPS OR LOCALHOST'
+            : 'AVAILABLE',
+          trBrSt: bridge ? (conn && real ? 'live' : 'ready') : 'warn',
+          trBrV: bridge ? ((conn && real) ? 'CONNECTED' : 'RUNNING — READY') : 'NOT RUNNING — INSTALL BELOW',
         };
       })(),
+      // One command each, copied rather than transcribed from a wall of shell.
+      onCopyPccd: () => { try { navigator.clipboard.writeText('curl -L https://github.com/peterlewis/pcc/releases/latest/download/pccd-macos-universal.tar.gz | tar xz && cd pcc && ./pccd\n'); } catch (e) {} },
+      onCopyPccdLinux: () => { try { navigator.clipboard.writeText('curl -L https://github.com/peterlewis/pcc/releases/latest/download/pccd-linux-$(uname -m).tar.gz | tar xz && cd pcc && ./pccd\n'); } catch (e) {} },
+      onCopyChrony: () => { try { navigator.clipboard.writeText('refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4\n'); } catch (e) {} },
       // Real Mk IV over Web Serial (requires a genuine user gesture for requestPort).
       onConnectReal: () => this.connectRealDevice(),
       // Explore with a simulation — a clearly-labelled demo for anyone without hardware. NEVER
