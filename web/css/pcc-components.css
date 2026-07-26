@@ -198,6 +198,9 @@
 .btn--primary { color: var(--led); border-color: var(--led); }
 .btn--primary:hover { color: var(--led); border-color: var(--led); background: var(--led-fill); }
 .btn[disabled] { color: var(--txt3); border-color: var(--line); cursor: not-allowed; }
+/* A standalone toggle — a .btn that latches. .seg__btn covers the grouped case, but a lone
+   on/off control had no component and was being hand-built out of inline borders. */
+.btn[aria-pressed="true"] { color: var(--led); border-color: var(--led); background: var(--led-fill); }
 
 /* The digit ladder was removed with the PRECISION module 2026-07-22 — it had no other
    mount point, and an unused component is the same rot as an unused inline style. The

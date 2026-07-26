@@ -3150,6 +3150,27 @@ class Component extends DcLite {
           trBrV: bridge ? ((conn && real) ? 'CONNECTED' : 'RUNNING — READY') : 'NOT RUNNING — INSTALL BELOW',
         };
       })(),
+      // ---- SIMULATION DRILL -----------------------------------------------------------------
+      // These three demonstrate the honest-digits behaviour: drop the fix, run time forward fast,
+      // and watch the sub-second digits stop being claimed. They only mean anything in simulation
+      // — you cannot fake a real receiver's signal — so the module they live in is not rendered at
+      // all outside it, rather than rendered greyed out. They used to sit in a panel on FACE, which
+      // put a demo rig in the room's prime position; DEVICE is where the simulation is started and
+      // stopped, so it is where its drills belong.
+      drillShow: this.appMode() === 'simulation' && !!this.emu,
+      onGpsSignal: () => { if (this.appMode() !== 'simulation' || !this.emu) return; this.emu.setSignal(!this.emu.state().signal); },
+      onTimelapse: () => { if (this.appMode() !== 'simulation' || !this.emu) return; this.emu.setTimelapse(!(this.emu.timelapseOn && this.emu.timelapseOn())); },
+      onHoldoverFade: () => { if (this.appMode() !== 'simulation' || !this.emu) return; this.emu.setHoldoverFade(!(this.emu.holdoverFadeOn && this.emu.holdoverFadeOn())); },
+      ...(() => {
+        const E = this.emu, on = (v) => (v ? 'true' : 'false');
+        if (!E || this.appMode() !== 'simulation') return { apGps: 'false', apTl: 'false', apFade: 'false' };
+        return {
+          apGps: on(E.state && E.state().signal),
+          apTl: on(E.timelapseOn && E.timelapseOn()),
+          apFade: on(E.holdoverFadeOn && E.holdoverFadeOn()),
+        };
+      })(),
+
       // One command each, copied rather than transcribed from a wall of shell.
       onCopyPccd: () => { try { navigator.clipboard.writeText('curl -L https://github.com/peterlewis/pcc/releases/latest/download/pccd-macos-universal.tar.gz | tar xz && cd pcc && ./pccd\n'); } catch (e) {} },
       onCopyPccdLinux: () => { try { navigator.clipboard.writeText('curl -L https://github.com/peterlewis/pcc/releases/latest/download/pccd-linux-$(uname -m).tar.gz | tar xz && cd pcc && ./pccd\n'); } catch (e) {} },

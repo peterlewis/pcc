@@ -107,7 +107,7 @@ let html = readFileSync(resolve(web, 'index.html'), 'utf8');
   ];
 
   // Floor: you may not satisfy the ceilings by deleting components.
-  const FLOOR = [{ key: 'class="  [components in use]', min: 685, n: count(/class="/g) }];
+  const FLOOR = [{ key: 'class="  [components in use]', min: 694, n: count(/class="/g) }];
 
   const fail = [], slack = [];
   for (const r of CEIL) {

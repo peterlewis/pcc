@@ -998,6 +998,26 @@
                 </div>
                 <div class="mod__legend">Run pccd, then open the address it prints and click CONNECT DEVICE. Served over https, Safari and Firefox cannot reach a local bridge &#8212; use the localhost copy.</div>
               </section>
+              <!-- SIMULATION DRILL — rehomed from the deleted PRECISION panel. These demonstrate the
+                   honest-digits behaviour: drop the fix, run time forward, watch the sub-second digits
+                   stop being claimed. They only mean anything in simulation, so the module is not
+                   rendered at all outside it rather than rendered greyed out. -->
+              <sc-if value="{{drillShow}}" hint-placeholder-val="{{false}}">
+                <section class="mod">
+                  <div class="mod__strip">
+                    <span>SIMULATION DRILL</span>
+                    <span class="mod__stat" data-state="sim">SIMULATION ONLY</span>
+                  </div>
+                  <div class="mod__field">
+                    <div class="ctl">
+                      <button class="btn" aria-pressed="{{apGps}}" onClick="{{onGpsSignal}}">GPS SIGNAL</button>
+                      <button class="btn" aria-pressed="{{apTl}}" onClick="{{onTimelapse}}">TIME-LAPSE</button>
+                      <button class="btn" aria-pressed="{{apFade}}" onClick="{{onHoldoverFade}}">SIGNIFICANCE FADE</button>
+                    </div>
+                  </div>
+                  <div class="mod__legend">Drop GPS and run time-lapse to watch holdover grow. With fade on, sub-second digits dim as the 3-sigma bound passes their place value.</div>
+                </section>
+              </sc-if>
             </div>
           </div>
         </sc-if>
@@ -1807,6 +1827,6 @@
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=279"></script>
+<script type="module" src="js/app-controller.js?v=280"></script>
 </body>
 </html>
