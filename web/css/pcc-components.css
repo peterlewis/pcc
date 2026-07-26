@@ -227,6 +227,27 @@
   color: var(--txt2); max-width: 68ch;
 }
 
+/* ---- the type primitives --------------------------------------------------
+   Not new design — these are the four strings the app already retyped hundreds of
+   times, given names. Counted before extraction: .lbl 79x, .sub 72x, .val 50x,
+   .lbl--nano 29x. A label is what a thing is; a value is what it reads; a sub is
+   the quiet half of a pair. Everything else stays inline, deliberately. */
+.lbl {
+  font-family: var(--mono); font-size: var(--fs-label);
+  letter-spacing: var(--ls-label); color: var(--txt2);
+}
+.lbl--nano {
+  font-size: var(--fs-nano); letter-spacing: .1em; color: var(--txt3);
+}
+.lbl--micro {
+  font-size: var(--fs-micro); letter-spacing: var(--ls-micro); color: var(--txt3);
+}
+.val {
+  font-family: var(--mono); font-size: var(--fs-data-sm); color: var(--txt);
+}
+.val--r { text-align: right; }
+.sub { font-size: var(--fs-data-sm); color: var(--txt2); }
+
 /* ---- the shared work surface ---------------------------------------------- */
 .grid12 { display: grid; grid-template-columns: repeat(12, 1fr); gap: var(--gap-grid); }
 .span-4  { grid-column: span 4; }

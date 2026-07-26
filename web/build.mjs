@@ -94,7 +94,7 @@ let html = readFileSync(resolve(web, 'index.html'), 'utf8');
 
   // Ceilings: hand-authored styling that a component already covers.
   const CEIL = [
-    { key: 'inline style="',            max: 1313, n: count(/style="/g),
+    { key: 'inline style="',            max: 1075, n: count(/style="/g),
       fix: 'use a component class from pcc-components.css' },
     { key: 'background:var(--panel)',   max: 63,   n: count(/background:var\(--panel\)/g),
       fix: 'this is the .mod chassis — use class="mod"' },
@@ -107,7 +107,7 @@ let html = readFileSync(resolve(web, 'index.html'), 'utf8');
   ];
 
   // Floor: you may not satisfy the ceilings by deleting components.
-  const FLOOR = [{ key: 'class="  [components in use]', min: 218, n: count(/class="/g) }];
+  const FLOOR = [{ key: 'class="  [components in use]', min: 456, n: count(/class="/g) }];
 
   const fail = [], slack = [];
   for (const r of CEIL) {
