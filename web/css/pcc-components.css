@@ -265,6 +265,16 @@
 .span-8  { grid-column: span 8; }
 .span-12 { grid-column: span 12; }
 
+/* SKY's plot | rail split is declared minmax(430px,1.5fr) minmax(300px,1fr) with a 14px gap —
+   744px of TRACK MINIMA before the room's own padding. Below roughly 960px of viewport the grid
+   cannot honour them and the rail overhangs the room, scrolling the work surface sideways.
+   base.css's [data-screen-label]{min-width:0} net does not help: the overflow comes from the
+   track minima, not from a min-width on the container. Collapse to one column — the plot takes
+   the width and the rail stacks beneath it. */
+@media (max-width: 1000px) {
+  [data-screen-label="Satellites"] { grid-template-columns: minmax(0, 1fr) !important; }
+}
+
 @media (max-width: 1180px) {
   .rack { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .rack__cell:nth-child(3) { border-right: 0; }

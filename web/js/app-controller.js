@@ -1210,6 +1210,28 @@ class Component extends DcLite {
 
   sizeDispBar(retry) {
     const E = this.els;
+    // Watch the wrap itself, exactly as the header dock is watched. sizeDispBar derives the scale
+    // from wrap.clientWidth, and on a narrow first paint that width can be settled-but-wrong: the
+    // room mounts, the bar sizes against a width the layout has not finished narrowing, and the
+    // retry guard does not catch it because clientWidth is non-zero, merely stale. The clock then
+    // stays too wide — cut off at the room edge — until some later window resize happens to fire.
+    // That breaks the one rule the face has: ALWAYS SHOW THE WHOLE CLOCK. An observer on the wrap
+    // closes it, because the container's own width change is the true trigger, not the window's.
+    if (typeof ResizeObserver !== 'undefined' && E.dispWrap && this._dispROel !== E.dispWrap) {
+      // dc-lite recreates the wrap on layout changes, so re-point at the live node rather than
+      // leaving the observer on a detached one.
+      if (this._dispRO) this._dispRO.disconnect();
+      this._dispRO = this._dispRO || new ResizeObserver(() => {
+        if (this._faceFolding) return;                 // a pose fold owns the bar; don't fight it
+        const w = this.els.dispWrap ? this.els.dispWrap.clientWidth : 0;
+        if (!w || w === this._dispROw) return;         // width unchanged -> no echo loop
+        this._dispROw = w;
+        this.sizeDispBar();
+      });
+      this._dispROel = E.dispWrap;
+      this._dispROw = 0;
+      this._dispRO.observe(E.dispWrap);
+    }
     // Width comes from the DOM parent chain, NOT the dispWrap ref — on remount the canvas
     // ref fires before dispWrap re-attaches, but the canvas's own parent holders are always
     // in the DOM with a real width. This makes sizing independent of ref-callback order.
