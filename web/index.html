@@ -916,6 +916,41 @@
 
         <sc-if value="{{sec_connect}}" hint-placeholder-val="{{false}}">
           <div data-screen-label="Connect" style="animation:pcc-in var(--t-room) var(--ease-ui) both;padding:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(370px,1fr));gap:14px;align-items:start;max-width:1180px">
+            <!-- THE RACK (Law 1) — DEVICE's answer to "what am I connected to, and is it healthy?"
+                 stated before any of the setup procedure below it. -->
+            <div class="rack" data-pps="{{vRackPps}}" style="grid-column:1/-1">
+              <div class="rack__colon"><i></i><i></i></div>
+              <div class="rack__cell" data-state="{{vLinkSt}}">
+                <div class="rack__k">Link</div>
+                <div class="rack__v rack__v--word">{{vLinkV}}</div>
+                <div class="rack__s">{{cPort}}</div>
+              </div>
+              <div class="rack__cell" data-state="{{vLinkSt}}">
+                <div class="rack__k">Session</div>
+                <div class="rack__v rack__v--word">{{cSession}}</div>
+                <div class="rack__s">{{vDeviceS}}</div>
+              </div>
+              <div class="rack__cell" data-state="{{vLinkSt}}">
+                <div class="rack__k">Fix</div>
+                <div class="rack__v rack__v--word">{{cFix}}</div>
+                <div class="rack__s">{{vSatsS}}</div>
+              </div>
+              <div class="rack__cell" data-state="{{vFwSt}}">
+                <div class="rack__k">Firmware</div>
+                <div class="rack__v rack__v--word">{{vFwV}}</div>
+                <div class="rack__s">{{vFwS}}</div>
+              </div>
+              <div class="rack__cell" data-state="{{vCfgSt}}">
+                <div class="rack__k">Config</div>
+                <div class="rack__v">{{vCfgV}}<span class="rack__u">{{vCfgU}}</span></div>
+                <div class="rack__s">{{vCfgS}}</div>
+              </div>
+              <div class="rack__cell" data-state="{{vTransSt}}">
+                <div class="rack__k">Transport</div>
+                <div class="rack__v rack__v--word">{{vTransV}}</div>
+                <div class="rack__s">{{vTransS}}</div>
+              </div>
+            </div>
             <section style="background:var(--panel);border:1px solid var(--line)">
               <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
                 <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">01 · CONNECTION</span>
@@ -1817,6 +1852,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=269"></script>
+<script type="module" src="js/app-controller.js?v=271"></script>
 </body>
 </html>

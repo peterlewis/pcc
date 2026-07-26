@@ -3235,6 +3235,29 @@ class Component extends DcLite {
       cFix: S && S.fix.valid ? '3D · HDOP ' + S.fix.hdop.toFixed(2) : (conn ? (S.scenario === 'nofix' ? 'NO FIX' : 'ACQUIRING') : '—'),
       cSats: S && conn ? S.fix.sats + ' / ' + S.sats.filter((x) => x.visible).length : '—',
       cAge: S && S.fix.valid && S.fixAgeT ? ((Date.now() - S.fixAgeT) / 1000).toFixed(1) + ' s' : '—',
+      // ---- THE RACK (Law 1) for DEVICE. What am I connected to, and is it healthy — stated before
+      // the setup procedure rather than after it. Disconnected is the honest default: cells dash and
+      // say what is missing, which is also the room's call to action.
+      ...(() => {
+        const real = !!(S && S.real);
+        const cfg = (S && S.cfg && S.cfg.modes) ? Object.keys(S.cfg).length : 0;
+        return {
+          vRackPps: conn ? 'on' : 'off',
+          vLinkSt: conn ? (real ? 'live' : 'sim') : 'absent',
+          vLinkV: conn ? '115200' : '—',
+          vDeviceS: conn ? (real ? 'MK IV · STM32 CDC' : 'EMULATED · NO HARDWARE') : 'NOT CONNECTED',
+          vSatsS: conn ? ((S.fix.sats || 0) + ' USED / ' + S.sats.filter((x) => x.visible).length + ' IN VIEW') : 'NO RECEIVER',
+          vFwSt: conn ? (real ? 'live' : 'sim') : 'absent',
+          vFwV: conn ? (real ? (S.fwVersion || 'UNREAD') : 'WASM') : '—',
+          vFwS: conn ? (real ? 'READ FROM DEVICE' : 'BUILT FROM SOURCE') : 'CONNECT TO READ',
+          vCfgSt: cfg ? 'live' : 'absent',
+          vCfgV: cfg || '—', vCfgU: cfg ? 'keys' : '',
+          vCfgS: cfg ? 'config.txt · READ' : 'NOT READ · USE READ CLOCK DRIVE',
+          vTransSt: conn ? 'live' : 'absent',
+          vTransV: conn ? (real ? 'SERIAL' : 'EMU') : '—',
+          vTransS: conn ? (real ? 'WEB SERIAL · USB CDC' : 'IN-BROWSER FIRMWARE') : (chrom ? 'WEB SERIAL AVAILABLE' : 'NEEDS A CHROMIUM BROWSER'),
+        };
+      })(),
       // Real Mk IV over Web Serial (requires a genuine user gesture for requestPort).
       onConnectReal: () => this.connectRealDevice(),
       // Explore with a simulation — a clearly-labelled demo for anyone without hardware. NEVER
