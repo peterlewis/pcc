@@ -77,6 +77,63 @@ const bundle = result.outputFiles[0].text;
 //    JS. That truncates the inline <script> in the browser → the whole app dies → raw {{…}} render.
 //    A function's return value is used verbatim, with zero `$`-pattern interpretation.
 let html = readFileSync(resolve(web, 'index.html'), 'utf8');
+
+// ============================================================================
+// 1b. THE DRIFT GATE — what stops the component layer rotting back into 1432
+//     inline styles. The app HAS a design system; it lost coherence because
+//     nothing stopped a new feature from hand-typing a panel box instead of
+//     using one. These are RATCHETS: every number may fall freely, and the
+//     build fails the moment one climbs. Migration stays incremental, but it
+//     can only ever go one way.
+//     When you drive a number down, lower its `max` here in the same commit —
+//     the gate prints the new floor for you.
+// ============================================================================
+{
+  const src = html;                                  // the authored file, pre-inlining
+  const count = (re) => (src.match(re) || []).length;
+
+  // Ceilings: hand-authored styling that a component already covers.
+  const CEIL = [
+    { key: 'inline style="',            max: 1377, n: count(/style="/g),
+      fix: 'use a component class from pcc-components.css' },
+    { key: 'background:var(--panel)',   max: 65,   n: count(/background:var\(--panel\)/g),
+      fix: 'this is the .mod chassis — use class="mod"' },
+    { key: 'border:1px solid var(--line)', max: 71, n: count(/border:1px solid var\(--line\)/g),
+      fix: 'this is the .mod / .rack edge — use the component' },
+    { key: 'background:var(--strip)',   max: 14,   n: count(/background:var\(--strip\)/g),
+      fix: 'this is the engraved header — use class="mod__strip"' },
+    { key: 'var(--fs-body)  [prose budget]', max: 12, n: count(/var\(--fs-body\)/g),
+      fix: 'sans prose is legal only in .lead — a readout is a value, a caption is .cap, a silkscreen is .mod__legend' },
+  ];
+
+  // Floor: you may not satisfy the ceilings by deleting components.
+  const FLOOR = [{ key: 'class="  [components in use]', min: 181, n: count(/class="/g) }];
+
+  const fail = [], slack = [];
+  for (const r of CEIL) {
+    if (r.n > r.max) fail.push(`  ${r.key}: ${r.n} > ceiling ${r.max}  (+${r.n - r.max})\n      → ${r.fix}`);
+    else if (r.n < r.max) slack.push(`  ${r.key}: ${r.n} (ceiling ${r.max} — lower it)`);
+  }
+  for (const r of FLOOR) {
+    if (r.n < r.min) fail.push(`  ${r.key}: ${r.n} < floor ${r.min}  (components were removed, not added)`);
+    else if (r.n > r.min) slack.push(`  ${r.key}: ${r.n} (floor ${r.min} — raise it)`);
+  }
+
+  // Hard rule, not a ratchet: a silkscreen legend is two short lines. Any longer and it is
+  // prose wearing a legend's clothes — which is exactly the habit the depth law removed.
+  for (const m of src.matchAll(/class="mod__legend"[^>]*>([\s\S]*?)<\/div>/g)) {
+    const text = m[1].replace(/<[^>]+>/g, '').replace(/&#\d+;/g, '.').trim();
+    if (text.length > 170) fail.push(`  .mod__legend is ${text.length} chars (max 170): "${text.slice(0, 60)}…"\n      → a legend states provenance in two short lines; move the rest into a .cap or drop it`);
+  }
+
+  if (fail.length) {
+    console.error('\n[gate] DRIFT GATE FAILED — the composition regressed:\n' + fail.join('\n') +
+      '\n\n  pcc-components.css exists so these do not have to be retyped.' +
+      '\n  If a ceiling genuinely must rise, raise it deliberately and say why in the commit.\n');
+    process.exit(1);
+  }
+  console.log('[gate] drift gate OK' + (slack.length ? ' — ratchets can tighten:\n' + slack.join('\n') : ''));
+}
 const css = readFileSync(resolve(web, 'css/base.css'), 'utf8').replace(/\.\.\/fonts\//g, 'fonts/');
 html = html.replace(/<link rel="stylesheet" href="css\/base\.css(?:\?v=\d+)?">/, () => `<style>\n${css}\n</style>`);
 // pcc-tokens.css (design-return tokens) — inline it too, AFTER base.css so its :root additions win.
