@@ -353,13 +353,18 @@ int  emu_mode(void){ return displayMode; }
  * emulator's live displayMode (which the two cover buttons step in firmware-enum order,
  * exactly like the hardware) back to the app's mode key — instead of running a second,
  * app-order cursor that silently desynced the label from the segments. Emu-only shim;
- * the real firmware never needs a name table. Guards mirror the per-mode exports below. */
+ * the real firmware never needs a name table. Guards mirror the per-mode exports below.
+ * Must cover the WHOLE enum, not just the face-cycle modes: the SETTINGS.BIN override
+ * panel labels menu-store rows through this table, and any miss renders as "MODE #n". */
 int emu_mode_id(const char* name){
   if (!name) return -1;
   #define M(n) if (!strcmp(name, #n)) return n;
   M(MODE_ISO8601_STD) M(MODE_ISO_ORDINAL) M(MODE_ISO_WEEK) M(MODE_UNIX)
   M(MODE_JULIAN_DATE) M(MODE_MODIFIED_JD) M(MODE_SHOW_OFFSET) M(MODE_SHOW_TZ_NAME)
   M(MODE_WEEKDAY) M(MODE_WEEKDA_DD) M(MODE_WDY_MM_DD)
+  M(MODE_STANDBY) M(MODE_COUNTDOWN) M(MODE_SATVIEW) M(MODE_DEBUG_BRIGHTNESS)
+  M(MODE_DEBUG_RTC) M(MODE_TEXT) M(MODE_FIRMWARE_CRC_T) M(MODE_FIRMWARE_CRC_D)
+  M(MODE_VBAT) M(MODE_DISPLAYTEST) M(MODE_TTFF)
   M(MODE_SUN) M(MODE_SUN_AZEL) M(MODE_MOON) M(MODE_GRID) M(MODE_LATLON) M(MODE_TEMPCOMP)
   #if EMU_HAS_ALT
   M(MODE_LST) M(MODE_SOLAR)
