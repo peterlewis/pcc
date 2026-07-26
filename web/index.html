@@ -1240,35 +1240,43 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
                 <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">06 · TIMING — PPS HOST-TIMESTAMPING</span>
                 <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:{{ppsBannerC}}">{{ppsBanner}}</span>
               </div>
-              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
-                <div style="padding:var(--pad-panel-y) var(--pad-panel-x);border-right:1px solid var(--line-soft)">
-                  <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">PHASE JITTER RMS</div>
-                  <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt)">{{tJitter}}<span style="font-size:var(--fs-label);font-weight:400;color:var(--txt3)"> {{tJitterU}}</span></div>
-                </div>
-                <div style="padding:var(--pad-panel-y) var(--pad-panel-x);border-right:1px solid var(--line-soft)">
-                  <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">PEAK-TO-PEAK</div>
-                  <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt)">{{tP2p}}<span style="font-size:var(--fs-label);font-weight:400;color:var(--txt3)"> {{tP2pU}}</span></div>
-                </div>
-                <div style="padding:var(--pad-panel-y) var(--pad-panel-x);border-right:1px solid var(--line-soft)">
-                  <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">OSC DRIFT</div>
-                  <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt)">{{tDrift}}<span style="font-size:var(--fs-label);font-weight:400;color:var(--txt3)"> ppm</span></div>
-                </div>
-                <div style="padding:var(--pad-panel-y) var(--pad-panel-x);border-right:1px solid var(--line-soft)">
-                  <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">HOLDOVER</div>
-                  <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt)">{{tHold}}<span style="font-size:var(--fs-label);font-weight:400;color:var(--txt3)"> s</span></div>
-                  <div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3);margin-top:3px">{{tHoldSub}}</div>
-                </div>
-                <div style="padding:var(--pad-panel-y) var(--pad-panel-x);border-right:1px solid var(--line-soft)">
-                  <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">DIE TEMP</div>
-                  <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt)">{{tTemp}}<span style="font-size:var(--fs-label);font-weight:400;color:var(--txt3)"> °C</span></div>
-                </div>
-                <div style="padding:12px">
-                  <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">PPS EDGES</div>
-                  <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt)">{{tSeq}}</div>
-                  <div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3);margin-top:3px">DROPPED {{tDrop}}</div>
-                </div>
-              </div>
             </section>
+            <!-- THE RACK (Law 1) — TIMING's strip was the shape every other room is now copying, so
+                 it becomes the reference implementation of the component rather than a sixth
+                 bespoke grid. Six cells, same six places, sub-line 6 carries provenance. -->
+            <div class="rack" data-pps="{{tRackPps}}">
+              <div class="rack__colon"><i></i><i></i></div>
+              <div class="rack__cell" data-state="{{tRackSt}}">
+                <div class="rack__k">Phase jitter RMS</div>
+                <div class="rack__v">{{tJitter}}<span class="rack__u">{{tJitterU}}</span></div>
+                <div class="rack__s">1&#963; AT THE PPS EDGE</div>
+              </div>
+              <div class="rack__cell" data-state="{{tRackSt}}">
+                <div class="rack__k">Peak-to-peak</div>
+                <div class="rack__v">{{tP2p}}<span class="rack__u">{{tP2pU}}</span></div>
+                <div class="rack__s">WORST EXCURSION</div>
+              </div>
+              <div class="rack__cell" data-state="{{tRackSt}}">
+                <div class="rack__k">Osc drift</div>
+                <div class="rack__v">{{tDrift}}<span class="rack__u">ppm</span></div>
+                <div class="rack__s">FREE-RUNNING CRYSTAL</div>
+              </div>
+              <div class="rack__cell" data-state="{{tRackSt}}">
+                <div class="rack__k">Holdover</div>
+                <div class="rack__v">{{tHold}}<span class="rack__u">s</span></div>
+                <div class="rack__s">{{tHoldSub}}</div>
+              </div>
+              <div class="rack__cell" data-state="{{tRackSt}}">
+                <div class="rack__k">Die temp</div>
+                <div class="rack__v">{{tTemp}}<span class="rack__u">&#176;C</span></div>
+                <div class="rack__s">ON-DIE SENSOR</div>
+              </div>
+              <div class="rack__cell" data-state="{{tRackSt}}">
+                <div class="rack__k">PPS edges</div>
+                <div class="rack__v">{{tSeq}}</div>
+                <div class="rack__s">{{tRackProv}}</div>
+              </div>
+            </div>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;align-items:stretch">
               <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
@@ -1772,6 +1780,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=267"></script>
+<script type="module" src="js/app-controller.js?v=268"></script>
 </body>
 </html>

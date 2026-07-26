@@ -3530,6 +3530,12 @@ class Component extends DcLite {
       tDrift: noData ? '—' : (T.ppm || 0).toFixed(2), tHold: noData ? '—' : (T.locked ? '0' : String(T.hold || 0)),
       tHoldSub: noData ? 'NO PPS — CONNECT A CLOCK OR SIMULATE' : (T.locked ? 'GPS DISCIPLINED' : 'FREE-RUNNING — LSE (TEMP COMP HOST-SIDE)'),
       tTemp: noData ? '—' : (T.temp || 0).toFixed(1), tSeq: noData ? '—' : String(T.seq || 0), tDrop: noData ? '—' : String(T.drop || 0),
+      // Rack state for TIMING. noData is the honest absent case — the room's six cells all show an
+      // em-dash and cell 6 carries the reason, rather than the charts implying a stream that isn't
+      // there. The colon only pulses when a PPS edge is actually arriving.
+      tRackSt: noData ? 'absent' : 'live',
+      tRackPps: noData ? 'off' : 'on',
+      tRackProv: noData ? 'NO $PMTXTS &#183; pps=off' : ('DROPPED ' + String(T.drop || 0)),
       fitK0: fit ? fit.k0.toFixed(4) : '—', fitK1: fit ? fit.k1.toFixed(5) : '—', fitK2: fit ? fit.k2.toFixed(6) : '—',
       fitSpread: fit ? fit.spread.toFixed(1) + ' °C' : '—',
       fitRms: fit ? fit.rms.toFixed(2) + ' ppm' : '—',
