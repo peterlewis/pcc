@@ -3397,7 +3397,11 @@ class Component extends DcLite {
       oTrail12h: () => this.setTrailAge(43200), oTrail24h: () => this.setTrailAge(86400),
     };
     if (!S) {
-      Object.assign(out, { fLat: '—', fLon: '—', fAlt: '—', fHdop: '—', fFix: '—', fSatsUV: '—', fGrid: '—', cSunAlt: '—', cSunAz: '—', cMoonAlt: '—', cMoonAz: '—', cMoonPhase: '—', cMoonIllum: '—', cRise: '—', cSet: '—', sStarted: '—', sPasses: '—', sObs: '—', sPeak: '—', sCover: '—', nGps: '·', nGlo: '·', nGal: '·', nBds: '·', starShow: false, starSrc: '', starRows: [] });
+      Object.assign(out, { fLat: '—', fLon: '—', fAlt: '—', fHdop: '—', fFix: '—', fSatsUV: '—', fGrid: '—', cSunAlt: '—', cSunAz: '—', cMoonAlt: '—', cMoonAz: '—', cMoonPhase: '—', cMoonIllum: '—', cRise: '—', cSet: '—', sStarted: '—', sPasses: '—', sObs: '—', sPeak: '—', sCover: '—', nGps: '·', nGlo: '·', nGal: '·', nBds: '·', starShow: false, starSrc: '', starRows: [],
+        // Rack, with no session at all: every cell absent and saying why, never a fabricated zero.
+        kRackSt: 'absent', kRackPps: 'off', kConst: 'NO SESSION', kDopNote: 'NO FIX',
+        kLatLon: 'NO POSITION', kFixNote: 'NO FIX', kAgeSt: 'absent', kPeak: '—',
+        kRecSt: 'absent', kRecSub: 'NOTHING RECORDED YET' });
       return out;
     }
     const sun = this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon);
@@ -3424,6 +3428,29 @@ class Component extends DcLite {
       sPeak: S.peakEl.toFixed(1) + '°',
       sCover: Math.round(S.bins.size / (36 * 9) * 100) + '%',
       nGps: String(cnt('G')), nGlo: String(cnt('R')), nGal: String(cnt('E')), nBds: String(cnt('C')),
+      // ---- THE RACK (Law 1) for SKY. All six values were already in the right-hand rail; the rack
+      // promotes the six the ROOM is accountable for so the answer precedes the plot. FIX AGE is the
+      // honesty cell — it steps to acq then alert as the fix goes stale, because a plot drawn from a
+      // minutes-old fix looks exactly as confident as one drawn from a fresh one.
+      ...(() => {
+        const valid = !!(S.fix && S.fix.valid);
+        const ageS = (S.fix && S.fix.valid && S.fixAgeT) ? (Date.now() - S.fixAgeT) / 1000 : null;
+        const hd = valid ? S.fix.hdop : null;
+        return {
+          kRackSt: valid ? 'live' : 'absent',
+          kRackPps: valid ? 'on' : 'off',
+          kConst: valid ? ('G' + cnt('G') + ' R' + cnt('R') + ' E' + cnt('E') + ' C' + cnt('C')) : 'NO FIX',
+          kDopNote: hd == null ? 'NO FIX' : hd < 1 ? 'IDEAL GEOMETRY' : hd < 2 ? 'GOOD GEOMETRY' : hd < 5 ? 'MODERATE' : 'POOR GEOMETRY',
+          kLatLon: valid ? (S.obs.lat.toFixed(4) + ', ' + S.obs.lon.toFixed(4)) : 'OBSERVER DEFAULT',
+          kFixNote: ageS == null ? 'NO FIX' : 'RMC 1 Hz',
+          kAgeSt: ageS == null ? 'absent' : ageS < 5 ? 'live' : ageS < 30 ? 'stale' : 'alert',
+          kPeak: 'PEAK EL ' + S.peakEl.toFixed(0) + '°',
+          kRecSt: S.passes > 0 ? 'live' : 'absent',
+          kRecSub: S.passes > 0
+            ? ((S.obsCount > 1000 ? (S.obsCount / 1000).toFixed(1) + 'k' : String(S.obsCount)) + ' OBS')
+            : 'NOTHING RECORDED YET',
+        };
+      })(),
     });
     // NEXT TRANSITS — the star-transit predictor's $PMSTAR list (MODE_STAR). From a real clock
     // (realdev.js → S.star) when Connected; from the emulator's own predictor (S.simStar, refreshed
@@ -3535,7 +3562,7 @@ class Component extends DcLite {
       // there. The colon only pulses when a PPS edge is actually arriving.
       tRackSt: noData ? 'absent' : 'live',
       tRackPps: noData ? 'off' : 'on',
-      tRackProv: noData ? 'NO $PMTXTS &#183; pps=off' : ('DROPPED ' + String(T.drop || 0)),
+      tRackProv: noData ? 'NO $PMTXTS · pps=off' : ('DROPPED ' + String(T.drop || 0)),
       fitK0: fit ? fit.k0.toFixed(4) : '—', fitK1: fit ? fit.k1.toFixed(5) : '—', fitK2: fit ? fit.k2.toFixed(6) : '—',
       fitSpread: fit ? fit.spread.toFixed(1) + ' °C' : '—',
       fitRms: fit ? fit.rms.toFixed(2) + ' ppm' : '—',

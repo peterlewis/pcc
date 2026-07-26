@@ -1008,6 +1008,43 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
 
         <sc-if value="{{sec_satellites}}" hint-placeholder-val="{{false}}">
           <div data-screen-label="Satellites" style="animation:pcc-in var(--t-room) var(--ease-ui) both;padding:14px;display:grid;grid-template-columns:minmax(430px,1.5fr) minmax(300px,1fr);gap:14px;align-items:start;max-width:1560px">
+            <!-- THE RACK (Law 1) — spans both columns so the room states its vital signs before
+                 the plot or the rail. The six numbers SKY is accountable for: how many satellites,
+                 how good the geometry is, where we are, how fresh the fix is, how much sky we have
+                 mapped, and how much has been recorded. -->
+            <div class="rack" data-pps="{{kRackPps}}" style="grid-column:1/-1">
+              <div class="rack__colon"><i></i><i></i></div>
+              <div class="rack__cell" data-state="{{kRackSt}}">
+                <div class="rack__k">Satellites</div>
+                <div class="rack__v">{{fSatsUV}}</div>
+                <div class="rack__s">{{kConst}}</div>
+              </div>
+              <div class="rack__cell" data-state="{{kRackSt}}">
+                <div class="rack__k">HDOP</div>
+                <div class="rack__v">{{fHdop}}</div>
+                <div class="rack__s">{{kDopNote}}</div>
+              </div>
+              <div class="rack__cell" data-state="{{kRackSt}}">
+                <div class="rack__k">Grid</div>
+                <div class="rack__v rack__v--word">{{fGrid}}</div>
+                <div class="rack__s">{{kLatLon}}</div>
+              </div>
+              <div class="rack__cell" data-state="{{kAgeSt}}">
+                <div class="rack__k">Fix age</div>
+                <div class="rack__v">{{cAge}}</div>
+                <div class="rack__s">{{kFixNote}}</div>
+              </div>
+              <div class="rack__cell" data-state="{{kRackSt}}">
+                <div class="rack__k">Sky coverage</div>
+                <div class="rack__v">{{sCover}}</div>
+                <div class="rack__s">{{kPeak}}</div>
+              </div>
+              <div class="rack__cell" data-state="{{kRecSt}}">
+                <div class="rack__k">Recorded</div>
+                <div class="rack__v rack__v--word">{{sPasses}}<span class="rack__u">passes</span></div>
+                <div class="rack__s">{{kRecSub}}</div>
+              </div>
+            </div>
             <section style="background:var(--panel);border:1px solid var(--line)">
               <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--pad-panel-y) var(--pad-panel-x) 0">
                 <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">03 · SKY PLOT</span>
@@ -1780,6 +1817,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=268"></script>
+<script type="module" src="js/app-controller.js?v=269"></script>
 </body>
 </html>
