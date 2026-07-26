@@ -94,7 +94,7 @@ let html = readFileSync(resolve(web, 'index.html'), 'utf8');
 
   // Ceilings: hand-authored styling that a component already covers.
   const CEIL = [
-    { key: 'inline style="',            max: 811, n: count(/style="/g),
+    { key: 'inline style="',            max: 809, n: count(/style="/g),
       fix: 'use a component class from pcc-components.css' },
     { key: 'background:var(--panel)',   max: 20,   n: count(/background:var\(--panel\)/g),
       fix: 'this is the .mod chassis — use class="mod"' },
@@ -129,11 +129,11 @@ let html = readFileSync(resolve(web, 'index.html'), 'utf8');
   // ORPHANED HANDLERS. Deleting a panel leaves its onX handlers wired to nothing — dead weight
   // that still ships in the bundle and still looks live when you grep. Removing the PRECISION
   // module orphaned eight in one go, which is exactly why this check exists. A ratchet, not a
-  // hard fail: the existing ones are a known debt, but you may not add more.
+  // hard fail only because the debt is now zero: any new orphan fails the build outright.
   const ctrl = readFileSync(resolve(web, 'js/app-controller.js'), 'utf8');
   const declared = new Set([...ctrl.matchAll(/^\s{6}(on[A-Z]\w*)\s*:/gm)].map((m) => m[1]));
   const orphans = [...declared].filter((k) => !src.includes('{{' + k + '}}')).sort();
-  const ORPHAN_MAX = 8;   // PRECISION's DRILL/sim-demo set — decide whether to rehome or delete
+  const ORPHAN_MAX = 0;   // cleared 2026-07-22 — a handler with no binding is now a build failure
   if (orphans.length > ORPHAN_MAX) {
     fail.push(`  orphaned handlers: ${orphans.length} > ceiling ${ORPHAN_MAX}\n      ${orphans.join(', ')}` +
       `\n      → a handler with no {{binding}} in index.html is dead: wire it or delete it`);

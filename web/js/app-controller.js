@@ -21,7 +21,6 @@ class Component extends DcLite {
   state = {
     phase: 'boot', entryVisible: true, docked: false, drawerOpen: false, hdrPose: 'open',
     facePose: (typeof localStorage !== 'undefined' && localStorage.getItem('pccweb.facePose')) || 'flat',
-    fullFace: false,
     section: 'display', theme: 'dark', scenario: 'locked',
     mode: 'time',
     // Clock-behaviour defaults (dateFormat, weekdayFmt, timeRow, modesEnabled, astroFmt, colon,
@@ -45,14 +44,12 @@ class Component extends DcLite {
     accessoryOpen: (() => { try { return JSON.parse(localStorage.getItem('pccweb.accOpen') || '{}'); } catch (e) { return {}; } })(),
     // The honest-digits panel's GPS-drop / time-lapse are a SIMULATION-ONLY demo ("drill"); folded away
     // behind a chip by default so the panel leads with the readout, not a party trick. Session-only.
-    drillOpen: false,
     // SIGNAL PATH explainer knobs (TIMING room). Defaults = the shipped recommended values (PF_REC);
     // session-only — this is a tuning explainer, not a persisted preference. seed drives the sample
     // stream; freeze halts the sweep for inspection. source is DERIVED (spSyncSource), never chosen:
     // 'real' when a pccd connection streams raw samples, 'model' (sample data) only while a
     // simulation runs, 'none' otherwise — the panel shows an honest absence instead of a demo.
     sp: { K: PF_REC.k, window: PF_REC.window, group: PF_REC.group, floorUs: PF_REC.floorUs, corrRatio: PF_REC.corrRatio, seed: 0x9e37, freeze: false, source: 'none' },
-    showcase: false,
     tzOverride: 'auto', matrixFreq: '1.6',
     skyHeatmap: false, skyHorizon: false, skyTrails: true, skyLabels: true,
     appStale: false,   // the served app moved under this tab (pccd overlay refresh / Pages deploy) — offer a reload
@@ -105,8 +102,8 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=108'), import('./realdev.js?v=117'), import('./emu-driver.js?v=37'), import('./ppsts.js?v=15'), import('./demo7.js?v=4'), import('./settings-bin.js?v=2')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, D7, SB]) => {
-      this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.D7 = D7; this.SB = SB;
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=108'), import('./realdev.js?v=117'), import('./emu-driver.js?v=37'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=2')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
+      this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.SB = SB;
       try { localStorage.removeItem('pccweb.cuckoo'); } catch (e) {}   // parked feature's persisted setting — clear the ghost
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
@@ -159,7 +156,6 @@ class Component extends DcLite {
     this.onKey = (e) => {
       const t0 = e.target, tag0 = t0 && t0.tagName;
       const typing = tag0 === 'INPUT' || tag0 === 'TEXTAREA' || tag0 === 'SELECT' || (t0 && t0.isContentEditable);
-      if (e.key === 'Escape' && this.state.fullFace) { e.preventDefault(); this.exitFullFace(); return; }
       if ((e.key === 'Enter' || e.key === ' ') && this.state.phase === 'entry') { e.preventDefault(); this.beginFold(); return; }
       // 1..9,0 jump to nav item 1..10 (0 -> item 10 / Export), in the app only and
       // never while typing in a field.
@@ -465,43 +461,6 @@ class Component extends DcLite {
 
   // SIGNIFICANT DIGITS: turn the firmware's precision ladder into a legible, self-teaching panel —
   // each sub-second digit is shown only while it stays significant under the holdover uncertainty.
-  precUi() {
-    const off = { level: '—', style: '', unc: '—', digits: '—', hold: '—', pct: 0, colon: '', gps: 'GPS SIGNAL: ON', tl: 'TIME-LAPSE: OFF', fade: 'SIGNIFICANCE FADE: OFF' };
-    // Standby has no GPS discipline — say so plainly instead of showing a precision ladder that
-    // isn't backed by any fix. CONNECTED and SIMULATION both drive the firmware (real NMEA / virtual
-    // GPS) so both fall through to the live precision ladder below — a connected clock shows its REAL
-    // holdover precision, not this placeholder.
-    if (this.appMode() === 'standby') {
-      return { ...off, level: '1 s', style: 'display:inline-flex;align-items:center;justify-content:center;min-width:58px;height:36px;font-family:var(--mono);font-size:15px;font-weight:700;color:var(--txt3);border:1.5px solid var(--line2);border-radius:7px',
-        unc: 'no fix', digits: 'whole seconds', hold: 'SYSTEM TIME', colon: 'no PPS — start a simulation or connect a clock' };
-    }
-    if (!this.emu || !this.emu.precision) return off;
-    const p = this.emu.precision();
-    const COL = { P3: '#3fd06a', P2: '#caa63a', P1: '#e08b3a', P0: '#e0503a' };
-    const col = COL[p.level] || '#888';
-    // "P3..P0" is the firmware's INTERNAL handler naming (SysTick_CountUp_P3 …), not real metrology —
-    // surface the honest quantity instead: the RESOLUTION of the finest digit still displayed.
-    const RES = { P3: '1 ms', P2: '10 ms', P1: '0.1 s', P0: '1 s' };
-    const unc = p.uUs == null ? 'unknown' : (p.uUs < 1000 ? (p.uUs < 1 ? '<1' : p.uUs) + ' µs' : (p.uUs / 1000).toFixed(p.uUs < 10000 ? 2 : 1) + ' ms');
-    const hold = !p.hadPps ? 'NO FIX' : (p.since <= 0 ? 'PPS fresh' : 'holdover ' + p.since + ' s');
-    // Meter: how far significance has decayed. On the dash ladder that's holdover age vs the 100 ms
-    // threshold; with the significance-fade on it's driven by which digits remain (the ladder age is
-    // meaningless once significance_fade overrides it), so map the fade level straight to the meter.
-    const pct = p.fade ? ({ P3: 8, P2: 38, P1: 68, P0: 100 }[p.level] ?? 100)
-      : (!p.hadPps ? 100 : Math.min(100, Math.round(100 * p.since / p.t100)));
-    const cn = this.emu.colonName();
-    const colon = cn === 'heartbeat' ? 'colon HEARTBEAT — PPS-disciplined (locked)'
-      : cn === 'alt_sawtooth' ? 'colon ALT — sidereal/solar time'
-      : cn === 'solid' ? 'colon SOLID — free-running / holdover' : 'colon ' + cn.toUpperCase();
-    return {
-      level: RES[p.level] || p.level,
-      style: 'display:inline-flex;align-items:center;justify-content:center;min-width:58px;height:36px;font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:.04em;color:' + col + ';border:1.5px solid ' + col + ';border-radius:7px;transition:color .25s,border-color .25s;white-space:nowrap;padding:0 8px',
-      unc, digits: p.digitsTo, hold, pct, colon,
-      gps: p.signal ? 'GPS SIGNAL: ON' : 'GPS SIGNAL: OFF',
-      tl: this.emu.timelapseOn && this.emu.timelapseOn() ? 'TIME-LAPSE: ON' : 'TIME-LAPSE: OFF',
-      fade: this.emu.holdoverFadeOn && this.emu.holdoverFadeOn() ? 'SIGNIFICANCE FADE: ON' : 'SIGNIFICANCE FADE: OFF',
-    };
-  }
 
   emuSourceTag() {
     const mode = this.appMode();
@@ -753,12 +712,11 @@ class Component extends DcLite {
       f.applyDeviceFrame(frame);
     }
     this.driveCuckoo(frame);
-    this.driveShowcase(frame);
   }
 
   // FIRMWARE cuckoo animations (the clock4 `cuckoo` branch): when the engine's dither interleave
   // is running, render its per-segment levels on the time face through the same setSegField
-  // surface the web showcase uses — the firmware is the choreographer, the face is a screen.
+  // same setSegField surface — the firmware is the choreographer, the face is a screen.
   // On branches without the engine (rollup today) cuckooActive() is a constant 0 and this is
   // inert. Level rows: 0..5 = the six big digits, 6..8 = ds/cs/ms; colons stay on their own
   // TIM2 PWM path (the field's colon values come from computeField as usual).
@@ -770,10 +728,9 @@ class Component extends DcLite {
     const targets = [this.faces.dispTime, this.faces.entryTime, this.faces.hdrTime].filter((f) => f && f.setSegField);
     if (!targets.length) return;
     if (!this.emu.cuckooActive()) {
-      if (this._ckOn) { this._ckOn = false; if (!this._sc) for (const t of targets) t.setSegField(null); }
+      if (this._ckOn) { this._ckOn = false; for (const t of targets) t.setSegField(null); }
       return;
     }
-    if (this._sc) return;                    // the web showcase owns the face if both run
     for (const t of targets) {
       const field = t.computeField({ time: frame.time }, Date.now());
       const geo = t.segGeometry();
@@ -790,41 +747,6 @@ class Component extends DcLite {
     this._ckOn = true;
   }
 
-  // SHOWCASE: the minute-locked segment choreography (demo7.js) driving the two display faces
-  // through their setSegField surface. The emulator keeps ticking underneath — the engine only
-  // decorates/modulates the live glyph mask, so time stays correct throughout. Manual only
-  // (the SHOWCASE button loops until stopped): the scheduled CUCKOO variant is PARKED with the
-  // clock4 cuckoo branch — no web control until the firmware feature actually exists.
-  driveShowcase(frame) {
-    // The acts perform on whichever face pair is MOUNTED — the FACE-room hero when it exists, else
-    // the header dock (open or desk pose; both rows live in both). The clock performs wherever it
-    // is; the stale-pair guard below already resets a running act when the pair changes on a
-    // section switch, so an act never drives dead DOM.
-    const d = this.faces.dispDate || this.faces.hdrDate, t = this.faces.dispTime || this.faces.hdrTime;
-    if (!d || !t || !d.setSegField || !this.D7) return;
-    const wantManual = this.state.showcase;
-    // manual toggle
-    if (wantManual && (!this._sc || this._scMode !== 'manual')) {
-      if (this._sc) this._sc.stop();   // an auto chime yields to the button
-      else { this._sc = this.D7.createShowcase({ dateFace: d, timeFace: t, program: 'loop' }); this._scMode = 'manual'; this._scD = d; this._scT = t; }
-    }
-    if (!wantManual && this._scMode === 'manual' && this._sc) this._sc.stop();
-
-    if (!this._sc) return;
-    // dc-lite recreates faces on layout changes — a stale engine would drive dead DOM.
-    if (this._scD !== d || this._scT !== t) { this._sc = null; this._scMode = null; return; }
-    const S = this.session && this.session.S;
-    const fields = this._sc.frame(Date.now(), frame, { sats: (S && S.sats) || [] });
-    if (!fields) {   // exit ramp finished — land on the live face
-      const wasManual = this._scMode === 'manual';
-      this._sc = null; this._scMode = null;
-      d.setSegField(null); t.setSegField(null);
-      if (wasManual && this.state.showcase) this.setState({ showcase: false });
-      return;
-    }
-    d.setSegField(fields.date);
-    t.setSegField(fields.time);
-  }
 
   set2(patch) {
     // Picking a date format / weekday is mutually exclusive with an astro date-row mode —
@@ -1170,14 +1092,6 @@ class Component extends DcLite {
 
   jumpToApp() { this.setState({ phase: 'app', entryVisible: false, docked: true }); }
 
-  replayEntry() {
-    this.marqOff = 0;
-    this.setState({ entryVisible: true, docked: false, phase: 'entry' });
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (this.faces.entryDate) this.faces.entryDate.setInverted(false);
-      this.layoutEntry();
-    }));
-  }
 
   // Closing the docked clock IS closing the hinge, and it is THE ENTRY FOLD RUN BACKWARDS —
   // in-plane, about the seam pins, the hinge axis pointing at the viewer (never a 3D turn: the
@@ -1479,40 +1393,6 @@ class Component extends DcLite {
     }
   }
 
-  // FULL FACE — the honest fullscreen timepiece. The SAME hero bar (one renderer) flies to fill
-  // the dimmed room; the caption names the state you are looking at (Standby / Connected /
-  // Simulation). Click anywhere or Esc reverses the flight. Reopens the deleted fullscreen ONLY
-  // in this form: no second clock, no unlabelled time.
-  enterFullFace() {
-    if (this.state.fullFace || this.state.section !== 'display') return;
-    const bar = this.els.dispBar; if (!bar) return;
-    const r = bar.getBoundingClientRect(); if (!r.width) return;
-    const vw = window.innerWidth, vh = window.innerHeight;
-    const s = Math.min(0.94 * vw / r.width, 0.62 * vh / r.height);
-    const dx = vw / 2 - (r.left + r.width / 2), dy = vh * 0.45 - (r.top + r.height / 2);
-    this._ff = { dx, dy, s };
-    bar.style.zIndex = '95'; bar.style.transformOrigin = '50% 50%';
-    if (this.els.main) { this._ffScroll = this.els.main.scrollTop; this.els.main.style.overflow = 'hidden'; }
-    this.setState({ fullFace: true });
-    const kf = [{ transform: 'none' }, { transform: 'translate(' + dx + 'px,' + dy + 'px) scale(' + s + ')' }];
-    if (this.canAnimate()) this._ffAnim = bar.animate(kf, { duration: 420, easing: 'cubic-bezier(.55,.02,.14,1)', fill: 'forwards' });
-    else bar.style.transform = kf[1].transform;
-  }
-  exitFullFace() {
-    if (!this.state.fullFace) return;
-    const bar = this.els.dispBar, p = this._ff;
-    const land = () => {
-      if (bar) { bar.style.zIndex = ''; bar.style.transform = ''; }
-      if (this.els.main) { this.els.main.style.overflow = ''; if (this._ffScroll != null) this.els.main.scrollTop = this._ffScroll; }
-      this.setState({ fullFace: false });
-    };
-    if (this._ffAnim) { try { this._ffAnim.cancel(); } catch (e) {} this._ffAnim = null; }
-    if (bar && p && this.canAnimate()) {
-      const a = bar.animate([{ transform: 'translate(' + p.dx + 'px,' + p.dy + 'px) scale(' + p.s + ')' }, { transform: 'none' }],
-        { duration: 380, easing: 'cubic-bezier(.55,.02,.14,1)' });
-      a.onfinish = land; a.oncancel = land;
-    } else land();
-  }
 
   // The docked menu-bar clock is the SAME clock as the Display bar, just HEIGHT-constrained to
   // the menu bar instead of width-constrained to the panel. Size it from the board geometry so
@@ -2700,7 +2580,6 @@ class Component extends DcLite {
       // and a text node has no .style — the old .lastChild threw on every hover (Safari console).
       onEntryOver: () => { const h = this.els.hint; if (h && h.firstElementChild && h.lastElementChild) { h.lastElementChild.style.color = 'var(--txt2)'; h.firstElementChild.style.background = 'var(--txt3)'; } },
       onEntryOut: () => { const h = this.els.hint; if (h && h.firstElementChild && h.lastElementChild) { h.lastElementChild.style.color = 'var(--txt3)'; h.firstElementChild.style.background = 'var(--line2)'; } },
-      onReplay: () => this.replayEntry(),
       connLed: ci.led, connGlow: ci.glow || 'transparent', connState: ci.state, connSub: ci.sub,
       // H2 — the status pill is now a disclosure: click to open a popover that holds the
       // connection readouts (PORT / FRAMING / FIX·SATS / FIX AGE) and the SIM fix toggles,
@@ -2879,10 +2758,6 @@ class Component extends DcLite {
       // POSE (flat line / stacked desk pose) + FULL FACE — Act III of the presentation grammar.
       ssPoseFlat: this.seg(st.facePose !== 'stacked', true), ssPoseStack: this.seg(st.facePose === 'stacked', false),
       onPoseFlat: () => this.foldFacePose(false), onPoseStack: () => this.foldFacePose(true),
-      onFullFace: () => this.enterFullFace(),
-      fullFaceOn: !!st.fullFace,
-      ffCaption: (_mode === 'connected' ? 'LIVE HARDWARE' : _mode === 'simulation' ? 'SIMULATION' : 'SYSTEM TIME — STANDBY') + ' · CLICK OR ESC TO CLOSE',
-      onFullFaceExit: () => this.exitFullFace(),
       // Hardware calibration overlay — drag the board furniture on the face, read the mm here.
       hwCalibrateOn: !!st.hwCalibrate,
       hwCalShow: false,   // furniture positions are baked to gospel defaults — hide the calibrate entry (flip to re-enable)
@@ -3053,41 +2928,6 @@ class Component extends DcLite {
           if (zone && S && S.real && this.realdev) this.devSend('zone_override = ' + zone);
         });
       },
-      // Honest-digits precision panel (recomputed each render; onTick re-renders at 1 Hz).
-      ...(() => { const u = this.precUi(); return {
-        precLevel: u.level, precLevelStyle: u.style, precUnc: u.unc, precDigits: u.digits,
-        precHold: u.hold, precMeterPct: u.pct + '%', precColon: u.colon, gpsSignalLabel: u.gps, timelapseLabel: u.tl, fadeLabel: u.fade,
-      }; })(),
-      // The GPS-drop / time-lapse toggles are a SIMULATION-ONLY drill — you can't fake a real
-      // receiver's signal, and standby is plain host time. Enable them only in simulation; grey
-      // them out (not-allowed cursor + faded) everywhere else so they never read as clickable.
-      simDemoDisabled: this.appMode() !== 'simulation',
-      simDemoBtnStyle: 'font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--txt);background:var(--well);border:1px solid var(--line2);border-radius:var(--r-1);padding:6px 12px;cursor:' +
-        (this.appMode() !== 'simulation' ? 'not-allowed;opacity:.38' : 'pointer'),
-      onGpsSignal: () => { if (this.appMode() !== 'simulation' || !this.emu) return; this.emu.setSignal(!this.emu.state().signal); },
-      onTimelapse: () => { if (this.appMode() !== 'simulation' || !this.emu) return; this.emu.setTimelapse(!(this.emu.timelapseOn && this.emu.timelapseOn())); },
-      // SIGNIFICANCE FADE toggle — flips the firmware's significance_fade so sub-second digits fade out
-      // (continuous TIE-driven) instead of dashing (the fixed tolerance ladder). Sim-only, like the rest.
-      onHoldoverFade: () => { if (this.appMode() !== 'simulation' || !this.emu) return; this.emu.setHoldoverFade(!(this.emu.holdoverFadeOn && this.emu.holdoverFadeOn())); },
-      // DRILL disclosure — folds the sim-only demo toggles away so the honest readout leads.
-      onDrillTog: () => this.setState({ drillOpen: !this.state.drillOpen }),
-      drillOpenStr: st.drillOpen ? 'true' : 'false', drillChev: st.drillOpen ? '▾' : '▸',
-      // SHOWCASE: start immediately; stop rides the engine's 0.5 s exit ramp back to the live
-      // face (driveShowcase flips the state off when the ramp lands). Needs a running clock —
-      // in standby there is no emulator frame to choreograph, so the chip is disabled.
-      onShowcase: () => {
-        if (this.appMode() === 'standby') return;
-        if (this.state.showcase) { if (this._sc) this._sc.stop(); else this.setState({ showcase: false }); }
-        else this.setState({ showcase: true });
-      },
-      scLabel: st.showcase ? '■ STOP SHOWCASE' : '◆ SHOWCASE',
-      scBtnStyle: 'display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.12em;'
-        + (this.appMode() === 'standby'
-          ? 'color:var(--txt3);opacity:.4;cursor:default;'
-          : st.showcase
-            ? 'color:var(--led);border-color:var(--led) !important;cursor:pointer;'
-            : 'color:var(--txt3);cursor:pointer;')
-        + 'background:transparent;border:1px solid var(--line2);border-radius:var(--r-1);padding:6px 11px',
       // CUCKOO schedule segmented control (persisted)
       // Emulator config.txt: APPLY through the real firmware parser + reboot; EXPORT/IMPORT a file.
       // Stage E — when a real Mk IV is attached, APPLY also mirrors every setting onto the
@@ -3739,7 +3579,6 @@ class Component extends DcLite {
       onMonFilterInput: () => this.setState({ monFilter: this.els.monFilter ? this.els.monFilter.value : '' }, () => this.scrollLog(true)),
       monFilterActive: !!(pred),
       monShown: pred ? (src.length + ' / ' + full.length + ' SHOWN') : '',
-      onClearFilter: () => { if (this.els.monFilter) this.els.monFilter.value = ''; this.setState({ monFilter: '' }); },
       onClear: () => { if (S) { S.nmeaLog.length = 0; this._monFrozen = []; this.setState({}); } },
       onSendCmd: () => this.sendCmd(),
       onCmdKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); this.sendCmd(); } },

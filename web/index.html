@@ -1798,19 +1798,15 @@
 
         <!-- @@PANELS -->
 
-        <!-- FULL FACE — the honest fullscreen timepiece. The room dims; the SAME hero bar (one
-             renderer, no copy) flies to fill the view; the caption states which of the three states
-             you are looking at. Click anywhere or press Esc to send the clock back to its slot. -->
-        <sc-if value="{{fullFaceOn}}" hint-placeholder-val="{{false}}">
-          <div onClick="{{onFullFaceExit}}" title="Close full face" style="position:fixed;inset:0;z-index:90;background:rgba(4,5,7,.93);cursor:pointer"></div>
-          <div style="position:fixed;left:0;right:0;bottom:6%;z-index:96;text-align:center;font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt3);pointer-events:none">{{ffCaption}}</div>
-        </sc-if>
+        <!-- FULL FACE overlay removed 2026-07-22. It was disabled earlier (the dim mask rendered
+             over the clock and the flying hero clipped instead of scaling to fit) and its handlers
+             were then dead weight. If it ever returns, the rule stands: ALWAYS show the WHOLE clock. -->
 
       </main>
     </div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=274"></script>
+<script type="module" src="js/app-controller.js?v=275"></script>
 </body>
 </html>
