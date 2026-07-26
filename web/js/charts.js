@@ -225,6 +225,24 @@ function xTimeTicks(ctx, tok, fr, h, spanSec) {
     const lab = ago === 0 ? 'now' : (ago >= 3600 ? '−' + (ago / 3600).toFixed(0) + 'h' : '−' + Math.round(ago / 60) + '′');
     ctx.fillText(lab, x, fr.m.t + fr.ih + 4);
   }
+  nowEdge(ctx, tok, fr);
+}
+
+// THE NOW-EDGE. A strip-chart recorder has one fixed pen and the paper advances under it; these
+// plots work the same way, so the right-hand edge is not merely where the data stops — it is the
+// instant being measured. A 1 px LED rule states that, and it gives the eye a fixed anchor to read
+// "how long ago" against instead of counting tick labels.
+// It lives inside xTimeTicks deliberately: that helper is called by exactly the charts whose x-axis
+// IS time, so a plot against tau (Allan deviation) or die temperature (drift fit) can never acquire
+// a "now" it does not have. Marking an instant on an axis that has no instants would be decoration.
+// Static, and low-alpha — the motion budget forbids a pulsing edge, and the data is what should
+// carry the eye.
+function nowEdge(ctx, tok, fr) {
+  const x = Math.round(fr.X(1)) - 0.5;          // half-pixel: a crisp 1 px rule, not a 2 px blur
+  ctx.save();
+  ctx.strokeStyle = tok.led; ctx.globalAlpha = 0.5; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(x, fr.m.t + 1); ctx.lineTo(x, fr.m.t + fr.ih - 1); ctx.stroke();
+  ctx.restore();
 }
 
 // ---------------------------------------------------------------- C/N0 vs elevation
