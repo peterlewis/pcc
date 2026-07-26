@@ -174,24 +174,10 @@
 .btn--primary:hover { color: var(--led); border-color: var(--led); background: var(--led-fill); }
 .btn[disabled] { color: var(--txt3); border-color: var(--line); cursor: not-allowed; }
 
-/* ---- the digit ladder -----------------------------------------------------
-   Replaces the precision panel's linear-gradient(--lock → --acq → --none) health
-   bar, which was the most SaaS-looking object in the product: a continuous
-   red-amber-green ramp implies a smooth "score", when the real quantity is
-   discrete — a digit is either still true or it is dark. One cell per sub-second
-   digit position, in the same left-to-right order as the LEDs on the real face,
-   lit while that place value still outruns the 3σ holdover bound. */
-.ladder { display: flex; gap: 3px; align-items: flex-end; }
-.ladder i {
-  display: block; width: 26px; height: 12px;
-  background: var(--led-dim); border: 1px solid var(--line-well);
-  transition: background var(--t-tick), box-shadow var(--t-tick);
-}
-.ladder i[data-lit="1"] { background: var(--led); box-shadow: 0 0 7px var(--led-glow); }
-.ladder__k {
-  font-family: var(--mono); font-size: var(--fs-pico); letter-spacing: var(--ls-micro);
-  color: var(--txt3); margin-left: var(--sp-2); align-self: center;
-}
+/* The digit ladder was removed with the PRECISION module 2026-07-22 — it had no other
+   mount point, and an unused component is the same rot as an unused inline style. The
+   idea (discrete lit/dark cells per sub-second place, not a continuous ramp) is recorded
+   here in case the sim-demo controls are ever rehomed. */
 
 /* ---- figure caption: how an instrument explains itself. --------------------
    A caption states provenance, not instruction. It is the ONLY sanctioned place
@@ -253,6 +239,24 @@
 }
 .val--r { text-align: right; }
 .sub { font-size: var(--fs-data-sm); color: var(--txt2); }
+
+/* ---- second-pass primitives -----------------------------------------------
+   The remaining repeats worth a name (9x down to 5x). Deliberately stopping here:
+   431 of the surviving inline styles occur exactly ONCE, which is what inline is
+   for. A component layer earns its keep by absorbing repetition, not by existing —
+   naming a one-off is just moving it somewhere harder to read. */
+.meta { font-family: var(--mono); font-size: var(--fs-nano); color: var(--txt3); }
+.meta--wide { font-size: var(--fs-meta); letter-spacing: .06em; }
+.between { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.col { display: flex; flex-direction: column; gap: 7px; }
+.mod--col { display: flex; flex-direction: column; }
+.row--plain { border-bottom: 0; }        /* a .row that is the last of its group */
+.lbl--stack { margin-bottom: 4px; }      /* label sitting above its value, not beside it */
+.badge {                                  /* BETA / COMING SOON — a status marker, not a control */
+  font-family: var(--mono); font-size: var(--fs-pico); font-weight: 700; letter-spacing: .16em;
+  color: var(--beta); background: var(--beta-fill); border: 1px solid var(--beta);
+  border-radius: var(--r-1); padding: 3px 5px; line-height: 1;
+}
 
 /* ---- the shared work surface ---------------------------------------------- */
 .grid12 { display: grid; grid-template-columns: repeat(12, 1fr); gap: var(--gap-grid); }

@@ -94,11 +94,11 @@ let html = readFileSync(resolve(web, 'index.html'), 'utf8');
 
   // Ceilings: hand-authored styling that a component already covers.
   const CEIL = [
-    { key: 'inline style="',            max: 868, n: count(/style="/g),
+    { key: 'inline style="',            max: 811, n: count(/style="/g),
       fix: 'use a component class from pcc-components.css' },
-    { key: 'background:var(--panel)',   max: 27,   n: count(/background:var\(--panel\)/g),
+    { key: 'background:var(--panel)',   max: 20,   n: count(/background:var\(--panel\)/g),
       fix: 'this is the .mod chassis — use class="mod"' },
-    { key: 'border:1px solid var(--line)', max: 20, n: count(/border:1px solid var\(--line\)/g),
+    { key: 'border:1px solid var(--line)', max: 13, n: count(/border:1px solid var\(--line\)/g),
       fix: 'this is the .mod / .rack edge — use the component' },
     { key: 'background:var(--strip)',   max: 14,   n: count(/background:var\(--strip\)/g),
       fix: 'this is the engraved header — use class="mod__strip"' },
@@ -107,7 +107,7 @@ let html = readFileSync(resolve(web, 'index.html'), 'utf8');
   ];
 
   // Floor: you may not satisfy the ceilings by deleting components.
-  const FLOOR = [{ key: 'class="  [components in use]', min: 628, n: count(/class="/g) }];
+  const FLOOR = [{ key: 'class="  [components in use]', min: 685, n: count(/class="/g) }];
 
   const fail = [], slack = [];
   for (const r of CEIL) {
@@ -124,6 +124,21 @@ let html = readFileSync(resolve(web, 'index.html'), 'utf8');
   for (const m of src.matchAll(/class="mod__legend"[^>]*>([\s\S]*?)<\/div>/g)) {
     const text = m[1].replace(/<[^>]+>/g, '').replace(/&#\d+;/g, '.').trim();
     if (text.length > 170) fail.push(`  .mod__legend is ${text.length} chars (max 170): "${text.slice(0, 60)}…"\n      → a legend states provenance in two short lines; move the rest into a .cap or drop it`);
+  }
+
+  // ORPHANED HANDLERS. Deleting a panel leaves its onX handlers wired to nothing — dead weight
+  // that still ships in the bundle and still looks live when you grep. Removing the PRECISION
+  // module orphaned eight in one go, which is exactly why this check exists. A ratchet, not a
+  // hard fail: the existing ones are a known debt, but you may not add more.
+  const ctrl = readFileSync(resolve(web, 'js/app-controller.js'), 'utf8');
+  const declared = new Set([...ctrl.matchAll(/^\s{6}(on[A-Z]\w*)\s*:/gm)].map((m) => m[1]));
+  const orphans = [...declared].filter((k) => !src.includes('{{' + k + '}}')).sort();
+  const ORPHAN_MAX = 8;   // PRECISION's DRILL/sim-demo set — decide whether to rehome or delete
+  if (orphans.length > ORPHAN_MAX) {
+    fail.push(`  orphaned handlers: ${orphans.length} > ceiling ${ORPHAN_MAX}\n      ${orphans.join(', ')}` +
+      `\n      → a handler with no {{binding}} in index.html is dead: wire it or delete it`);
+  } else if (orphans.length < ORPHAN_MAX) {
+    slack.push(`  orphaned handlers: ${orphans.length} (ceiling ${ORPHAN_MAX} — lower it)`);
   }
 
   if (fail.length) {

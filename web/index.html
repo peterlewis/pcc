@@ -8,7 +8,7 @@
 <meta name="description" content="Precision Clock Mk IV companion — emulator, GNSS sky, and GPS timing analytics. Static, offline-capable.">
 <link rel="stylesheet" href="css/base.css?v=96">
 <link rel="stylesheet" href="css/pcc-tokens.css?v=5">
-<link rel="stylesheet" href="css/pcc-components.css?v=7">
+<link rel="stylesheet" href="css/pcc-components.css?v=8">
 </head>
 <body>
 <div id="root">
@@ -38,7 +38,7 @@
         <div style="display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.14em;color:var(--txt3)"><span style="border:1px solid var(--line2);padding:1px 6px 2px;line-height:1.2">⏎</span><span>OR CLICK</span></div>
       </div>
       <div ref="{{refEntryCap}}" style="position:absolute;left:0;right:0;bottom:18px;display:flex;justify-content:space-between;padding:0 22px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.16em;color:var(--txt3)">
-        <span style="display:inline-flex;align-items:center;gap:9px">PRECISION CLOCK COMPANION <span style="font-family:var(--mono);font-size:var(--fs-pico);font-weight:700;letter-spacing:.16em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:var(--r-1);padding:3px 5px;line-height:1">BETA</span></span>
+        <span style="display:inline-flex;align-items:center;gap:9px">PRECISION CLOCK COMPANION <span class="badge">BETA</span></span>
         <span>MK IV FIRMWARE · WEBASSEMBLY · SYSTEM TIME · SIMULATE OR CONNECT INSIDE</span>
       </div>
     </div>
@@ -110,10 +110,10 @@
                 <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.12em;color:var(--txt3);margin-left:auto">{{connSub}}</span>
               </div>
               <div style="padding:11px 12px;display:flex;flex-direction:column;gap:8px">
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.14em;color:var(--txt3)">PORT</span><span style="font-family:var(--mono);font-size:var(--fs-label);color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px">{{portLabel}}</span></div>
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.14em;color:var(--txt3)">FRAMING</span><span style="font-family:var(--mono);font-size:var(--fs-label);color:var(--txt2);white-space:nowrap">115200 8N1</span></div>
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.14em;color:var(--txt3)">FIX · SATS</span><span style="font-family:var(--mono);font-size:var(--fs-label);color:var(--txt);white-space:nowrap">{{fixTypeLabel}} · {{satsLabel}}</span></div>
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.14em;color:var(--txt3)">FIX AGE</span><span style="font-family:var(--mono);font-size:var(--fs-label);color:var(--txt);white-space:nowrap">{{ageLabel}}</span></div>
+                <div class="between"><span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.14em;color:var(--txt3)">PORT</span><span style="font-family:var(--mono);font-size:var(--fs-label);color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px">{{portLabel}}</span></div>
+                <div class="between"><span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.14em;color:var(--txt3)">FRAMING</span><span style="font-family:var(--mono);font-size:var(--fs-label);color:var(--txt2);white-space:nowrap">115200 8N1</span></div>
+                <div class="between"><span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.14em;color:var(--txt3)">FIX · SATS</span><span style="font-family:var(--mono);font-size:var(--fs-label);color:var(--txt);white-space:nowrap">{{fixTypeLabel}} · {{satsLabel}}</span></div>
+                <div class="between"><span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.14em;color:var(--txt3)">FIX AGE</span><span style="font-family:var(--mono);font-size:var(--fs-label);color:var(--txt);white-space:nowrap">{{ageLabel}}</span></div>
                 <div style="height:1px;background:var(--line);margin:2px 0"></div>
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
                   <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.14em;color:var(--txt3)">SIM FIX</span>
@@ -146,7 +146,7 @@
         <span style="width:8px;height:8px;flex:none;border-radius:50%;background:var(--beta);box-shadow:0 0 8px var(--beta)"></span>
         <span style="font-family:var(--mono);font-size:var(--fs-label);font-weight:700;letter-spacing:.1em;color:var(--beta)">REVIEWING HISTORY</span>
         <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.06em;color:var(--txt2)">{{reviewBannerTime}}</span>
-        <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3)">— every room shows this moment</span>
+        <span class="meta meta--wide">— every room shows this moment</span>
         <span class="spacer"></span>
         <button onClick="{{onExitReview}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.08em;color:var(--beta);background:transparent;border:1px solid var(--beta);border-radius:var(--r-1);padding:5px 12px;cursor:pointer">EXIT TO LIVE</button>
       </div>
@@ -216,10 +216,10 @@
 
         <sc-if value="{{sec_devmodes}}" hint-placeholder-val="{{false}}">
           <div class="pcc-cards" data-screen-label="devmodes" style="animation:pcc-in var(--t-room) var(--ease-ui) both;padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:stretch;max-width:1420px">
-            <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+            <section class="mod mod--col">
                 <div style="display:flex;align-items:center;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)"><span class="lbl">TIME · PRECISION · STANDBY</span></div>
                 <div style="padding:14px var(--pad-panel-x) var(--pad-panel-x);display:flex;flex-direction:column;gap:14px;flex:1">
-                  <div style="display:flex;flex-direction:column;gap:7px">
+                  <div class="col">
                     <span class="lbl">HOLDOVER TOLERANCES</span>
                     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;{{tolRowStyle}}">
                       <label style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:var(--fs-nano);color:var(--txt3)">1 ms
@@ -264,9 +264,9 @@
                       <span style="min-width:96px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.04em;color:var(--face-led,#ff3b2e);padding:0 8px">{{modeCurLabel}}</span>
                       <button onClick="{{onModeNext}}" title="Next mode (button 1)" style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt);background:var(--well);border:0;border-left:1px solid var(--line);padding:5px 10px;cursor:pointer">›</button>
                     </div>
-                    <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3)">{{modeEnabledCount}} ENABLED</span>
+                    <span class="meta meta--wide">{{modeEnabledCount}} ENABLED</span>
                   </div>
-                  <div style="display:flex;flex-direction:column;gap:7px">
+                  <div class="col">
                     <span class="lbl">DATE ROW</span>
                     <div class="pcc-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px">
                       <button onClick="{{oFmtIso}}" class="cbtn"><span style="{{cbIso}}"></span>ISO 8601</button>
@@ -277,7 +277,7 @@
                       <button onClick="{{oFmtMjd}}" class="cbtn"><span style="{{cbMjd}}"></span>MODIFIED JD</button>
                     </div>
                   </div>
-                  <div style="display:flex;flex-direction:column;gap:7px">
+                  <div class="col">
                     <span class="lbl">WEEKDAY</span>
                     <div class="pcc-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px">
                       <button onClick="{{oWdFull}}" class="cbtn"><span style="{{cbWdFull}}"></span>WEEKDAY</button>
@@ -285,7 +285,7 @@
                       <button onClick="{{oWdDd}}" class="cbtn"><span style="{{cbWdDd}}"></span>WEEKDAY DD</button>
                     </div>
                   </div>
-                  <div style="display:flex;flex-direction:column;gap:7px">
+                  <div class="col">
                     <span class="lbl">TIME ROW</span>
                     <div class="pcc-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px">
                       <button onClick="{{oTrSid}}" class="cbtn"><span style="{{cbTrSid}}"></span>SIDEREAL LST</button>
@@ -301,10 +301,10 @@
             <section style="background:var(--panel);border:1px solid var(--line);grid-column:1/-1">
                 <div class="panelhead">
                   <span class="lbl">ASTRO</span>
-                  <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3)">DATE ROW · SUN / MOON / GRID · TIME ROW KEEPS TICKING</span>
+                  <span class="meta meta--wide">DATE ROW · SUN / MOON / GRID · TIME ROW KEEPS TICKING</span>
                 </div>
                 <div style="padding:14px var(--pad-panel-x) var(--pad-panel-x);display:flex;flex-direction:column;gap:14px">
-                  <div style="display:flex;flex-direction:column;gap:7px">
+                  <div class="col">
                     <span class="lbl">MODE</span>
                     <div class="pcc-cards" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px 12px">
                       <button onClick="{{oAstSun}}" class="cbtn"><span style="{{cbAstSun}}"></span>SUN RISE/SET</button>
@@ -316,7 +316,7 @@
                       <button onClick="{{oAstStar}}" class="cbtn"><span style="{{cbAstStar}}"></span>STAR TRANSIT</button>
                     </div>
                   </div>
-                  <div style="display:flex;flex-direction:column;gap:7px">
+                  <div class="col">
                     <span class="lbl">PAGE DWELL</span>
                     <div style="display:flex;gap:8px;align-items:center">
                       <input ref="{{refAstroDwellIn}}" type="number" min="250" max="65535" defaultValue="{{astroDwellVal}}" style="width:104px;min-width:0;font-family:var(--mono);font-size:var(--fs-data-sm);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:5px 8px">
@@ -357,7 +357,7 @@
                     </div>
                     <canvas ref="{{refGammaCurve}}" style="width:64px;height:46px;flex:none"></canvas>
                   </div>
-                  <div style="display:flex;flex-direction:column;gap:7px">
+                  <div class="col">
                     <span class="lbl">COLON STYLE</span>
                     <div class="pcc-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px">
                       <button onClick="{{oColSlow}}" class="cbtn"><span style="{{rbColSlow}}"></span>SLOWFADE</button>
@@ -373,7 +373,7 @@
                     <span class="lbl">LED BALANCE</span>
                     <div style="display:flex;justify-content:space-between"><span class="sub">Per-segment</span><span class="val">{{balSeg}}</span></div>
                     <div style="display:flex;justify-content:space-between"><span class="sub">Colon</span><span class="val">{{balColon}}</span></div>
-                    <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3)">CURRENT-SHARING COMPENSATION · OFF / AUTO / MANUAL STRENGTH · SET VIA config.txt OR MENU</span>
+                    <span class="meta meta--wide">CURRENT-SHARING COMPENSATION · OFF / AUTO / MANUAL STRENGTH · SET VIA config.txt OR MENU</span>
                   </div>
                 </div>
               </section>
@@ -381,12 +381,12 @@
             <section style="background:var(--panel);border:1px solid var(--line);grid-column:1/-1;max-width:1000px">
               <div style="display:flex;align-items:center;justify-content:space-between;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)">
                 <span class="lbl">POINT VALUES · DAC CURVE</span>
-                <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3)">{{dacApplyNote}}</span>
+                <span class="meta meta--wide">{{dacApplyNote}}</span>
               </div>
               <div style="padding:14px var(--pad-panel-x) var(--pad-panel-x);display:flex;gap:16px;flex-wrap:wrap">
                 <div style="flex:1;min-width:280px;display:flex;flex-direction:column;gap:8px">
                   <canvas ref="{{refDacCurve}}" style="width:100%;height:220px;display:block;background:var(--well);border:1px solid var(--line2)"></canvas>
-                  <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3)">DRAG A POINT · X = SENSOR ADC 0–4095 · Y = DAC BRIGHTNESS 0–4095</span>
+                  <span class="meta meta--wide">DRAG A POINT · X = SENSOR ADC 0–4095 · Y = DAC BRIGHTNESS 0–4095</span>
                 </div>
                 <div style="width:230px;display:flex;flex-direction:column;gap:12px">
                   <div style="display:flex;flex-direction:column;gap:3px">
@@ -418,7 +418,7 @@
             <section class="mod">
               <div style="display:flex;align-items:center;justify-content:space-between;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)">
                 <span class="lbl">config.txt — DEVICE USB VOLUME</span>
-                <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3)">{{cfgName}}</span>
+                <span class="meta meta--wide">{{cfgName}}</span>
               </div>
               <div style="padding:14px var(--pad-panel-x) var(--pad-panel-x);display:flex;flex-direction:column;gap:10px">
                 <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
@@ -460,7 +460,7 @@
             <section class="mod">
               <div style="display:flex;align-items:center;gap:9px;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)">
                 <span class="lbl">EMULATOR config.txt — LIVE via the firmware's own parser</span>
-                <span style="font-family:var(--mono);font-size:var(--fs-pico);font-weight:700;letter-spacing:.16em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:var(--r-1);padding:3px 5px;line-height:1">BETA</span>
+                <span class="badge">BETA</span>
               </div>
               <div style="padding:14px var(--pad-panel-x) var(--pad-panel-x);display:flex;flex-direction:column;gap:10px">
                 <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -485,7 +485,7 @@
                   <span class="lbl lbl--nano">LIVE OVER SERIAL</span>
                 </div>
                 <div style="padding:14px var(--pad-panel-x) var(--pad-panel-x);display:flex;flex-direction:column;gap:11px">
-                  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+                  <div class="between">
                     <span class="sub">Timezone override</span>
                     <span style="position:relative;display:inline-flex;align-items:center">
                       <select value="{{tzVal}}" onChange="{{onTz}}" style="appearance:none;-webkit-appearance:none;font-family:var(--mono);font-size:var(--fs-label);background:var(--well);color:var(--txt);border:1px solid var(--line2);padding:4px 22px 4px 8px;border-radius:0;cursor:pointer">
@@ -498,7 +498,7 @@
                       <span style="position:absolute;right:7px;pointer-events:none;color:var(--txt3);font-size:var(--fs-pico)">▾</span>
                     </span>
                   </div>
-                  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+                  <div class="between">
                     <span class="sub">Matrix frequency</span>
                     <span style="position:relative;display:inline-flex;align-items:center">
                       <select value="{{mxVal}}" onChange="{{onMx}}" style="appearance:none;-webkit-appearance:none;font-family:var(--mono);font-size:var(--fs-label);background:var(--well);color:var(--txt);border:1px solid var(--line2);padding:4px 22px 4px 8px;border-radius:0;cursor:pointer">
@@ -509,14 +509,14 @@
                       <span style="position:absolute;right:7px;pointer-events:none;color:var(--txt3);font-size:var(--fs-pico)">▾</span>
                     </span>
                   </div>
-                  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+                  <div class="between">
                     <span class="sub">Time tolerance</span>
                     <span style="display:flex;align-items:center;gap:6px">
                       <input defaultValue="50" size="4" style="width:58px;font-family:var(--mono);font-size:var(--fs-label);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:4px 6px;text-align:right">
-                      <span style="font-family:var(--mono);font-size:var(--fs-nano);color:var(--txt3)">ms</span>
+                      <span class="meta">ms</span>
                     </span>
                   </div>
-                  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+                  <div class="between">
                     <span class="sub">Simulated position</span>
                     <span style="display:flex;align-items:center;gap:6px">
                       <input ref="{{refLatIn}}" defaultValue="52.20530" size="8" style="width:76px;font-family:var(--mono);font-size:var(--fs-label);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:4px 6px;text-align:right">
@@ -806,7 +806,7 @@
                           <button onClick="{{onSpdStd}}" style="{{ssSpdStd}}">STD</button>
                           <button onClick="{{onSpdFast}}" style="{{ssSpdFast}}">FAST</button>
                         </div>
-                        <span style="font-family:var(--mono);font-size:var(--fs-nano);color:var(--txt3)">{{marqueeNote}}</span>
+                        <span class="meta">{{marqueeNote}}</span>
                       </div>
                     </div></div>
               </section>
@@ -829,7 +829,7 @@
                         <button onClick="{{onCd1y}}" style="font-family:var(--mono);font-size:var(--fs-nano);padding:4px 9px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">+1 YEAR</button>
                         <button onClick="{{onCdNye}}" style="font-family:var(--mono);font-size:var(--fs-nano);padding:4px 9px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">NEW YEAR</button>
                       </div>
-                      <div style="font-family:var(--mono);font-size:var(--fs-nano);color:var(--txt3)">TARGET {{cdTargetLabel}}</div>
+                      <div class="meta">TARGET {{cdTargetLabel}}</div>
                     </div></div>
               </section>
               <section class="mod">
@@ -870,7 +870,7 @@
                 <button onClick="{{accTogWx}}" class="pcc-acc-sum" style="width:100%;display:flex;align-items:center;gap:10px;height:44px;padding:0 var(--pad-panel-x);background:transparent;border:0;cursor:pointer;text-align:left">
                   <span class="pcc-acc-chev" style="color:var(--txt3);font-size:var(--fs-nano);width:9px;flex:none">{{accChevWx}}</span>
                   <span class="pcc-acc-title" style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">WEATHER</span>
-                  <span style="font-family:var(--mono);font-size:var(--fs-pico);font-weight:700;letter-spacing:.16em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:var(--r-1);padding:3px 5px;line-height:1">COMING SOON</span>
+                  <span class="badge">COMING SOON</span>
                   <span class="spacer"></span>
                 </button>
                 <div class="pcc-acc-body" data-open="{{accOpenWx}}" style="padding:2px var(--pad-panel-x) var(--pad-panel-x)">
@@ -1081,7 +1081,7 @@
                 <div class="row"><span class="sub">Altitude</span><span class="val">{{fAlt}}</span></div>
                 <div class="row"><span class="sub">HDOP</span><span class="val">{{fHdop}}</span></div>
                 <div class="row"><span class="sub">Satellites used / in view</span><span class="val">{{fSatsUV}}</span></div>
-                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px"><span class="sub">Maidenhead grid</span><span class="val">{{fGrid}}</span></div>
+                <div class="row row--plain"><span class="sub">Maidenhead grid</span><span class="val">{{fGrid}}</span></div>
               </section>
               <section class="mod">
                 <div class="panelhead">
@@ -1092,7 +1092,7 @@
                 <div class="row"><span class="sub">Moon alt / az</span><span class="val">{{cMoonAlt}} / {{cMoonAz}}</span></div>
                 <div class="row"><span class="sub">Moon phase</span><span class="val">{{cMoonPhase}} · {{cMoonIllum}}</span></div>
                 <div class="row"><span class="sub">Sunrise</span><span class="val">{{cRise}}</span></div>
-                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px"><span class="sub">Sunset</span><span class="val">{{cSet}}</span></div>
+                <div class="row row--plain"><span class="sub">Sunset</span><span class="val">{{cSet}}</span></div>
               </section>
               <sc-if value="{{starShow}}" hint-placeholder-val="{{false}}">
                 <section class="mod">
@@ -1136,7 +1136,7 @@
         <sc-if value="{{sec_signal}}" hint-placeholder-val="{{false}}">
           <div data-screen-label="Signal" style="animation:pcc-in var(--t-room) var(--ease-ui) both;padding:14px;display:flex;flex-direction:column;gap:14px;max-width:1560px">
             <div style="display:grid;grid-template-columns:minmax(420px,1.4fr) minmax(300px,1fr);gap:14px;align-items:stretch">
-              <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+              <section class="mod mod--col">
                 <div class="panelhead">
                   <span class="lbl">04 · C/N₀ VS ELEVATION</span>
                   <span class="lbl lbl--nano">ANTENNA / MULTIPATH QC</span>
@@ -1153,7 +1153,7 @@
                   <span style="display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:var(--fs-nano);color:var(--txt2)"><span style="width:9px;height:9px;background:var(--bds)"></span>BDS</span>
                 </div>
               </section>
-              <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+              <section class="mod mod--col">
                 <div class="panelhead">
                   <span class="lbl">SIGNAL BARS</span>
                   <span class="lbl lbl--nano">dB-Hz · DIM = UNUSED</span>
@@ -1218,7 +1218,7 @@
                   <button onClick="{{oPwin30}}" style="{{ssPwin30}}">30M</button>
                   <button onClick="{{oPwin1h}}" style="{{ssPwin1h}}">1H</button>
                 </div>
-                <span style="font-family:var(--mono);font-size:var(--fs-nano);color:var(--txt3)">EACH FIX = ONE SAMPLE · AGE-FADED · SHARED WITH SIGNAL</span>
+                <span class="meta">EACH FIX = ONE SAMPLE · AGE-FADED · SHARED WITH SIGNAL</span>
               </div>
             </section>
             <div style="display:flex;flex-direction:column;gap:14px">
@@ -1229,11 +1229,11 @@
                 </div>
                 <div class="pcc-cards" style="display:grid;grid-template-columns:1fr 1fr">
                   <div style="padding:var(--pad-panel-y) var(--pad-panel-x);border-right:1px solid var(--line-soft)">
-                    <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">CEP 50%</div>
+                    <div class="lbl lbl--stack">CEP 50%</div>
                     <div style="font-family:var(--mono);font-size:var(--fs-heading);font-weight:700;color:var(--txt)">{{pCep}}</div>
                   </div>
                   <div style="padding:12px">
-                    <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">2DRMS 95%</div>
+                    <div class="lbl lbl--stack">2DRMS 95%</div>
                     <div style="font-family:var(--mono);font-size:var(--fs-heading);font-weight:700;color:var(--txt)">{{pDrms}}</div>
                   </div>
                 </div>
@@ -1309,7 +1309,7 @@
               </div>
             </div>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;align-items:stretch">
-              <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+              <section class="mod mod--col">
                 <div class="panelhead">
                   <span class="lbl">PHASE AT PPS EDGE</span>
                   <span class="lbl lbl--nano">MEDIAN-CENTRED · ROBUST ±1σ BAND</span>
@@ -1319,7 +1319,7 @@
                 </div>
                 <div style="padding:0 12px 10px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">CAPTURED IN FIRMWARE AT THE PPS EDGE (SYSTICK ≈12.5 ns). USB TRANSPORT JITTER IS EXCLUDED.</div>
               </section>
-              <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+              <section class="mod mod--col">
                 <div class="panelhead">
                   <span class="lbl">OSCILLATOR DRIFT + DIE TEMP</span>
                   <span class="lbl lbl--nano">CAL WINDOW 63 s → STAIRCASE</span>
@@ -1331,7 +1331,7 @@
               </section>
             </div>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;align-items:stretch">
-              <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+              <section class="mod mod--col">
                 <div class="panelhead">
                   <span class="lbl">DRIFT VS DIE TEMP</span>
                   <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:{{fitStatusC}}">{{fitStatus}}</span>
@@ -1341,7 +1341,7 @@
                 </div>
                 <div style="padding:0 12px 10px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">32 kHz TUNING-FORK PARABOLA. FITTED CURVE IN AMBER.</div>
               </section>
-              <section style="background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column">
+              <section class="mod mod--col">
                 <div class="panelhead">
                   <span class="lbl">ALLAN DEVIATION — FREE-RUNNING OSCILLATOR</span>
                   <span class="lbl lbl--nano">σ_y(τ) · OCTAVE TAUS · LOG-LOG</span>
@@ -1359,7 +1359,7 @@
                 <div class="row"><span class="sub">HSE — system clock</span><span class="val">{{fwTcHse}}</span></div>
                 <div class="row"><span class="sub">LSE — battery RTC</span><span class="val">{{fwTcLse}}</span></div>
                 <div class="row"><span class="sub">Learned die range</span><span class="val">{{fwTcRange}}</span></div>
-                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px"><span class="sub">Read back</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt3)">{{fwTcMeta}}</span></div>
+                <div class="row row--plain"><span class="sub">Read back</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt3)">{{fwTcMeta}}</span></div>
                 <div style="padding:0 12px 10px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">LEARNED ON-DIE, READ VIA "tc_dump = on" → $PMTXTC. APPLIED DURING HOLDOVER.</div>
               </section>
               <section class="mod">
@@ -1394,29 +1394,29 @@
                 <!-- readout band -->
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));border-bottom:1px solid var(--line-soft);border-top:1px solid var(--line-soft);margin-top:8px">
                   <div style="padding:8px 12px;border-right:1px solid var(--line-soft)">
-                    <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">RAW → CLEAN RMS</div>
+                    <div class="lbl lbl--stack">RAW → CLEAN RMS</div>
                     <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt)">{{spRawRms}}<span style="color:var(--txt3)"> → </span><span style="color:var(--lock)">{{spCleanRms}}</span><span style="font-size:var(--fs-label);font-weight:400;color:var(--txt3)"> µs</span></div>
                   </div>
                   <div style="padding:8px 12px;border-right:1px solid var(--line-soft)">
-                    <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">REDUCTION</div>
+                    <div class="lbl lbl--stack">REDUCTION</div>
                     <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt-hi)">{{spReduction}}</div>
                     <div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3);margin-top:3px">AGGREGATE {{spSqrtG}}</div>
                   </div>
                   <div style="padding:8px 12px;border-right:1px solid var(--line-soft)">
-                    <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">REJECTED</div>
+                    <div class="lbl lbl--stack">REJECTED</div>
                     <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt)"><span style="color:var(--led)">{{spRej}}</span><span style="font-size:var(--fs-label);font-weight:400;color:var(--txt3)"> / {{spTot}}</span></div>
                   </div>
                   <div style="padding:8px 12px;border-right:1px solid var(--line-soft)">
-                    <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">KEPT</div>
+                    <div class="lbl lbl--stack">KEPT</div>
                     <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt)">{{spKept}}</div>
                   </div>
                   <div style="padding:8px 12px;border-right:1px solid var(--line-soft)">
-                    <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">GROUPS OUT</div>
+                    <div class="lbl lbl--stack">GROUPS OUT</div>
                     <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt)">{{spGroups}}</div>
                     <div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3);margin-top:3px">1 PER ~{{spGVal}} s</div>
                   </div>
                   <div style="padding:8px 12px">
-                    <div style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2);margin-bottom:4px">GATE</div>
+                    <div class="lbl lbl--stack">GATE</div>
                     <div style="font-family:var(--mono);font-size:var(--fs-title);font-weight:700;color:var(--txt)">{{spGate}}<span style="font-size:var(--fs-label);font-weight:400;color:var(--txt3)"> µs</span></div>
                     <div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3);margin-top:3px">{{spGateSub}}</div>
                   </div>
@@ -1533,7 +1533,7 @@
                 </div>
                 <div class="row"><span class="sub">Sub-solar point</span><span class="val">{{gSub}}</span></div>
                 <div class="row"><span class="sub">In view at observer</span><span class="val">{{gVis}}</span></div>
-                <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px"><span class="sub">Observer grid</span><span class="val">{{fGrid}}</span></div>
+                <div class="row row--plain"><span class="sub">Observer grid</span><span class="val">{{fGrid}}</span></div>
               </section>
               <section class="mod">
                 <div class="panelhead">
@@ -1590,7 +1590,7 @@
                   <div class="row"><span class="sub">Wind / gust</span><span class="val">{{wWind}} / {{wGust}}</span></div>
                   <div class="row"><span class="sub">Precipitation</span><span class="val">{{wPrecip}}</span></div>
                   <div class="row"><span class="sub">Updated</span><span class="val">{{wAsOf}}</span></div>
-                  <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px"><span class="sub">Point forecast at</span><span style="font-family:var(--mono);font-size:var(--fs-label);color:var(--txt2)">{{wPos}}</span></div>
+                  <div class="row row--plain"><span class="sub">Point forecast at</span><span style="font-family:var(--mono);font-size:var(--fs-label);color:var(--txt2)">{{wPos}}</span></div>
                 </div>
               </sc-if>
               <sc-if value="{{wxOffline}}" hint-placeholder-val="{{false}}">
@@ -1672,7 +1672,7 @@
             <section style="background:var(--panel);border:1px solid var(--line);grid-column:1/-1">
               <div style="display:flex;align-items:center;gap:9px;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)">
                 <span class="lbl">TELEMETRY LOG — PERSISTENT</span>
-                <span style="font-family:var(--mono);font-size:var(--fs-pico);font-weight:700;letter-spacing:.16em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:var(--r-1);padding:3px 5px;line-height:1">BETA</span>
+                <span class="badge">BETA</span>
                 <span style="margin-left:auto;font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">INDEXEDDB · CONNECTED ONLY</span>
               </div>
               <div style="padding:14px var(--pad-panel-x) var(--pad-panel-x);display:flex;flex-direction:column;gap:12px">
@@ -1696,7 +1696,7 @@
             <section style="background:var(--panel);border:1px solid var(--line);grid-column:1/-1">
               <div style="display:flex;align-items:center;gap:9px;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)">
                 <span class="lbl">REWIND · SCRUB</span>
-                <span style="font-family:var(--mono);font-size:var(--fs-pico);font-weight:700;letter-spacing:.16em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:var(--r-1);padding:3px 5px;line-height:1">BETA</span>
+                <span class="badge">BETA</span>
                 <span style="margin-left:auto;font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.04em;color:var(--face-led,#ff3b2e)">{{rvTime}}</span>
               </div>
               <div style="padding:14px var(--pad-panel-x) var(--pad-panel-x);display:flex;flex-direction:column;gap:11px">
@@ -1730,7 +1730,7 @@
               <div class="row"><span class="sub">Position fixes</span><span class="val">{{eFixes}}</span></div>
               <div class="row"><span class="sub">Satellite observations</span><span class="val">{{eObs}}</span></div>
               <div class="row"><span class="sub">NMEA lines held</span><span class="val">{{eLines}}</span></div>
-              <div style="display:flex;justify-content:space-between;gap:16px;padding:5px 12px"><span class="sub">PPS samples</span><span class="val">{{ePps}}</span></div>
+              <div class="row row--plain"><span class="sub">PPS samples</span><span class="val">{{ePps}}</span></div>
               <div style="padding:8px 12px;border-top:1px solid var(--line);font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3)">SESSION IS HELD IN MEMORY. CLEARED ON RELOAD.</div>
             </section>
             <section class="mod">
@@ -1744,7 +1744,7 @@
                   <div style="font-size:var(--fs-label);color:var(--txt3);margin-top:2px">Fix time series — lat/lon/alt, E/N offsets, DOP, sats, fix type</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:10px;flex:none">
-                  <span style="font-family:var(--mono);font-size:var(--fs-nano);color:var(--txt3)">{{eCsvN}}</span>
+                  <span class="meta">{{eCsvN}}</span>
                   <button onClick="{{onDlCsv}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt);cursor:pointer" style-hover="border-color:var(--txt3)">DOWNLOAD</button>
                 </div>
               </div>
@@ -1754,7 +1754,7 @@
                   <div style="font-size:var(--fs-label);color:var(--txt3);margin-top:2px">Full session — observer, stats, satellite snapshot, PPS fit</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:10px;flex:none">
-                  <span style="font-family:var(--mono);font-size:var(--fs-nano);color:var(--txt3)">STRUCTURED</span>
+                  <span class="meta">STRUCTURED</span>
                   <button onClick="{{onDlJson}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt);cursor:pointer" style-hover="border-color:var(--txt3)">DOWNLOAD</button>
                 </div>
               </div>
@@ -1764,7 +1764,7 @@
                   <div style="font-size:var(--fs-label);color:var(--txt3);margin-top:2px">Fix track for GIS tools — 1 point / 5 s</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:10px;flex:none">
-                  <span style="font-family:var(--mono);font-size:var(--fs-nano);color:var(--txt3)">{{eGpxN}}</span>
+                  <span class="meta">{{eGpxN}}</span>
                   <button onClick="{{onDlGpx}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt);cursor:pointer" style-hover="border-color:var(--txt3)">DOWNLOAD</button>
                 </div>
               </div>
@@ -1774,7 +1774,7 @@
                   <div style="font-size:var(--fs-label);color:var(--txt3);margin-top:2px">Sky history — az/el per satellite (1 pt / 30 s) with nearest C/N&#8320;</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:10px;flex:none">
-                  <span style="font-family:var(--mono);font-size:var(--fs-nano);color:var(--txt3)">{{eSatN}}</span>
+                  <span class="meta">{{eSatN}}</span>
                   <button onClick="{{onDlSat}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt);cursor:pointer" style-hover="border-color:var(--txt3)">DOWNLOAD</button>
                 </div>
               </div>
@@ -1784,7 +1784,7 @@
                   <div style="font-size:var(--fs-label);color:var(--txt3);margin-top:2px">Received sentences as captured, checksums intact</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:10px;flex:none">
-                  <span style="font-family:var(--mono);font-size:var(--fs-nano);color:var(--txt3)">{{eNmeaN}}</span>
+                  <span class="meta">{{eNmeaN}}</span>
                   <button onClick="{{onDlNmea}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt);cursor:pointer" style-hover="border-color:var(--txt3)">DOWNLOAD</button>
                 </div>
               </div>
@@ -1811,6 +1811,6 @@
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=273"></script>
+<script type="module" src="js/app-controller.js?v=274"></script>
 </body>
 </html>

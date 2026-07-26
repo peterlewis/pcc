@@ -3057,14 +3057,6 @@ class Component extends DcLite {
       ...(() => { const u = this.precUi(); return {
         precLevel: u.level, precLevelStyle: u.style, precUnc: u.unc, precDigits: u.digits,
         precHold: u.hold, precMeterPct: u.pct + '%', precColon: u.colon, gpsSignalLabel: u.gps, timelapseLabel: u.tl, fadeLabel: u.fade,
-        // Digit ladder — replaces the red-amber-green meter. The quantity is DISCRETE (a digit is
-        // true or it is dark), so it is drawn as one cell per sub-second place in LED order, not as
-        // a continuous ramp. P3 = ms still true, P2 = cs, P1 = ds, P0 = whole seconds only.
-        ...(() => {
-          const lv = (this.emu && this.emu.precision) ? this.emu.precision().level : ('P' + (this.state.precision || 0));
-          const n = { P3: 3, P2: 2, P1: 1, P0: 0 }[lv] || 0;
-          return { plDs: n >= 1 ? '1' : '0', plCs: n >= 2 ? '1' : '0', plMs: n >= 3 ? '1' : '0' };
-        })(),
       }; })(),
       // The GPS-drop / time-lapse toggles are a SIMULATION-ONLY drill — you can't fake a real
       // receiver's signal, and standby is plain host time. Enable them only in simulation; grey
