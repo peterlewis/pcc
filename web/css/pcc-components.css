@@ -186,6 +186,25 @@
 .btn--primary:hover { color: var(--led); border-color: var(--led); background: var(--led-fill); }
 .btn[disabled] { color: var(--txt3); border-color: var(--line); cursor: not-allowed; }
 
+/* ---- the digit ladder -----------------------------------------------------
+   Replaces the precision panel's linear-gradient(--lock → --acq → --none) health
+   bar, which was the most SaaS-looking object in the product: a continuous
+   red-amber-green ramp implies a smooth "score", when the real quantity is
+   discrete — a digit is either still true or it is dark. One cell per sub-second
+   digit position, in the same left-to-right order as the LEDs on the real face,
+   lit while that place value still outruns the 3σ holdover bound. */
+.ladder { display: flex; gap: 3px; align-items: flex-end; }
+.ladder i {
+  display: block; width: 26px; height: 12px;
+  background: var(--led-dim); border: 1px solid var(--line-well);
+  transition: background var(--t-tick), box-shadow var(--t-tick);
+}
+.ladder i[data-lit="1"] { background: var(--led); box-shadow: 0 0 7px var(--led-glow); }
+.ladder__k {
+  font-family: var(--mono); font-size: var(--fs-pico); letter-spacing: var(--ls-micro);
+  color: var(--txt3); margin-left: var(--sp-2); align-self: center;
+}
+
 /* ---- figure caption: how an instrument explains itself. --------------------
    A caption states provenance, not instruction. It is the ONLY sanctioned place
    for an explanation that sits next to data, and it replaces the floating

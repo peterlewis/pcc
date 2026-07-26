@@ -3059,6 +3059,14 @@ class Component extends DcLite {
       ...(() => { const u = this.precUi(); return {
         precLevel: u.level, precLevelStyle: u.style, precUnc: u.unc, precDigits: u.digits,
         precHold: u.hold, precMeterPct: u.pct + '%', precColon: u.colon, gpsSignalLabel: u.gps, timelapseLabel: u.tl, fadeLabel: u.fade,
+        // Digit ladder — replaces the red-amber-green meter. The quantity is DISCRETE (a digit is
+        // true or it is dark), so it is drawn as one cell per sub-second place in LED order, not as
+        // a continuous ramp. P3 = ms still true, P2 = cs, P1 = ds, P0 = whole seconds only.
+        ...(() => {
+          const lv = (this.emu && this.emu.precision) ? this.emu.precision().level : ('P' + (this.state.precision || 0));
+          const n = { P3: 3, P2: 2, P1: 1, P0: 0 }[lv] || 0;
+          return { plDs: n >= 1 ? '1' : '0', plCs: n >= 2 ? '1' : '0', plMs: n >= 3 ? '1' : '0' };
+        })(),
       }; })(),
       // The GPS-drop / time-lapse toggles are a SIMULATION-ONLY drill — you can't fake a real
       // receiver's signal, and standby is plain host time. Enable them only in simulation; grey
@@ -3139,6 +3147,9 @@ class Component extends DcLite {
       oColSlow: () => this.set2({ colon: 'slowfade' }), oColHeart: () => this.set2({ colon: 'heartbeat' }), oColSaw: () => this.set2({ colon: 'sawtooth' }), oColAlt: () => this.set2({ colon: 'alt_sawtooth' }), oColTog: () => this.set2({ colon: 'toggle' }), oColSolid: () => this.set2({ colon: 'solid' }),
       colonFreezeNote: this.noFixFreeze() ? 'HELD SOLID — FIRMWARE FREEZES THE ANIMATION WITHOUT FIX' : 'RESYNCED ON THE EVEN UTC SECOND · 2 S CYCLE',
       ssSrcLocal: this.seg(!st.utc, true), ssSrcUtc: this.seg(st.utc, false),
+      // .seg carries its own state in CSS off aria-pressed, so the segmented control no longer
+      // needs a computed style string pushed into markup — and it announces correctly.
+      apSrcLocal: st.utc ? 'false' : 'true', apSrcUtc: st.utc ? 'true' : 'false',
       oSrcLocal: () => { this.set2({ utc: false }); if (this.emu) this.emu.setUtc(false); },
       oSrcUtc: () => { this.set2({ utc: true }); if (this.emu) this.emu.setUtc(true); },
       cbStandby: this.cb(st.standby), oStandby: () => this.set2({ standby: !st.standby }),

@@ -8,7 +8,7 @@
 <meta name="description" content="Precision Clock Mk IV companion — emulator, GNSS sky, and GPS timing analytics. Static, offline-capable.">
 <link rel="stylesheet" href="css/base.css?v=96">
 <link rel="stylesheet" href="css/pcc-tokens.css?v=5">
-<link rel="stylesheet" href="css/pcc-components.css?v=1">
+<link rel="stylesheet" href="css/pcc-components.css?v=2">
 </head>
 <body>
 <div id="root">
@@ -746,62 +746,73 @@
               </div>
             </div>
 
-            <section style="background:var(--panel);border:1px solid var(--line)">
-              <div style="display:flex;align-items:center;gap:9px;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">PRECISION — SIGNIFICANT DIGITS</span><span style="font-family:var(--mono);font-size:var(--fs-pico);font-weight:700;letter-spacing:.16em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:var(--r-1);padding:3px 5px;line-height:1">BETA</span></div>
-              <div style="padding:13px 12px;display:flex;flex-direction:column;gap:11px">
-                <div style="display:flex;align-items:center;gap:13px">
-                  <span style="{{precLevelStyle}}">{{precLevel}}</span>
-                  <div style="display:flex;flex-direction:column;gap:2px">
-                    <span style="font-size:var(--fs-data-sm);color:var(--txt);font-family:var(--mono)">±{{precUnc}} · significant to {{precDigits}}</span>
-                    <span style="font-size:var(--fs-nano);color:var(--txt3);font-family:var(--mono);letter-spacing:.04em">{{precColon}}</span>
+            <!-- PRECISION — a READOUT module under Law 2: everything the device measured sits in a
+                 well (recessed, not editable); the only things on the raised face are the controls
+                 that change what is measured. The floating tutorial sentence became the legend. -->
+            <section class="mod">
+              <div class="mod__strip">
+                <span>PRECISION — SIGNIFICANT DIGITS</span>
+                <span style="font-family:var(--mono);font-size:var(--fs-pico);font-weight:700;letter-spacing:.16em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:var(--r-1);padding:3px 5px;line-height:1">BETA</span>
+                <span class="mod__stat">{{precHold}}</span>
+              </div>
+              <div class="mod__field">
+                <div class="well">
+                  <div class="kv"><span class="kv__k">Significant to</span><span class="kv__v">{{precDigits}}</span></div>
+                  <div class="kv"><span class="kv__k">Uncertainty</span><span class="kv__v">±{{precUnc}}</span></div>
+                  <div class="kv"><span class="kv__k">Time base</span><span class="kv__v">{{precColon}}</span></div>
+                  <div class="kv" style="border-top:1px solid var(--line-soft);padding-top:9px;margin-top:5px">
+                    <span class="kv__k">Sub-second digits</span>
+                    <span style="display:flex;align-items:center">
+                      <span class="ladder" title="One cell per sub-second digit, in LED order. Lit while that place value still outruns the 3-sigma holdover bound.">
+                        <i data-lit="{{plDs}}"></i><i data-lit="{{plCs}}"></i><i data-lit="{{plMs}}"></i>
+                      </span>
+                      <span class="ladder__k">0.1 · 0.01 · 0.001 s</span>
+                    </span>
                   </div>
-                  <span style="flex:1"></span>
-                  <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.06em;color:var(--txt2)">{{precHold}}</span>
                 </div>
-                <div style="position:relative;height:6px;background:var(--well);border:1px solid var(--line2);border-radius:var(--r-1);overflow:hidden">
-                  <div style="position:absolute;left:0;top:0;bottom:0;width:{{precMeterPct}};background:linear-gradient(90deg,var(--lock),var(--acq) 55%,var(--none));transition:width var(--t-disclose) var(--ease-ui)"></div>
+                <div class="ctl" style="margin-top:var(--sp-3)">
+                  <button class="btn" onClick="{{onDrillTog}}"><span>{{drillChev}}</span> DRILL</button>
                 </div>
-                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-                  <button onClick="{{onDrillTog}}" style="display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.12em;color:var(--txt3);background:transparent;border:1px solid var(--line2);border-radius:var(--r-1);padding:6px 11px;cursor:pointer" style-hover="color:var(--txt2);border-color:var(--txt3)"><span>{{drillChev}}</span>DRILL</button>
-                  <span style="flex:1;min-width:80px"></span>
-                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body);max-width:300px">Turn on Significance Fade, drop GPS, and run time-lapse. Sub-second digits fade as uncertainty grows.</span>
-                </div>
-                <div class="pcc-acc-body" data-open="{{drillOpenStr}}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-                  <span style="font-family:var(--mono);font-size:var(--fs-micro);font-weight:700;letter-spacing:.14em;color:var(--beta)">SIMULATION ONLY</span>
+                <div class="pcc-acc-body ctl" data-open="{{drillOpenStr}}">
+                  <span class="ctl__k" style="color:var(--beta)">SIMULATION ONLY</span>
                   <button onClick="{{onGpsSignal}}" disabled="{{simDemoDisabled}}" style="{{simDemoBtnStyle}}">{{gpsSignalLabel}}</button>
                   <button onClick="{{onTimelapse}}" disabled="{{simDemoDisabled}}" style="{{simDemoBtnStyle}}">{{timelapseLabel}}</button>
                   <button onClick="{{onHoldoverFade}}" disabled="{{simDemoDisabled}}" style="{{simDemoBtnStyle}}">{{fadeLabel}}</button>
                 </div>
               </div>
+              <div class="mod__legend">Digits darken as the 3-sigma holdover bound passes their place value. DRILL drops GPS and runs time-lapse &#183; simulation only.</div>
             </section>
 
-            <section style="background:var(--panel);border:1px solid var(--line)">
-              <div style="display:flex;align-items:center;gap:9px;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">OBSERVER — DRIVES SIDEREAL / SOLAR / GRID &amp; THE REAL SKY</span></div>
-              <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:11px 12px">
-                <button onClick="{{onGeolocate}}" disabled="{{obsCtrlDisabled}}" style="{{obsGeoStyle}}">
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="6" cy="6" r="4.5"></circle><circle cx="6" cy="6" r="1.4" fill="currentColor" stroke="none"></circle><path d="M6 .5v2M6 9.5v2M.5 6h2M9.5 6h2"></path></svg>
-                  USE MY LOCATION
-                </button>
-                <div style="display:flex;align-items:center;gap:6px">
-                  <span style="font-family:var(--mono);font-size:var(--fs-nano);color:var(--txt3)">LAT</span>
-                  <input ref="{{refEmuLat}}" type="number" step="0.0001" defaultValue="{{emuLatVal}}" disabled="{{obsCtrlDisabled}}" style="width:92px;font-family:var(--mono);font-size:var(--fs-data-sm);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:5px 7px">
-                  <span style="font-family:var(--mono);font-size:var(--fs-nano);color:var(--txt3);margin-left:4px">LON</span>
-                  <input ref="{{refEmuLon}}" type="number" step="0.0001" defaultValue="{{emuLonVal}}" disabled="{{obsCtrlDisabled}}" style="width:92px;font-family:var(--mono);font-size:var(--fs-data-sm);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:5px 7px">
+            <!-- OBSERVER — a CONTROL module under Law 2, so it carries NO well: every value it
+                 produces (GRID, ZONE) is already reported in the rack, and a value is reported
+                 once. Controls sit on the raised face; the prose became the legend. -->
+            <section class="mod">
+              <div class="mod__strip">
+                <span>OBSERVER — DRIVES SIDEREAL / SOLAR / GRID &amp; THE REAL SKY</span>
+                <span class="mod__stat">{{emuObserverTag}}</span>
+              </div>
+              <div class="mod__field">
+                <div class="ctl">
+                  <button onClick="{{onGeolocate}}" disabled="{{obsCtrlDisabled}}" style="{{obsGeoStyle}}">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="6" cy="6" r="4.5"></circle><circle cx="6" cy="6" r="1.4" fill="currentColor" stroke="none"></circle><path d="M6 .5v2M6 9.5v2M.5 6h2M9.5 6h2"></path></svg>
+                    USE MY LOCATION
+                  </button>
+                  <span class="ctl__k" style="margin-left:var(--sp-3)">LAT</span>
+                  <input ref="{{refEmuLat}}" type="number" step="0.0001" defaultValue="{{emuLatVal}}" disabled="{{obsCtrlDisabled}}" style="width:92px;font-family:var(--mono);font-size:var(--fs-data-sm);background:var(--well);border:1px solid var(--line-well);color:var(--txt);padding:5px 7px">
+                  <span class="ctl__k">LON</span>
+                  <input ref="{{refEmuLon}}" type="number" step="0.0001" defaultValue="{{emuLonVal}}" disabled="{{obsCtrlDisabled}}" style="width:92px;font-family:var(--mono);font-size:var(--fs-data-sm);background:var(--well);border:1px solid var(--line-well);color:var(--txt);padding:5px 7px">
                   <button onClick="{{onSetLoc}}" disabled="{{obsCtrlDisabled}}" style="{{obsSetStyle}}">SET</button>
                 </div>
-                <span style="flex:1"></span>
-                <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.05em;color:var(--txt3)">{{emuObserverTag}}</span>
-              </div>
-              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:0 12px 11px">
-                <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.14em;color:var(--txt3)">TIME ZONE</span>
-                <div style="display:flex;border:1px solid var(--line)">
-                  <button onClick="{{oSrcLocal}}" style="{{ssSrcLocal}}">LOCAL</button>
-                  <button onClick="{{oSrcUtc}}" style="{{ssSrcUtc}}">UTC</button>
+                <div class="ctl">
+                  <span class="ctl__k">TIME ZONE</span>
+                  <div class="seg">
+                    <button class="seg__btn" aria-pressed="{{apSrcLocal}}" onClick="{{oSrcLocal}}">LOCAL</button>
+                    <button class="seg__btn" aria-pressed="{{apSrcUtc}}" onClick="{{oSrcUtc}}">UTC</button>
+                  </div>
+                  <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.04em;color:var(--txt2)">{{emuTzTag}}</span>
                 </div>
-                <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.04em;color:var(--txt2)">{{emuTzTag}}</span>
-                <span style="flex:1;min-width:60px"></span>
-                <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:1.5;max-width:300px">The real Mk IV derives the zone from its GPS fix; the emulator follows the browser zone (DST-aware). With no fix and no config file, a bare device shows UTC.</span>
               </div>
+              <div class="mod__legend">The Mk IV takes its zone from the GPS fix. The emulator follows the browser zone; a bare device with no fix shows UTC.</div>
             </section>
 
             <div style="margin-top:var(--gap-room);padding-top:var(--sp-3);border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:10px">
@@ -1761,6 +1772,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=266"></script>
+<script type="module" src="js/app-controller.js?v=267"></script>
 </body>
 </html>
