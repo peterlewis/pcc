@@ -83,6 +83,11 @@ html = html.replace(/<link rel="stylesheet" href="css\/base\.css(?:\?v=\d+)?">/,
 const tokens = readFileSync(resolve(web, 'css/pcc-tokens.css'), 'utf8');
 html = html.replace(/<link rel="stylesheet" href="css\/pcc-tokens\.css(?:\?v=\d+)?">/, () => `<style>\n${tokens}\n</style>`);
 if (/href="css\/pcc-tokens\.css/.test(html)) throw new Error('pcc-tokens.css link not inlined');
+// pcc-components.css (the compositional layer: the rack + the depth law) — LAST, so its
+// component classes can lean on every token above them.
+const comps = readFileSync(resolve(web, 'css/pcc-components.css'), 'utf8');
+html = html.replace(/<link rel="stylesheet" href="css\/pcc-components\.css(?:\?v=\d+)?">/, () => `<style>\n${comps}\n</style>`);
+if (/href="css\/pcc-components\.css/.test(html)) throw new Error('pcc-components.css link not inlined');
 const scriptRe = /<script type="module" src="js\/app-controller\.js(?:\?v=\d+)?"><\/script>/;
 if (!scriptRe.test(html)) throw new Error('module <script> tag not found in index.html');
 // Defence in depth: neutralise any literal `</script` in the bundle BEFORE inlining — inside a JS

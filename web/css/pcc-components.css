@@ -1,0 +1,223 @@
+/* ============================================================================
+   pcc-components.css — THE COMPOSITIONAL LAYER · C1
+   Load AFTER pcc-tokens.css. Tokens said what things look like; this says what
+   things ARE. Two laws, and every component below is one of them made buildable.
+
+   LAW 1 — THE RACK (horizontal).  Every room opens with the same object: one
+   box, six cells, the six numbers that room is accountable for, in the same six
+   places forever. A room answers "what is true right now?" BEFORE it offers a
+   single control. TIMING already worked this way; this makes it constitutional.
+   Corollary, and the reason FACE's tutorial column dies: STATE REPORTED AS A
+   VALUE CANNOT ALSO BE REPORTED AS A PARAGRAPH. Once ZONE is a cell reading
+   "UTC+01 / EUROPE/LONDON · DST", the sentence explaining it has no job left.
+
+   LAW 2 — DEPTH (vertical).  base.css ships a five-step ladder (--inset, --well,
+   --bg, --panel, --strip) and the app spent it at random. It now means exactly
+   one thing, and the direction of the metaphor is constant in both themes:
+       RECESSED = THE DEVICE PRODUCED THIS. You cannot edit it.
+       RAISED   = YOU OPERATE THIS.
+     -1  --inset   the LED face. Nothing else, ever.
+      0  --well    readouts, tables, charts, values the device wrote.
+      1  --bg      the room floor.
+      2  --panel   the module's raised front face: controls and legends.
+      3  --strip   the engraved header band.
+   ENFORCING RULE: a module holds readouts or controls, NEVER both at the same
+   depth. If it needs both, readouts go in a well and controls sit on the face
+   around it. That single rule makes the old FACE panels impossible to build.
+   ========================================================================== */
+
+/* ---- Light-theme depth fix -------------------------------------------------
+   Recessed must read as recessed in BOTH themes, and on paper that means DARKER,
+   not lighter. base.css set light --well #fbfaf7, which is lighter than --panel
+   #f2f1ed, so every well read as RAISED and Law 2 inverted. Corrected here (the
+   token keeps its name and every existing --well use — inputs, code blocks —
+   becomes correctly inset rather than floating). */
+:root[data-theme="light"] {
+  --well: #dcdad2;
+  --line-well: #c4c1b8;      /* a well's own edge, one step firmer than --line */
+}
+:root, :root[data-theme="dark"] {
+  --line-well: #15181d;
+}
+
+/* ============================================================================
+   THE RACK — Law 1
+   ========================================================================== */
+.rack {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-0);
+}
+.rack__cell {
+  padding: var(--sp-2) var(--sp-3) 9px;
+  border-right: 1px solid var(--line-soft);
+  min-width: 0;                       /* let long values ellipsis instead of blowing the grid */
+}
+.rack__cell:last-child { border-right: 0; }
+
+.rack__k {                             /* what this cell is accountable for */
+  font-family: var(--mono); font-size: var(--fs-nano);
+  letter-spacing: var(--ls-label); text-transform: uppercase; color: var(--txt3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rack__v {                             /* the number. The ONLY place mono 700 at this size appears */
+  font-family: var(--mono); font-size: var(--fs-data-lg); font-weight: 700;
+  color: var(--txt-hi); line-height: 1.15; margin-top: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: color var(--t-tick);
+}
+.rack__v--word { font-size: var(--fs-data); }   /* a word, not a numeral (MODES, IO91wm) */
+.rack__u {                             /* unit rides the value, never its own cell */
+  font-size: var(--fs-nano); font-weight: 400; color: var(--txt3); margin-left: 3px;
+}
+.rack__s {                             /* provenance / qualifier — the sub-line */
+  font-family: var(--mono); font-size: var(--fs-nano); color: var(--txt3);
+  margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Cell state is COLOUR ONLY — never movement, never a second border (hairline economy).
+   absent is the honest one: an em-dash and the reason, never a fabricated zero. */
+.rack__cell[data-state="live"]   .rack__v { color: var(--txt-hi); }
+.rack__cell[data-state="sim"]    .rack__v { color: var(--acq); }
+.rack__cell[data-state="stale"]  .rack__v { color: var(--txt2); }
+.rack__cell[data-state="absent"] .rack__v { color: var(--txt3); }
+.rack__cell[data-state="alert"]  .rack__v { color: var(--none); }
+
+/* THE COLON. The divider between cells 3 and 4 is not a hairline — it is the
+   clock's own colon, at the real display's proportion (3.15 mm dots, 11.3 mm
+   apart => 1:3.6). So the rack reads as a six-digit display with a colon in the
+   middle, in every room. It is also the app's only heartbeat: opacity-only at
+   1 Hz, which the motion budget allows and which stops dead in reduced-motion. */
+.rack__colon {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; gap: 11px; pointer-events: none; z-index: 2;
+}
+.rack__colon i {
+  width: 3px; height: 3px; background: var(--led);
+  box-shadow: 0 0 6px var(--led-glow);
+}
+.rack[data-pps="on"] .rack__colon { animation: pcc-rack-colon 1s steps(1, end) infinite; }
+@keyframes pcc-rack-colon { 0%, 49% { opacity: 1; } 50%, 100% { opacity: .28; } }
+/* No device, no pulse — a still colon is the honest reading of "nothing is disciplining us". */
+.rack[data-pps="off"] .rack__colon i { background: var(--led-dim); box-shadow: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rack[data-pps="on"] .rack__colon { animation: none; }
+}
+
+/* ============================================================================
+   THE MODULE — Law 2. Chassis of fixed anatomy: engraved strip, working field,
+   silkscreen legend. Replaces ~60 hand-typed <section style="background:...">.
+   ========================================================================== */
+.mod {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-0);
+}
+.mod__strip {                          /* depth 3 — engraved header */
+  display: flex; align-items: center; gap: var(--sp-3);
+  background: var(--strip); border-bottom: 1px solid var(--line);
+  padding: 7px var(--pad-panel-x);
+  font-family: var(--mono); font-size: var(--fs-label);
+  letter-spacing: var(--ls-label); text-transform: uppercase; color: var(--txt2);
+}
+.mod__stat { margin-left: auto; font-size: var(--fs-nano); color: var(--txt3); }
+.mod__stat[data-state="live"]  { color: var(--lock); }
+.mod__stat[data-state="sim"]   { color: var(--acq); }
+.mod__stat[data-state="alert"] { color: var(--none); }
+.mod__field { padding: var(--pad-panel-y) var(--pad-panel-x); }
+.mod__legend {                         /* silkscreen. Two lines MAX — enforced in build */
+  border-top: 1px solid var(--line-soft);
+  padding: 8px var(--pad-panel-x);
+  font-family: var(--mono); font-size: var(--fs-meta);
+  letter-spacing: var(--ls-micro); text-transform: uppercase;
+  color: var(--txt3); line-height: 1.5;
+}
+
+/* ---- the well: depth 0. Device-produced, not editable. --------------------- */
+.well {
+  background: var(--well);
+  border: 1px solid var(--line-well);
+  border-radius: var(--r-0);
+  padding: 9px var(--sp-3);
+}
+.kv { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-4);
+  padding: 4px 0; font-family: var(--mono); font-size: var(--fs-data-sm); }
+.kv + .kv { border-top: 1px solid var(--line-soft); }
+.kv__k { color: var(--txt3); letter-spacing: var(--ls-micro); text-transform: uppercase;
+  font-size: var(--fs-nano); }
+.kv__v { color: var(--txt-hi); white-space: nowrap; }
+.kv__v[data-state="absent"] { color: var(--txt3); }
+
+/* ---- the control face: depth 2. You operate these. ------------------------- */
+.ctl { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+.ctl + .ctl { margin-top: var(--sp-3); }
+.ctl__k { font-family: var(--mono); font-size: var(--fs-nano); letter-spacing: var(--ls-label);
+  text-transform: uppercase; color: var(--txt3); margin-right: 2px; }
+
+/* Segmented control. aria-pressed carries the state, so the controller stops
+   computing style strings (ssPoseFlat, ssThemeDark, subStyle_*) and pushing them
+   into markup — less JS, and it announces correctly to a screen reader. */
+.seg { display: flex; border: 1px solid var(--line); border-radius: var(--r-0); }
+.seg__btn {
+  font-family: var(--mono); font-size: var(--fs-nano); letter-spacing: .1em;
+  text-transform: uppercase; color: var(--txt3);
+  background: transparent; border: 0; padding: 5px 11px; cursor: pointer;
+  transition: color var(--t-ui), background var(--t-ui);
+}
+.seg__btn + .seg__btn { border-left: 1px solid var(--line); }
+.seg__btn:hover { color: var(--txt2); }
+.seg__btn[aria-pressed="true"] { color: var(--led); background: var(--led-fill); }
+.seg__btn:focus-visible { outline: 1px solid var(--led); outline-offset: -1px; }
+
+.btn {
+  font-family: var(--mono); font-size: var(--fs-nano); letter-spacing: .12em;
+  text-transform: uppercase; color: var(--txt2);
+  background: transparent; border: 1px solid var(--line2); border-radius: var(--r-1);
+  padding: 6px 11px; cursor: pointer;
+  transition: color var(--t-ui), border-color var(--t-ui);
+}
+.btn:hover { color: var(--txt); border-color: var(--txt3); }
+.btn:focus-visible { outline: 1px solid var(--led); outline-offset: 1px; }
+.btn--primary { color: var(--led); border-color: var(--led); }
+.btn--primary:hover { color: var(--led); border-color: var(--led); background: var(--led-fill); }
+.btn[disabled] { color: var(--txt3); border-color: var(--line); cursor: not-allowed; }
+
+/* ---- figure caption: how an instrument explains itself. --------------------
+   A caption states provenance, not instruction. It is the ONLY sanctioned place
+   for an explanation that sits next to data, and it replaces the floating
+   right-hand tutorial column that made FACE read as documentation. */
+.cap {
+  font-family: var(--mono); font-size: var(--fs-micro);
+  letter-spacing: var(--ls-micro); text-transform: uppercase;
+  color: var(--txt3); line-height: 1.55; margin-top: 9px;
+}
+
+/* ---- the one prose class. Sans is legal HERE and nowhere else. ------------- */
+.lead {
+  font-family: var(--sans); font-size: var(--fs-body); line-height: var(--lh-body);
+  color: var(--txt2); max-width: 68ch;
+}
+
+/* ---- the shared work surface ---------------------------------------------- */
+.grid12 { display: grid; grid-template-columns: repeat(12, 1fr); gap: var(--gap-grid); }
+.span-4  { grid-column: span 4; }
+.span-6  { grid-column: span 6; }
+.span-8  { grid-column: span 8; }
+.span-12 { grid-column: span 12; }
+
+@media (max-width: 1180px) {
+  .rack { grid-template-columns: repeat(3, 1fr); }
+  .rack__cell:nth-child(3) { border-right: 0; }
+  .rack__cell:nth-child(-n+3) { border-bottom: 1px solid var(--line-soft); }
+  .rack__colon { display: none; }      /* the colon only means something on one row */
+  .span-4, .span-6, .span-8 { grid-column: span 12; }
+}
+@media (max-width: 620px) {
+  .rack { grid-template-columns: repeat(2, 1fr); }
+  .rack__cell:nth-child(2n) { border-right: 0; }
+  .rack__cell:nth-child(-n+4) { border-bottom: 1px solid var(--line-soft); }
+}

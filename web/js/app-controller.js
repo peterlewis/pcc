@@ -2777,6 +2777,77 @@ class Component extends DcLite {
     try { localStorage.setItem('pccweb.accOpen', JSON.stringify(m)); } catch (e) {}
   }
 
+  // ---- THE RACK (Law 1) -----------------------------------------------------------------------
+  // The six numbers the FACE room is accountable for. Every value here already existed somewhere in
+  // the room; five were being reported as a 9.5px status string and two more only as sentences. A
+  // cell reports state as a VALUE, which is what retires the tutorial prose beneath it.
+  // Cell states are honest: 'absent' renders an em-dash with the reason in the sub-line, never a
+  // fabricated zero. Standby has no fix, so precision and grid are genuinely absent, and say so.
+  faceRack(mode, dispName) {
+    const st = this.state, S = this.session && this.session.S;
+    const em = this.effectiveMode();
+    const standby = mode === 'standby';
+    const sim = mode === 'simulation';
+    const dash = '—';
+
+    // 1 · SIGNIFICANT TO — the finest digit that is still true, and its 3σ bound.
+    const P = { P3: ['1', 'ms'], P2: ['10', 'ms'], P1: ['0.1', 's'], P0: ['1', 's'] };
+    const pr = (!standby && this.emu && this.emu.precision) ? this.emu.precision() : null;
+    const pv = pr ? (P[pr.level] || P.P0) : null;
+    const uUs = pr && Number.isFinite(pr.uUs) ? pr.uUs : null;
+
+    // 4 · ZONE — the offset is the value; the IANA name and whether DST is in force qualify it.
+    let zoneV = 'UTC', zoneS = 'COORDINATED UNIVERSAL';
+    if (!st.utc) {
+      const d = new Date(), off = -d.getTimezoneOffset();
+      const sgn = off < 0 ? '−' : '+', a = Math.abs(off);
+      zoneV = 'UTC' + sgn + String((a / 60) | 0).padStart(2, '0') + (a % 60 ? ':' + String(a % 60).padStart(2, '0') : '');
+      let zn = '';
+      try { zn = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
+      // DST tell: compare against January in the same zone (southern hemisphere handled by the max()).
+      let dst = false;
+      try {
+        const jan = new Date(d.getFullYear(), 0, 1).getTimezoneOffset();
+        const jul = new Date(d.getFullYear(), 6, 1).getTimezoneOffset();
+        dst = d.getTimezoneOffset() < Math.max(jan, jul);
+      } catch (e) {}
+      zoneS = (zn.toUpperCase() || this.tzName().toUpperCase()) + (dst ? ' · DST' : '');
+    }
+
+    // 5 · GRID — Maidenhead from the observer the astronomy actually uses, with its provenance.
+    let gridV = dash, gridS = 'NO POSITION', gridSt = 'absent';
+    const lat = S && S.obs ? S.obs.lat : NaN, lon = S && S.obs ? S.obs.lon : NaN;
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      try { gridV = ASTRO.maidenhead(lat, lon); gridSt = standby ? 'stale' : 'live'; } catch (e) { gridV = dash; }
+      gridS = S && S.obsUserSet ? 'SET BY HAND' : (standby ? 'DEFAULT' : 'FROM FIX');
+    }
+
+    // 6 · SOURCE — which of the three states is driving the face, and where it comes from.
+    const srcV = mode === 'connected' ? 'DEVICE' : sim ? 'SIM' : 'SYSTEM';
+    const srcS = mode === 'connected' ? (this.portName(S) || 'USB SERIAL')
+      : sim ? 'VIRTUAL GPS' : 'HOST CLOCK · NO DEVICE';
+
+    return {
+      // PPS drives the colon: it only pulses when something is actually disciplining us.
+      rackPps: (!standby && pr && pr.hadPps) ? 'on' : 'off',
+
+      rkSigV: pv ? pv[0] : dash, rkSigU: pv ? pv[1] : '',
+      rkSigS: standby ? 'NO FIX · HOST CLOCK' : (uUs != null ? '±' + (uUs < 1 ? '<1' : uUs) + ' µs' : 'ACQUIRING'),
+      rkSigSt: standby ? 'absent' : (pr && pr.level === 'P3' ? 'live' : 'stale'),
+
+      rkRowV: em.m === 'text' ? 'TEXT' : em.m === 'countdown' ? 'COUNTDOWN' : st.standby ? 'BLANK' : 'MODES',
+      rkRowS: dispName, rkRowSt: st.standby ? 'absent' : 'live',
+
+      rkBrtV: Math.round((st.brightness != null ? st.brightness : 0) * 100),
+      rkBrtS: st.brightnessFixed ? 'FIXED' : 'AUTO · AMBIENT',
+      rkBrtSt: 'live',
+
+      rkZoneV: zoneV, rkZoneS: zoneS, rkZoneSt: 'live',
+      rkGridV: gridV, rkGridS: gridS, rkGridSt: gridSt,
+      rkSrcV: srcV, rkSrcS: srcS, rkSrcSt: sim ? 'sim' : standby ? 'absent' : 'live',
+    };
+  }
+
   rvDisplay() {
     const st = this.state, em = this.effectiveMode();
     const S = this.session && this.session.S;
@@ -2802,6 +2873,10 @@ class Component extends DcLite {
       accTogWx: () => this.toggleAccessory('weather'), accOpenWx: acc.weather ? 'true' : 'false', accChevWx: acc.weather ? '▾' : '▸',
       accStatWx: st.wxOffline ? 'UNAVAILABLE' : 'AT FIX',
       faceStatusLine: _modeLbl + ' · ' + _dispName + ' · BRT ' + Math.round(st.brightness * 100) + '% · ' + _pl + ' · ' + (st.utc ? 'UTC' : 'LOCAL'),
+      // ---- THE RACK (Law 1) — the six numbers FACE is accountable for. These values all existed
+      // already; five of them were being crammed into faceStatusLine at 9.5px. Promoting them to
+      // cells is what lets the tutorial prose below be deleted rather than merely shortened.
+      ...this.faceRack(_mode, _dispName),
       faceRoomCap: _mode === 'connected' ? 'MK IV FACE — LIVE HARDWARE' : _mode === 'simulation' ? 'MK IV FACE — SIMULATION' : 'MK IV FACE — SYSTEM TIME',
       // POSE (flat line / stacked desk pose) + FULL FACE — Act III of the presentation grammar.
       ssPoseFlat: this.seg(st.facePose !== 'stacked', true), ssPoseStack: this.seg(st.facePose === 'stacked', false),

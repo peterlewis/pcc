@@ -8,6 +8,7 @@
 <meta name="description" content="Precision Clock Mk IV companion — emulator, GNSS sky, and GPS timing analytics. Static, offline-capable.">
 <link rel="stylesheet" href="css/base.css?v=96">
 <link rel="stylesheet" href="css/pcc-tokens.css?v=5">
+<link rel="stylesheet" href="css/pcc-components.css?v=1">
 </head>
 <body>
 <div id="root">
@@ -631,7 +632,8 @@
                 <sc-if value="{{hwCalShow}}" hint-placeholder-val="{{false}}">
                   <button onClick="{{onHwCalibrate}}" style="{{hwCalBtnStyle}}">{{hwCalBtnLabel}}</button>
                 </sc-if>
-                <span style="font-family:var(--mono);font-size:var(--fs-micro);letter-spacing:var(--ls-micro);color:var(--txt3)">{{faceStatusLine}}</span>
+                <!-- {{faceStatusLine}} removed: its five values are now rack cells below. A value is
+                     reported once, in one place, at a size you can actually read. -->
               </div>
               <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px var(--pad-panel-x) 0">
                 <span style="font-family:var(--mono);font-size:var(--fs-micro);letter-spacing:var(--ls-micro);color:var(--txt3)">DATE ROW SOURCE</span>
@@ -704,6 +706,45 @@
                 </sc-if>
               </div>
             </section>
+
+            <!-- THE RACK (Law 1) — the six numbers this room is accountable for, in the same six
+                 places every room uses. It replaces the 9.5px {{faceStatusLine}} that was carrying
+                 five of these as a throwaway string in the header, and it is why the tutorial
+                 paragraphs below can go: state reported as a value is not reported again as prose.
+                 The divider at centre is the clock's own colon, pulsing 1 Hz when PPS disciplines us. -->
+            <div class="rack" data-pps="{{rackPps}}">
+              <div class="rack__colon"><i></i><i></i></div>
+              <div class="rack__cell" data-state="{{rkSigSt}}">
+                <div class="rack__k">Significant to</div>
+                <div class="rack__v">{{rkSigV}}<span class="rack__u">{{rkSigU}}</span></div>
+                <div class="rack__s">{{rkSigS}}</div>
+              </div>
+              <div class="rack__cell" data-state="{{rkRowSt}}">
+                <div class="rack__k">Date row</div>
+                <div class="rack__v rack__v--word">{{rkRowV}}</div>
+                <div class="rack__s">{{rkRowS}}</div>
+              </div>
+              <div class="rack__cell" data-state="{{rkBrtSt}}">
+                <div class="rack__k">Brightness</div>
+                <div class="rack__v">{{rkBrtV}}<span class="rack__u">%</span></div>
+                <div class="rack__s">{{rkBrtS}}</div>
+              </div>
+              <div class="rack__cell" data-state="{{rkZoneSt}}">
+                <div class="rack__k">Zone</div>
+                <div class="rack__v rack__v--word">{{rkZoneV}}</div>
+                <div class="rack__s">{{rkZoneS}}</div>
+              </div>
+              <div class="rack__cell" data-state="{{rkGridSt}}">
+                <div class="rack__k">Grid</div>
+                <div class="rack__v rack__v--word">{{rkGridV}}</div>
+                <div class="rack__s">{{rkGridS}}</div>
+              </div>
+              <div class="rack__cell" data-state="{{rkSrcSt}}">
+                <div class="rack__k">Source</div>
+                <div class="rack__v rack__v--word">{{rkSrcV}}</div>
+                <div class="rack__s">{{rkSrcS}}</div>
+              </div>
+            </div>
 
             <section style="background:var(--panel);border:1px solid var(--line)">
               <div style="display:flex;align-items:center;gap:9px;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)"><span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:var(--ls-label);color:var(--txt2)">PRECISION — SIGNIFICANT DIGITS</span><span style="font-family:var(--mono);font-size:var(--fs-pico);font-weight:700;letter-spacing:.16em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:var(--r-1);padding:3px 5px;line-height:1">BETA</span></div>
@@ -1720,6 +1761,6 @@ refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4</code></div>
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=265"></script>
+<script type="module" src="js/app-controller.js?v=266"></script>
 </body>
 </html>
