@@ -9,7 +9,7 @@ import { TelemetryLog } from './telemetrylog.js?v=4';
 import { prepReview, drawReview, sampleAt, tAtX } from './review.js?v=1';
 import { subSatellitePoint } from './satpass.js?v=1';
 import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=1';
-import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=5';
+import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=6';
 import { REC as PF_REC, RANGE as PF_RANGE, modelStream, runPrefilter } from './prefilter.mjs?v=2';
 
 // config.txt is the single source of truth: the clock-behaviour defaults (enabled modes, colon,

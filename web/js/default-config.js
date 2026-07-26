@@ -130,7 +130,7 @@ BS5 = 3849,4095
 ## display balance
 # Equalise per-segment brightness by duty so a "1" isn't brighter than an "8". "on" = the
 # calibrated auto curve (recommended); a number 2..300 pins a fixed manual strength.
-seg_balance = on
+#seg_balance = on
 # Dim the colons in step with the main brightness (they are on their own PWM rail). "on" = auto
 # curve; a number 2..256 pins a fixed scale. Leave off until the digit levels are dialled in.
 #colon_balance = on
