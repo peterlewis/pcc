@@ -82,12 +82,37 @@
 }
 
 /* Cell state is COLOUR ONLY — never movement, never a second border (hairline economy).
-   absent is the honest one: an em-dash and the reason, never a fabricated zero. */
+   absent is the honest one: an em-dash and the reason, never a fabricated zero.
+*/
 .rack__cell[data-state="live"]   .rack__v { color: var(--txt-hi); }
 .rack__cell[data-state="sim"]    .rack__v { color: var(--acq); }
 .rack__cell[data-state="stale"]  .rack__v { color: var(--txt2); }
 .rack__cell[data-state="absent"] .rack__v { color: var(--txt3); }
 .rack__cell[data-state="alert"]  .rack__v { color: var(--none); }
+/* ---- FRESHNESS (direction D's graft) --------------------------------------
+   A rack answers "what is true right now?". That claim expires. When a connected
+   clock stops sending, every value stays on screen looking exactly as confident
+   as it did a second ago — which is the one thing an instrument must not do.
+   So the rack carries its own age, and the whole rack reports it at once: these
+   values come from one stream, so one statement is the honest unit, not six.
+       live  — a line arrived within the last few seconds
+       stale — nothing for a while; values are last-known, not current
+       dead  — the link is gone; what you are reading is history
+   Colour only, per the motion budget: nothing moves, nothing flashes.
+   ORDER MATTERS: these selectors carry the SAME specificity as the per-cell
+   data-state rules above, so they must come AFTER them to win. A stale rack
+   dims even the cells that individually still believe they are live. */
+.rack__age {
+  font-family: var(--mono); font-size: var(--fs-nano); letter-spacing: var(--ls-micro);
+  text-transform: uppercase; color: var(--txt3);
+  transition: color var(--t-tick);
+}
+.rack[data-fresh="stale"] .rack__v { color: var(--txt2); }
+.rack[data-fresh="stale"] .rack__age { color: var(--acq); }
+.rack[data-fresh="dead"]  .rack__v { color: var(--txt3); }
+.rack[data-fresh="dead"]  .rack__age { color: var(--none); }
+
+
 
 /* The colon divider between cells 3 and 4 was removed 2026-07-22 at the user's call —
    it read as an ornament on the bar rather than as structure. The rack's promise is the

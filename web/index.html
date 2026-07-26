@@ -8,7 +8,7 @@
 <meta name="description" content="Precision Clock Mk IV companion — emulator, GNSS sky, and GPS timing analytics. Static, offline-capable.">
 <link rel="stylesheet" href="css/base.css?v=96">
 <link rel="stylesheet" href="css/pcc-tokens.css?v=5">
-<link rel="stylesheet" href="css/pcc-components.css?v=9">
+<link rel="stylesheet" href="css/pcc-components.css?v=10">
 </head>
 <body>
 <div id="root">
@@ -712,7 +712,7 @@
                  five of these as a throwaway string in the header, and it is why the tutorial
                  paragraphs below can go: state reported as a value is not reported again as prose.
                  The divider at centre is the clock's own colon, pulsing 1 Hz when PPS disciplines us. -->
-            <div class="rack">
+            <div class="rack" data-fresh="{{rkFresh}}">
               <div class="rack__cell" data-state="{{rkSigSt}}">
                 <div class="rack__k">Significant to</div>
                 <div class="rack__v">{{rkSigV}}<span class="rack__u">{{rkSigU}}</span></div>
@@ -885,7 +885,7 @@
           <div data-screen-label="Connect" style="animation:pcc-in var(--t-room) var(--ease-ui) both;padding:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(370px,1fr));gap:14px;align-items:start;max-width:1180px">
             <!-- THE RACK (Law 1) — DEVICE's answer to "what am I connected to, and is it healthy?"
                  stated before any of the setup procedure below it. -->
-            <div class="rack" style="grid-column:1/-1">
+            <div class="rack" data-fresh="{{rkFresh}}" style="grid-column:1/-1">
               <div class="rack__cell" data-state="{{vLinkSt}}">
                 <div class="rack__k">Link</div>
                 <div class="rack__v rack__v--word">{{vLinkV}}</div>
@@ -1008,7 +1008,7 @@
                  the plot or the rail. The six numbers SKY is accountable for: how many satellites,
                  how good the geometry is, where we are, how fresh the fix is, how much sky we have
                  mapped, and how much has been recorded. -->
-            <div class="rack" style="grid-column:1/-1">
+            <div class="rack" data-fresh="{{rkFresh}}" style="grid-column:1/-1">
               <div class="rack__cell" data-state="{{kRackSt}}">
                 <div class="rack__k">Satellites</div>
                 <div class="rack__v">{{fSatsUV}}</div>
@@ -1276,7 +1276,7 @@
             <!-- THE RACK (Law 1) — TIMING's strip was the shape every other room is now copying, so
                  it becomes the reference implementation of the component rather than a sixth
                  bespoke grid. Six cells, same six places, sub-line 6 carries provenance. -->
-            <div class="rack">
+            <div class="rack" data-fresh="{{rkFresh}}">
               <div class="rack__cell" data-state="{{tRackSt}}">
                 <div class="rack__k">Phase jitter RMS</div>
                 <div class="rack__v">{{tJitter}}<span class="rack__u">{{tJitterU}}</span></div>
@@ -1807,6 +1807,6 @@
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=277"></script>
+<script type="module" src="js/app-controller.js?v=278"></script>
 </body>
 </html>

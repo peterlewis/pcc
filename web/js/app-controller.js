@@ -2743,9 +2743,36 @@ class Component extends DcLite {
 
       rkZoneV: zoneV, rkZoneS: zoneS, rkZoneSt: 'live',
       rkGridV: gridV, rkGridS: gridS, rkGridSt: gridSt,
-      rkSrcV: srcV, rkSrcS: srcS, rkSrcSt: sim ? 'sim' : standby ? 'absent' : 'live',
+      rkSrcV: srcV, rkSrcS: this.withAge(srcS), rkSrcSt: sim ? 'sim' : standby ? 'absent' : 'live',
     };
   }
+
+  // ---- RACK FRESHNESS (direction D's graft) ----------------------------------------------------
+  // A rack claims "this is true right now". The claim expires, and the failure mode is silent: a
+  // connected clock stops sending and every value sits there looking exactly as confident as it did
+  // a second earlier. The one thing an instrument must not do.
+  // The honest clock is S.lastRxT — the last line actually received — not a render tick, which would
+  // keep counting happily while the link is dead. Simulation is live by construction; standby has no
+  // stream to be stale about and says so by saying nothing.
+  rackFresh() {
+    const mode = this.appMode();
+    if (mode === 'standby') return { rkFresh: 'na', rkAge: '' };
+    if (mode === 'simulation') return { rkFresh: 'live', rkAge: '' };
+    const S = this.session && this.session.S;
+    const t = S && S.lastRxT;
+    if (!t) return { rkFresh: 'dead', rkAge: 'NO DATA RECEIVED' };
+    const a = (Date.now() - t) / 1000;
+    return {
+      rkFresh: a < 3 ? 'live' : a < 15 ? 'stale' : 'dead',
+      rkAge: a < 2 ? 'LIVE'
+        : a < 60 ? Math.round(a) + ' S AGO'
+        : a < 3600 ? Math.round(a / 60) + ' MIN AGO'
+        : 'LINK LOST',
+    };
+  }
+  // The provenance sub-line (cell 6 in every room) is where the age belongs — it already says where
+  // the value came from, so it is the natural place to say when.
+  withAge(sub) { const a = this.rackFresh().rkAge; return a ? (sub + ' · ' + a) : sub; }
 
   rvDisplay() {
     const st = this.state, em = this.effectiveMode();
@@ -2776,6 +2803,7 @@ class Component extends DcLite {
       // already; five of them were being crammed into faceStatusLine at 9.5px. Promoting them to
       // cells is what lets the tutorial prose below be deleted rather than merely shortened.
       ...this.faceRack(_mode, _dispName),
+      ...this.rackFresh(),
       faceRoomCap: _mode === 'connected' ? 'MK IV FACE — LIVE HARDWARE' : _mode === 'simulation' ? 'MK IV FACE — SIMULATION' : 'MK IV FACE — SYSTEM TIME',
       // POSE (flat line / stacked desk pose) + FULL FACE — Act III of the presentation grammar.
       ssPoseFlat: this.seg(st.facePose !== 'stacked', true), ssPoseStack: this.seg(st.facePose === 'stacked', false),
@@ -3107,7 +3135,7 @@ class Component extends DcLite {
           vCfgS: cfg ? 'config.txt · READ' : 'NOT READ · USE READ CLOCK DRIVE',
           vTransSt: conn ? 'live' : 'absent',
           vTransV: conn ? (real ? 'SERIAL' : 'EMU') : '—',
-          vTransS: conn ? (real ? 'WEB SERIAL · USB CDC' : 'IN-BROWSER FIRMWARE') : (chrom ? 'WEB SERIAL AVAILABLE' : 'NEEDS A CHROMIUM BROWSER'),
+          vTransS: conn ? (real ? this.withAge('WEB SERIAL · USB CDC') : 'IN-BROWSER FIRMWARE') : (chrom ? 'WEB SERIAL AVAILABLE' : 'NEEDS A CHROMIUM BROWSER'),
 
           // ---- CONNECTING A REAL CLOCK: each transport reports its READINESS AS A VALUE, so the
           // room answers "can I use this, here, now?" instead of making you read a walkthrough and
@@ -3337,7 +3365,7 @@ class Component extends DcLite {
           kPeak: 'PEAK EL ' + S.peakEl.toFixed(0) + '°',
           kRecSt: S.passes > 0 ? 'live' : 'absent',
           kRecSub: S.passes > 0
-            ? ((S.obsCount > 1000 ? (S.obsCount / 1000).toFixed(1) + 'k' : String(S.obsCount)) + ' OBS')
+            ? this.withAge((S.obsCount > 1000 ? (S.obsCount / 1000).toFixed(1) + 'k' : String(S.obsCount)) + ' OBS')
             : 'NOTHING RECORDED YET',
         };
       })(),
@@ -3451,7 +3479,7 @@ class Component extends DcLite {
       // em-dash and cell 6 carries the reason, rather than the charts implying a stream that isn't
       // there. The colon only pulses when a PPS edge is actually arriving.
       tRackSt: noData ? 'absent' : 'live',
-      tRackProv: noData ? 'NO $PMTXTS · pps=off' : ('DROPPED ' + String(T.drop || 0)),
+      tRackProv: noData ? 'NO $PMTXTS · pps=off' : this.withAge('DROPPED ' + String(T.drop || 0)),
       fitK0: fit ? fit.k0.toFixed(4) : '—', fitK1: fit ? fit.k1.toFixed(5) : '—', fitK2: fit ? fit.k2.toFixed(6) : '—',
       fitSpread: fit ? fit.spread.toFixed(1) + ' °C' : '—',
       fitRms: fit ? fit.rms.toFixed(2) + ' ppm' : '—',
