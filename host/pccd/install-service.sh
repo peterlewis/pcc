@@ -10,7 +10,7 @@
 # Re-running it upgrades an existing install. `sudo ./install-service.sh --uninstall` removes it.
 set -eu
 
-LABEL=is.peterlew.pcc.d                   # macOS LaunchDaemon label (reverse-DNS of peterlew.is) / Linux unit is pccd.service
+LABEL=ws.ptrl.pcc.d                       # macOS LaunchDaemon label (reverse-DNS of ptrl.ws, the app's home) / Linux unit is pccd.service
 PREFIX=/usr/local/pcc                     # bundle lives here: $PREFIX/pccd + $PREFIX/pcc-web
 PLIST=/Library/LaunchDaemons/$LABEL.plist
 UNIT=/etc/systemd/system/pccd.service
@@ -22,12 +22,13 @@ SRC=$(cd "$(dirname "$0")" && pwd)
 
 stop_existing() {  # tear down any running pccd service so we can replace the binary + reclaim the serial port
   if [ "$OS" = Darwin ]; then
-    # io.github.peterlewis.pccd = a label a pre-release build of this installer used. Boot it out AND
-    # delete its plist, or it reloads at boot and holds the (exclusive) serial port against us.
-    for L in "$LABEL" io.github.peterlewis.pccd; do
+    # Retired labels: io.github.peterlewis.pccd (a pre-release build of this installer) and
+    # is.peterlew.pcc.d (before the app moved to pcc.ptrl.ws). Boot each out AND delete its
+    # plist, or it reloads at boot and holds the (exclusive) serial port against us.
+    for L in "$LABEL" io.github.peterlewis.pccd is.peterlew.pcc.d; do
       launchctl bootout system/"$L" 2>/dev/null || launchctl unload -w /Library/LaunchDaemons/"$L".plist 2>/dev/null || true
     done
-    rm -f /Library/LaunchDaemons/io.github.peterlewis.pccd.plist
+    rm -f /Library/LaunchDaemons/io.github.peterlewis.pccd.plist /Library/LaunchDaemons/is.peterlew.pcc.d.plist
   else
     systemctl disable --now pccd.service 2>/dev/null || true
   fi

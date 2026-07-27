@@ -102,7 +102,7 @@ feed chrony as a stratum-1 source:
     cd pcc && sudo ./install-service.sh          # Linux: pccd-linux-$(uname -m).tar.gz
 
 It copies the bundle to `/usr/local/pcc` (a stable, root-owned prefix) and installs
-a LaunchDaemon (`is.peterlew.pcc.d`, logs `/var/log/pccd.log`) or a systemd
+a LaunchDaemon (`ws.ptrl.pcc.d`, logs `/var/log/pccd.log`) or a systemd
 unit (`pccd.service`, `journalctl -u pccd -f`). Because the install prefix is fixed
 and has no `-w`, the service **updates itself** — UPDATE NOW / `pccd --update` swap
 the binary in place and the supervisor keeps the same PID. Re-run the installer to
@@ -251,8 +251,8 @@ changes via ChronyControl) recreates the socket root-only**, so the chmod must
 be repeated — the durable setup is pccd as a root LaunchDaemon:
 
     sudo make install
-    sudo cp is.peterlew.pcc.d.plist /Library/LaunchDaemons/
-    sudo launchctl load -w /Library/LaunchDaemons/is.peterlew.pcc.d.plist
+    sudo cp ws.ptrl.pcc.d.plist /Library/LaunchDaemons/
+    sudo launchctl load -w /Library/LaunchDaemons/ws.ptrl.pcc.d.plist
 
 (stop any user-run ./pccd first — the serial port is exclusive-open; logs land
 in /var/log/pccd.log). Without a writable socket, chrony silently falls back to any

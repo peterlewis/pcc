@@ -4,8 +4,12 @@
      chrony SOCK socket — is immune to chronyd restarts recreating it with root-only permissions.
      Install:
        sudo make install
-       sudo cp is.peterlew.pcc.d.plist /Library/LaunchDaemons/
-       sudo launchctl load -w /Library/LaunchDaemons/is.peterlew.pcc.d.plist
+       sudo cp ws.ptrl.pcc.d.plist /Library/LaunchDaemons/
+       sudo launchctl load -w /Library/LaunchDaemons/ws.ptrl.pcc.d.plist
+     Migrating from the old label (is.peterlew.pcc.d)? Boot it out first or both daemons
+     fight over the exclusive serial port:
+       sudo launchctl bootout system/is.peterlew.pcc.d 2>/dev/null || true
+       sudo rm -f /Library/LaunchDaemons/is.peterlew.pcc.d.plist
      (Stop any user-run ./pccd first — the serial port is exclusive-open.)
      Logs: /var/log/pccd.log
 
@@ -15,7 +19,7 @@
      drop the two -w lines to disable app-serving. -->
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>is.peterlew.pcc.d</string>
+  <key>Label</key><string>ws.ptrl.pcc.d</string>
   <key>ProgramArguments</key>
   <array>
     <string>/usr/local/bin/pccd</string>
