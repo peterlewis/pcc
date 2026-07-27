@@ -2,7 +2,7 @@
 
 A browser app for the [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs) by [mitxela](https://mitxela.com). It drives a real clock over Web Serial — display modes, text and countdowns, brightness curves, satellite views, timing analysis — and with no clock attached it *is* one: the on-screen clock is the actual `clock4` firmware compiled to WebAssembly, not an imitation of it.
 
-### **[▶ Open Precision Clock Companion (Beta) →](https://peterlewis.github.io/pcc/)**
+### **[▶ Open Precision Clock Companion (Beta) →](https://pcc.ptrl.ws/)**
 
 > [!NOTE]
 > Independent, community-built. Not affiliated with mitxela.
@@ -35,7 +35,7 @@ It's verified rather than assumed: 4,511 display checks against independently co
 
 ## Run it
 
-- **Hosted:** <https://peterlewis.github.io/pcc/> — open it in any browser. Everything but a live hardware connection works everywhere; to drive a real clock, see [**Connect a real clock**](#connect-a-real-clock).
+- **Hosted:** <https://pcc.ptrl.ws/> — open it in any browser. Everything but a live hardware connection works everywhere; to drive a real clock, see [**Connect a real clock**](#connect-a-real-clock).
 - **Local dev** — live source, no build step:
   ```bash
   git clone https://github.com/peterlewis/pcc.git

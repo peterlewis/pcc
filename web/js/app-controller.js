@@ -4025,7 +4025,7 @@ class Component extends DcLite {
     };
     Promise.all([
       fetch('app-manifest.sha256', { cache: 'no-store' }).then((r) => (r.ok ? r.text() : null)).catch(() => null),
-      fetch('https://peterlewis.github.io/pcc/app-manifest.sha256', { cache: 'no-store' }).then((r) => (r.ok ? r.text() : null)).catch(() => null),
+      fetch('https://pcc.ptrl.ws/app-manifest.sha256', { cache: 'no-store' }).then((r) => (r.ok ? r.text() : null)).catch(() => null),
     ]).then(async ([mineTxt, pagesTxt]) => {
       if (!mineTxt) return;                          // served app carries no manifest (pre-0.6 build) → show nothing
       this._appId = await digest12(mineTxt);
