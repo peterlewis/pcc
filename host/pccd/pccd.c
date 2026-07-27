@@ -875,7 +875,8 @@ static void serve_file(Client *c, const char *reqpath){
 // hosted app. `o` is "scheme://host[:port][/...]"; match the host exactly so http://localhost.evil.com fails.
 static int origin_ok(const char *o){
   if (!*o) return 1;                                     // no Origin header (native/CLI ws client)
-  if (!strcmp(o,"https://peterlewis.github.io")) return 1;
+  if (!strcmp(o,"https://pcc.ptrl.ws")) return 1;        // the app's canonical home
+  if (!strcmp(o,"https://peterlewis.github.io")) return 1; // pre-domain pages still cached out there
   const char *h = strstr(o,"://"); if (!h) return 0; h += 3;
   static const char *loop[] = { "localhost", "127.0.0.1", "[::1]" };
   for (unsigned i=0;i<sizeof loop/sizeof *loop;i++){ size_t n=strlen(loop[i]);
