@@ -1122,7 +1122,9 @@ class Component extends DcLite {
     const ease = 'cubic-bezier(.5,.03,.16,1)', easeMove = 'cubic-bezier(.55,.02,.14,1)';
     const face = () => this.faces.hdrDate;
     const anims = [];
-    const play = (el, kf, opts) => { const a = el.animate(kf, opts); anims.push(a); return a; };
+    const T = 1 / (this.props.stackFoldTempo || 1);   // same convention as the entry's foldTempo: a speed divisor
+    const nap = (ms) => this.sleep(ms * T);
+    const play = (el, kf, opts) => { const a = el.animate(kf, { ...opts, duration: opts.duration * T, delay: (opts.delay || 0) * T }); anims.push(a); return a; };
     // THE ENTRY'S LINKAGE, copied: the leaf rotates 90° about the DATE-SIDE pin (inner wrap) while
     // the outer wrap — CARRYING THE PLATE — rotates 90° about the TIME-SIDE pin. The plate never
     // animates on its own; it rides the outer wrap, exactly like the original unfold. The glide
@@ -1144,8 +1146,8 @@ class Component extends DcLite {
           { duration: 560, delay: 140, easing: ease, fill: 'forwards' });
         play(inner, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(90deg)' }],
           { duration: 500, delay: 320, easing: ease, fill: 'forwards' });
-        this.sleep(520).then(() => face() && face().setInverted(false));  // the switch, at the top of the arc
-        await this.sleep(840);
+        nap(520).then(() => face() && face().setInverted(false));  // the switch, at the top of the arc
+        await nap(840);
         // Glide home, measured: wherever the linkage actually put the stack, take it to the origin.
         const S = dh.getBoundingClientRect();
         const px = S.left - O0.left, py = S.top - D - O0.top;
@@ -1154,7 +1156,7 @@ class Component extends DcLite {
           { duration: 300, easing: ease, fill: 'forwards' });
         play(dock, [{ width: (2 * Wk) + 'px' }, { width: (M.W * k2) + 'px' }],
           { duration: 300, easing: ease, fill: 'forwards' });
-        await this.sleep(320);
+        await nap(320);
       } else {
         const Wc = parseFloat(dh.style.width) || 0;
         const C = dh.getBoundingClientRect();   // the closed mini's leaf, at rest
@@ -1186,18 +1188,18 @@ class Component extends DcLite {
           { duration: 300, easing: ease, fill: 'forwards' });
         play(dock, [{ width: Wc + 'px' }, { width: (2 * Wk) + 'px' }],
           { duration: 300, easing: ease, fill: 'forwards' });
-        await this.sleep(310);
+        await nap(310);
         // The unfold — the entry's own order: leaf first, wrap (with the plate) following.
         wrap.style.transform = ''; inner.style.transform = '';
         play(inner, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(0deg)' }],
           { duration: 500, easing: ease, fill: 'forwards' });
         play(wrap, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(0deg)' }],
-          { duration: 560, delay: 180, easing: ease, fill: 'forwards' });
-        this.sleep(340).then(() => face() && face().setInverted(true));
-        await this.sleep(760);
+          { duration: 560, delay: 180, easing: ease, fill: 'both' });
+        nap(340).then(() => face() && face().setInverted(true));
+        await nap(760);
         play(dock, [{ transform: 'translateY(' + D + 'px)' }, { transform: 'translateY(0px)' }],
           { duration: 280, easing: easeMove, fill: 'forwards' });
-        await this.sleep(300);
+        await nap(300);
       }
     } finally {
       // Land the final pose through the ONE writer of dock statics, then drop the transients.
@@ -1208,7 +1210,7 @@ class Component extends DcLite {
     }
   }
 
-  sizeDispBar(retry) {
+  sizeDispBar(retry, forcePose) {
     const E = this.els;
     // Watch the wrap itself, exactly as the header dock is watched. sizeDispBar derives the scale
     // from wrap.clientWidth, and on a narrow first paint that width can be settled-but-wrong: the
@@ -1247,18 +1249,22 @@ class Component extends DcLite {
       return;
     }
     const M = this.MM;
-    if (this._faceFolding) return;          // a pose fold is choreographing the bar — don't fight it
+    // forcePose: the pose fold laying its target statics mid-choreography through the ONE writer —
+    // everything (halves, canvases, link, pins, shadow) lands exactly where the post-fold relayout
+    // will put it, so the finally-pass is a visual no-op instead of an end-of-fold snap. The fold
+    // owns the LUT inversion timing itself (the switch belongs at the top of the arc, not here).
+    if (this._faceFolding && !forcePose) return; // a pose fold is choreographing the bar — don't fight it
     const avail = Math.max(120, wrap.clientWidth - 4);
     const kFlat = avail / (2 * M.W); // fill the available width; on phones this drops below 1 so the wide bar fits
     // AUTO-POSE: on narrow layouts the 20-digit line goes sub-legible while the desk pose is twice
     // the digit height in the same width — prefer STACKED there unless the user chose explicitly.
-    if (!this._facePoseUser && this.state.section === 'display') {
+    if (!forcePose && !this._facePoseUser && this.state.section === 'display') {
       const wantStack = M.H * kFlat < 56;
       const cur = this.state.facePose;
       if (wantStack && cur !== 'stacked') { this.setState({ facePose: 'stacked' }); return; }
       if (!wantStack && cur === 'stacked' && !((typeof localStorage !== 'undefined') && localStorage.getItem('pccweb.facePose'))) { this.setState({ facePose: 'flat' }); return; }
     }
-    const stacked = this.state.facePose === 'stacked';
+    const stacked = (forcePose || this.state.facePose) === 'stacked';
     // Desk-pose digits earn a bump over the line (that is the pose's point) but stay bounded so a
     // desktop stack doesn't balloon: min(full width, 1.4× the flat scale).
     const k = stacked ? Math.min(avail / M.W, 1.4 * kFlat) : kFlat;
@@ -1272,11 +1278,11 @@ class Component extends DcLite {
       // The desk pose: date directly above time, shared left edge — the entry stage's own layout.
       dh.style.left = '0px'; dh.style.top = '0px'; dh.style.transform = '';
       th.style.left = '0px'; th.style.top = Hk + 'px';
-      if (this.faces.dispDate) this.faces.dispDate.setInverted(false);
+      if (!forcePose && this.faces.dispDate) this.faces.dispDate.setInverted(false);
     } else {
       dh.style.left = '0px'; dh.style.top = '0px'; dh.style.transform = 'rotate(180deg)';
       th.style.left = Wk + 'px'; th.style.top = '0px';
-      if (this.faces.dispDate) this.faces.dispDate.setInverted(true);
+      if (!forcePose && this.faces.dispDate) this.faces.dispDate.setInverted(true);
     }
     if (E.dispDate) this.sizeFaceCanvas('dispDate', E.dispDate, dh, k, 7.0175);
     if (E.dispTime) this.sizeFaceCanvas('dispTime', E.dispTime, th, k, 7.0175);
@@ -1313,6 +1319,34 @@ class Component extends DcLite {
     }
   }
 
+  // While a pose fold runs, dim the room behind the clock so the eye follows the object. The
+  // scrim must live INSIDE the bar's nearest transformed ancestor: that ancestor is the stacking
+  // context the bar's raised z-index lives in (and its containing block), so only there does
+  // scrim z 50 reliably sit under bar z 60. A body-level overlay would paint over the clock.
+  foldScrim(show) {
+    let sc = this._scrimEl;
+    if (show) {
+      clearTimeout(this._scrimT);   // a rapid re-fold must not lose its scrim to the last fold's removal timer
+      if (!sc) {
+        sc = document.createElement('div');
+        sc.setAttribute('data-fold-scrim', '');
+        sc.style.cssText = 'position:absolute;inset:0;background:rgba(8,7,5,.34);opacity:0;' +
+          'pointer-events:none;z-index:50;transition:opacity 360ms ease';
+        this._scrimEl = sc;
+      }
+      let host = null;
+      for (let n = this.els.dispBar; n && n !== document.body; n = n.parentElement) {
+        if (getComputedStyle(n).transform !== 'none') { host = n; break; }
+      }
+      (host || document.body).appendChild(sc);
+      sc.getBoundingClientRect();   // commit the opacity:0 start state — no rAF, which never fires in a hidden tab
+      sc.style.opacity = '1';
+    } else if (sc && sc.parentElement) {
+      sc.style.opacity = '0';
+      this._scrimT = setTimeout(() => { if (sc.parentElement && sc.style.opacity === '0') sc.parentElement.removeChild(sc); }, 300);
+    }
+  }
+
   // The FACE hero's pose fold — the same four beats as the header's, at hero scale: lift out of
   // the slot into the room, the in-plane cartwheel about the seam (LUT switch at the top of the
   // arc, the leaf's 180° cancelling the mounting flip), then settle back into the slot in the new
@@ -1329,11 +1363,14 @@ class Component extends DcLite {
       this.setState({ facePose: pose }); this.sizeDispBar(); return;
     }
     this._faceFolding = true;
+    this.foldScrim(true);
     const ease = 'cubic-bezier(.5,.03,.16,1)', easeMove = 'cubic-bezier(.55,.02,.14,1)';
     const face = () => this.faces.dispDate;
     const link = E.dispLink;
     const anims = [];
-    const play = (el, kf, opts) => { const a = el.animate(kf, opts); anims.push(a); return a; };
+    const T = 1 / (this.props.stackFoldTempo || 1);   // same convention as the entry's foldTempo: a speed divisor
+    const nap = (ms) => this.sleep(ms * T);
+    const play = (el, kf, opts) => { const a = el.animate(kf, { ...opts, duration: opts.duration * T, delay: (opts.delay || 0) * T }); anims.push(a); return a; };
     // The entry's linkage, same as the header fold: leaf 90° about the DATE-SIDE pin (inner wrap),
     // outer wrap — carrying the plate — 90° about the TIME-SIDE pin. The plate rides the wrap.
     // The glide home is MEASURED, with the flex-centred bar's recentering folded into the target.
@@ -1355,8 +1392,8 @@ class Component extends DcLite {
           { duration: 560, delay: 140, easing: ease, fill: 'forwards' });
         play(inner, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(90deg)' }],
           { duration: 500, delay: 320, easing: ease, fill: 'forwards' });
-        this.sleep(520).then(() => face() && face().setInverted(false));
-        await this.sleep(840);
+        nap(520).then(() => face() && face().setInverted(false));
+        await nap(840);
         // Measured glide: take the landed stack to where the stacked statics will paint it —
         // the bar recentres when its width narrows, so the target shifts right by half the delta.
         const S = dh.getBoundingClientRect();
@@ -1365,25 +1402,22 @@ class Component extends DcLite {
         play(bar, [{ transform: 'translateY(' + D + 'px)' },
                    { transform: 'translate(' + tx + 'px,' + ty + 'px) scale(' + s + ')' }],
           { duration: 300, easing: ease, fill: 'forwards' });
-        await this.sleep(320);
+        await nap(320);
       } else {
         // Reverse: swap to flat statics held folded (pixel-matched to the stacked rest), fly out,
         // unfold — leaf first, wrap with the plate following — then glide home flat.
         const C = dh.getBoundingClientRect();   // the stacked rest's leaf
         const avail = Math.max(120, (bar.parentElement ? bar.parentElement.clientWidth : 240) - 4);
         const kF = avail / (2 * M.W);
-        const Wk = M.W * kF, Hk = M.H * kF, pin = 6 * kF, D = Wk + 24;
+        const Wk = M.W * kF, pin = 6 * kF, D = Wk + 24;
         bar.style.zIndex = '60'; bar.style.transformOrigin = '0 0';
         if (face()) face().setInverted(false);
-        // ONE synchronous block, no intermediate paint: flat statics + wraps held folded INLINE
-        // (reflected by forced layout, unlike pending WAAPI) + a bar transform matching the rest.
-        bar.style.width = (2 * Wk) + 'px'; bar.style.height = Hk + 'px';
-        dh.style.left = '0px'; dh.style.top = '0px'; dh.style.width = Wk + 'px'; dh.style.height = Hk + 'px'; dh.style.transform = 'rotate(180deg)';
-        th.style.left = Wk + 'px'; th.style.top = '0px'; th.style.width = Wk + 'px'; th.style.height = Hk + 'px';
-        if (E.dispDate) this.sizeFaceCanvas('dispDate', E.dispDate, dh, kF, 7.0175);
-        if (E.dispTime) this.sizeFaceCanvas('dispTime', E.dispTime, th, kF, 7.0175);
-        if (link) { link.style.left = (Wk - 12 * kF) + 'px'; link.style.top = '0px';
-          link.style.width = (24 * kF) + 'px'; link.style.height = (12 * kF) + 'px'; link.style.borderRadius = (6 * kF) + 'px'; }
+        // ONE synchronous block, no intermediate paint: flat statics through the ONE writer — halves,
+        // canvases, link, PINS and SHADOW all land where the post-fold relayout will put them (the
+        // hand-copied subset used here before left the hinge screws and the floor shadow at their
+        // stacked positions for the whole animation) — then wraps held folded INLINE (reflected by
+        // forced layout, unlike pending WAAPI) + a bar transform matching the stacked rest.
+        this.sizeDispBar(0, 'flat');
         wrap.style.transformOrigin = (Wk + pin) + 'px ' + pin + 'px'; wrap.style.transform = 'rotate(90deg)';
         inner.style.transformOrigin = (Wk - pin) + 'px ' + pin + 'px'; inner.style.transform = 'rotate(90deg)';
         bar.style.transform = 'none';
@@ -1394,20 +1428,21 @@ class Component extends DcLite {
         await this.raf2();
         play(bar, [{ transform: bar.style.transform }, { transform: 'translateY(' + D + 'px)' }],
           { duration: 300, easing: ease, fill: 'forwards' });
-        await this.sleep(310);
+        await nap(310);
         wrap.style.transform = ''; inner.style.transform = '';
         play(inner, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(0deg)' }],
           { duration: 500, easing: ease, fill: 'forwards' });
         play(wrap, [{ transform: 'rotate(90deg)' }, { transform: 'rotate(0deg)' }],
-          { duration: 560, delay: 180, easing: ease, fill: 'forwards' });
-        this.sleep(340).then(() => face() && face().setInverted(true));
-        await this.sleep(760);
+          { duration: 560, delay: 180, easing: ease, fill: 'both' });
+        nap(340).then(() => face() && face().setInverted(true));
+        await nap(760);
         play(bar, [{ transform: 'translateY(' + D + 'px)' }, { transform: 'translateY(0px)' }],
           { duration: 280, easing: easeMove, fill: 'forwards' });
-        await this.sleep(300);
+        await nap(300);
       }
     } finally {
       this._faceFolding = false;
+      this.foldScrim(false);
       this.setState({ facePose: pose });
       this.sizeDispBar();
       for (const a of anims) { try { a.cancel(); } catch (e) {} }
@@ -4415,7 +4450,7 @@ class Component extends DcLite {
 }
 
 // ---- boot ----
-const PROPS = { glowIntensity: 0.55, ghostIntensity: 1, foldTempo: 0.8, entry: 'fold' };
+const PROPS = { glowIntensity: 0.55, ghostIntensity: 1, foldTempo: 0.8, stackFoldTempo: 0.66, entry: 'fold' };
 const app = new Component(PROPS);
 window.__pcc = app;
 app.mount(document.getElementById('root'));
