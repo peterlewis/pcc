@@ -314,3 +314,9 @@
   .rack__cell:nth-child(2n) { border-right: 0; }
   .rack__cell:nth-child(-n+4) { border-bottom: 1px solid var(--line-soft); }
 }
+
+/* The one place the hosted app must hand the user a different address: a non-Chromium browser on
+   https cannot reach the loopback bridge at all (no localhost carve-out), so the app points at the
+   copy pccd serves itself. Two rules, not four inline styles — the gate's whole point. */
+.brg-blocked { margin: 2px var(--sp-3) 8px; }
+.brg-blocked__a { display: inline-block; margin-top: 8px; font-family: var(--mono); font-size: var(--fs-data-sm); color: var(--led); }

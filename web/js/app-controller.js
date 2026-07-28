@@ -3143,6 +3143,10 @@ class Component extends DcLite {
     const bridgeOk = !!st.bridgeInfo;
     const ctxOk = typeof window !== 'undefined' && window.isSecureContext;
     const chrom = typeof window !== 'undefined' && !!window.chrome;
+    // Served over https from a real host, with a browser that has no loopback carve-out → the local
+    // bridge is unreachable from this page no matter what the daemon is doing.
+    const bridgeBlocked = !bridgeOk && !chrom && typeof location !== 'undefined' &&
+      location.protocol === 'https:' && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
     const bridge = !!this.state.bridgeInfo;   // pccd answered its probe — the bridge transport is up
     return {
       cPort: this.portName(S),
@@ -3347,8 +3351,14 @@ class Component extends DcLite {
       simBtnLabel: st.sim ? 'STOP SIMULATION' : 'SIMULATE',
       realSeen, isReal: !!(S && S.real),
       supSerial: serialOk ? 'AVAILABLE' : 'NOT AVAILABLE', supSerialC: serialOk ? 'var(--lock)' : 'var(--none)',
-      supBridge: bridgeOk ? ('DETECTED v' + (st.bridgeInfo.version || '?') + ' — ' + (st.bridgeInfo.device || 'no device')) : 'NOT RUNNING',
-      supBridgeC: bridgeOk ? 'var(--lock)' : 'var(--txt3)',
+      // A non-Chromium browser on an https page CANNOT reach the bridge: Safari and Firefox block
+      // every http subresource from an https document, and unlike Chromium they make no exception
+      // for loopback. The probe never leaves the browser, so "NOT RUNNING" would be a lie about a
+      // daemon that is very likely running — say what is actually true, and offer the way through.
+      supBridge: bridgeOk ? ('DETECTED v' + (st.bridgeInfo.version || '?') + ' — ' + (st.bridgeInfo.device || 'no device'))
+                          : (bridgeBlocked ? 'UNREACHABLE FROM THIS PAGE' : 'NOT RUNNING'),
+      supBridgeC: bridgeOk ? 'var(--lock)' : (bridgeBlocked ? 'var(--acq)' : 'var(--txt3)'),
+      bridgeBlocked, bridgeLocalUrl: 'http://localhost:4192',   // BridgeClock.PORT (serial.js) — not imported here
       supCtx: ctxOk ? 'SECURE' : 'INSECURE', supCtxC: ctxOk ? 'var(--lock)' : 'var(--none)',
       supChrom: chrom ? 'CHROMIUM' : 'NON-CHROMIUM', supChromC: chrom ? 'var(--lock)' : 'var(--acq)',
       gateVisible: (!serialOk || !ctxOk) && !bridgeOk,

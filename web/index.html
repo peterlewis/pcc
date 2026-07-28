@@ -8,7 +8,7 @@
 <meta name="description" content="Precision Clock Mk IV companion — emulator, GNSS sky, and GPS timing analytics. Static, offline-capable.">
 <link rel="stylesheet" href="css/base.css?v=96">
 <link rel="stylesheet" href="css/pcc-tokens.css?v=5">
-<link rel="stylesheet" href="css/pcc-components.css?v=10">
+<link rel="stylesheet" href="css/pcc-components.css?v=11">
 </head>
 <body>
 <div id="root">
@@ -954,6 +954,12 @@
                 </div>
                 <div class="row row--lg"><span class="sub">Web Serial API</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:{{supSerialC}}">{{supSerial}}</span></div>
                 <div class="row row--lg"><span class="sub">PCC bridge (pccd)</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:{{supBridgeC}};text-align:right">{{supBridge}}</span></div>
+                <sc-if value="{{bridgeBlocked}}" hint-placeholder-val="{{false}}">
+                  <div class="well brg-blocked">
+                    <div class="sub">This browser blocks a local connection from an <code>https</code> page, so the bridge cannot be reached here even while pccd is running. pccd serves this same app itself &#8212; open it there and connect:</div>
+                    <a class="brg-blocked__a" href="{{bridgeLocalUrl}}">{{bridgeLocalUrl}}</a>
+                  </div>
+                </sc-if>
                 <div class="row row--lg"><span class="sub">Secure context</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:{{supCtxC}}">{{supCtx}}</span></div>
                 <div style="display:flex;justify-content:space-between;gap:16px;padding:6px 12px"><span class="sub">Engine</span><span style="font-family:var(--mono);font-size:var(--fs-data-sm);color:{{supChromC}}">{{supChrom}}</span></div>
                 <sc-if value="{{gateVisible}}" hint-placeholder-val="{{false}}">
@@ -1827,6 +1833,6 @@
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=284"></script>
+<script type="module" src="js/app-controller.js?v=285"></script>
 </body>
 </html>
