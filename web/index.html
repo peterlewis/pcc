@@ -8,7 +8,7 @@
 <meta name="description" content="Precision Clock Mk IV companion — emulator, GNSS sky, and GPS timing analytics. Static, offline-capable.">
 <link rel="stylesheet" href="css/base.css?v=96">
 <link rel="stylesheet" href="css/pcc-tokens.css?v=5">
-<link rel="stylesheet" href="css/pcc-components.css?v=11">
+<link rel="stylesheet" href="css/pcc-components.css?v=12">
 </head>
 <body>
 <div id="root">
@@ -49,7 +49,7 @@
       <!-- Brand: title on top; COMPANION left, BETA right-aligned under the end of CLOCK. -->
       <div style="display:flex;flex-direction:column;justify-content:center;gap:3px;padding:0 18px;border-right:1px solid var(--line-soft)">
         <div style="font-family:var(--mono);font-size:var(--fs-data);font-weight:700;letter-spacing:.08em;color:var(--txt-hi);white-space:nowrap">PRECISION CLOCK</div>
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:7px"><span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.18em;color:var(--txt3);white-space:nowrap">COMPANION</span><span style="font-family:var(--mono);font-size:var(--fs-pico);font-weight:700;letter-spacing:.14em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:var(--r-1);padding:2px 4px;line-height:1;white-space:nowrap">BETA</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:7px"><span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.18em;color:var(--txt3);white-space:nowrap">COMPANION</span><span style="font-family:var(--mono);font-size:var(--fs-meta);font-weight:700;letter-spacing:.14em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:var(--r-1);padding:2px 4px;line-height:1;white-space:nowrap">BETA</span></div>
       </div>
       <div ref="{{refDockSlot}}" style="display:flex;align-items:stretch">
         <sc-if value="{{hdrBarOn}}" hint-placeholder-val="{{false}}">

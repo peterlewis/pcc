@@ -280,8 +280,10 @@
 .mod--col { display: flex; flex-direction: column; }
 .row--plain { border-bottom: 0; }        /* a .row that is the last of its group */
 .lbl--stack { margin-bottom: 4px; }      /* label sitting above its value, not beside it */
-.badge {                                  /* BETA / COMING SOON — a status marker, not a control */
-  font-family: var(--mono); font-size: var(--fs-pico); font-weight: 700; letter-spacing: .16em;
+.badge {                                  /* BETA / COMING SOON — a status marker, not a control.
+                                             fs-meta, not fs-pico: a badge is a word to be read;
+                                             pico is for unit ticks that annotate, not inform */
+  font-family: var(--mono); font-size: var(--fs-meta); font-weight: 700; letter-spacing: .16em;
   color: var(--beta); background: var(--beta-fill); border: 1px solid var(--beta);
   border-radius: var(--r-1); padding: 3px 5px; line-height: 1;
 }
