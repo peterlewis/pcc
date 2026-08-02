@@ -33,6 +33,18 @@ class Component extends DcLite {
     // 5-point ambient-light DAC curve (ADC→DAC, 0..4095). Default = Rev D (VTT9812FH), the
     // firmware/macOS default. Edited by dragging in the Brightness tab; committed via BS1..BS5.
     dacCurve: [{ adc: 0, dac: 0 }, { adc: 131, dac: 365 }, { adc: 1076, dac: 1422 }, { adc: 2774, dac: 2665 }, { adc: 3849, dac: 4095 }],
+    // The curve the clock's OWN config.txt last reported (stashed by applyDeviceConfig). Nothing
+    // else in the app knows what the hardware is running, so this is what REVERT TO CLOCK restores.
+    deviceCurve: null,
+    // Named curves kept in this browser — macOS UserDefaults["customBrightnessPresets"].
+    // [{ name, pts: [[adc,dac] x5] }]; five points or the entry is dropped, on load AND on apply.
+    dacPresets: (() => { try { return (JSON.parse(localStorage.getItem('pccweb.dacPresets') || '[]') || []).filter((p) => p && Array.isArray(p.pts) && p.pts.length === 5); } catch (e) { return []; } })(),
+    // AMBIENT (TEST): the phototransistor code injected into the emulator. 2600 is emu-driver's own
+    // constructor default, so the slider opens where the emulator already sits rather than moving it.
+    ambientAdc: 2600,
+    // Where the brightness value came from: 'config' (read off the clock drive) or 'slider'. The
+    // rack's provenance sub-line is the only reader — a number is not provenance.
+    brightSrc: 'slider',
     // config.txt editor. Write-gate defaults OFF (matches macOS AppSettings.configWriteEnabled),
     // persisted to localStorage. The textarea is uncontrolled (ref) so editing never fights re-renders.
     cfgName: '', cfgDirty: false, cfgWrite: (typeof localStorage !== 'undefined' && localStorage.getItem('pccweb.cfgWrite') === '1'),
@@ -102,7 +114,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=109'), import('./realdev.js?v=117'), import('./emu-driver.js?v=37'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=2')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=110'), import('./realdev.js?v=117'), import('./emu-driver.js?v=38'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=2')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.SB = SB;
       try { localStorage.removeItem('pccweb.cuckoo'); } catch (e) {}   // parked feature's persisted setting — clear the ghost
       this.session = SIM.createSession({ preroll: 1560 });
@@ -880,6 +892,23 @@ class Component extends DcLite {
     this._brTimer = setTimeout(() => this.devSend('brightness = ' + b.toFixed(3)), 200);
   }
 
+  // LOCK = the firmware's manual override (config.brightness_override) holds the rail; UNLOCK hands
+  // it back to the phototransistor. `brightness = ` with an empty value parses to -1, which is the
+  // firmware's own "restore AUTO" — so unlocking takes effect immediately and needs no reboot. Any
+  // debounced slider write is cancelled first, or it would land after the release and re-pin the rail.
+  toggleBrightLock() {
+    const on = !this.state.brightLock;
+    this.setState({ brightLock: on, brightSrc: 'slider' });
+    const S = this.session && this.session.S;
+    if (on) this.devBright(this.state.brightness);
+    else { clearTimeout(this._brTimer); if (S && S.real && this.realdev) this.devSend('brightness = '); }
+    this.emuBright(on ? this.state.brightness : -1);
+    this.drawChart('dacCurve');
+  }
+  // The same override on the emulator. -1 restores AUTO there too, so the curve's operating point
+  // reappears the moment the lock comes off.
+  emuBright(v) { if (this.emu && this.emu.setBrightnessOverride) this.emu.setBrightnessOverride(v); }
+
   // Mirror a parsed config.txt (read from the CLOCK drive) onto local state, so the
   // emulator starts in the device's REAL state instead of fabricated defaults. This
   // is a READ: update state directly, do NOT route through set2/devApply — that would
@@ -889,7 +918,7 @@ class Component extends DcLite {
     const patch = {};
     const COLON = ['slowfade', 'heartbeat', 'sawtooth', 'alt_sawtooth', 'toggle', 'solid'];
     if (cfg.colon && COLON.includes(cfg.colon)) patch.colon = cfg.colon;
-    if (Number.isFinite(cfg.brightness)) { patch.brightness = Math.max(0, Math.min(1, cfg.brightness)); patch.brightLock = true; }
+    if (Number.isFinite(cfg.brightness)) { patch.brightness = Math.max(0, Math.min(1, cfg.brightness)); patch.brightLock = true; patch.brightSrc = 'config'; }
     if (cfg.zone != null) patch.utc = /^etc\/utc$/i.test(cfg.zone);
     if (Number.isFinite(cfg.matrixHz)) patch.matrixFreq = (cfg.matrixHz / 1000).toFixed(1);
     // The device cycles through all ENABLED modes; we can't know which is on screen
@@ -917,8 +946,10 @@ class Component extends DcLite {
     // so the set of keys = what this device supports. An older/stock clock simply omits the rollup
     // modes (MODE_LST/MODE_SOLAR/…). Record it to gate PR-only commands; null elsewhere = assume full.
     this._devCaps = (cfg.modes && Object.keys(cfg.modes).length) ? new Set(Object.keys(cfg.modes)) : null;
-    // DAC brightness curve, if the config.txt carried BS1..BS5.
-    if (cfg.bs) { const c = []; for (let i = 1; i <= 5; i++) { const p = cfg.bs['bs' + i]; if (p) c.push({ adc: p.adc, dac: p.dac }); } if (c.length === 5) patch.dacCurve = c; }
+    // DAC brightness curve, if the config.txt carried BS1..BS5. All-or-nothing (macOS loadFromConfig):
+    // three BS lines leave the baked Rev D in place. Stash it as well as adopt it — once the editor
+    // has been dragged, this is the only record of what the clock itself is set to.
+    if (cfg.bs) { const c = []; for (let i = 1; i <= 5; i++) { const p = cfg.bs['bs' + i]; if (p) c.push({ adc: p.adc, dac: p.dac }); } if (c.length === 5) { patch.dacCurve = c; patch.deviceCurve = c.map((p) => ({ adc: p.adc, dac: p.dac })); } }
     this.setState(patch, () => this.syncFaces());
     // Keep the emulator's own tz engine in sync with the device's config (a READ — emu.setUtc only
     // moves the emulator, never echoes a command back to the device).
@@ -1761,6 +1792,9 @@ class Component extends DcLite {
   drawCharts() {
     const s = this.state.section;
     if (s === 'display') this.drawChart('gammaCurve');
+    // BRIGHTNESS was painted only on mount, on drag and on preset load, so the curve's operating
+    // point sat wherever it was left. Repaint it on the tick like every other live readout.
+    else if (s === 'devbright') { this.drawChart('gammaCurve'); this.drawChart('dacCurve'); }
     else if (s === 'satellites') this.drawChart('sky');
     else if (s === 'signal') { this.drawChart('cn0elev'); this.drawChart('cn0time'); }
     else if (s === 'position') { this.drawChart('posScatter'); this.drawChart('dop'); this.drawChart('cont'); }
@@ -1786,7 +1820,10 @@ class Component extends DcLite {
     const T = this.tok(), S = this.session.S, CH = this.CH, st = this.state;
     const nowS = Math.floor(Date.now() / 1000);
     if (name === 'gammaCurve') return CH.drawGamma(el, T, st.gamma, st.brightness);
-    if (name === 'dacCurve') return CH.drawDacCurve(el, T, st.dacCurve, this._dacDrag);
+    if (name === 'dacCurve') return CH.drawDacCurve(el, T, st.dacCurve, this._dacDrag, {
+      presets: Object.values(this.DAC_PRESETS).map((p) => p.map(([adc, dac]) => ({ adc, dac }))),
+      interp: true, live: this.dacLive(),
+    });
     if (name === 'sky') {
       const trails = new Map();
       // TRAIL control IS the trail span (decoupled from the chart WINDOW). For long windows (1h..24h)
@@ -1956,20 +1993,75 @@ class Component extends DcLite {
     el.addEventListener('pointerup', up);
     el.addEventListener('pointercancel', up);
   }
-  loadDacPreset(name) {
-    const P = {
+  // The three factory sensor responses, exact from BrightnessView.swift's CurvePreset. REV D
+  // (VTT9812FH, R11=470K) is byte-identical to the firmware's baked brightnessCurve[]; REV C and
+  // GL5549 are the LDR boards. They are also the ghost curves the editor draws underneath.
+  get DAC_PRESETS() {
+    return {
       revc: [[0, 0], [1425, 737], [2566, 1601], [3396, 2725], [4095, 4095]],
       gl5549: [[0, 0], [1860, 225], [3050, 684], [3920, 2269], [4095, 4095]],
       revd: [[0, 0], [131, 365], [1076, 1422], [2774, 2665], [3849, 4095]],
-    }[name];
+    };
+  }
+  loadDacPreset(name) {
+    const P = this.DAC_PRESETS[name];
     if (!P) return;
     this.setState({ dacCurve: P.map(([adc, dac]) => ({ adc, dac })) });
     this.drawChart('dacCurve');
+  }
+  // Which factory response the editor is sitting on, '' once it has been dragged off one.
+  dacPresetName() {
+    const c = this.state.dacCurve;
+    for (const [k, P] of Object.entries(this.DAC_PRESETS)) {
+      if (P.every(([adc, dac], i) => c[i] && c[i].adc === adc && c[i].dac === dac)) return k;
+    }
+    return '';
+  }
+  // The operating point to mark on the curve: the ambient code the emulator's phototransistor is
+  // reading, through the firmware's own lookup. Real hardware reports neither ADC nor DAC on the
+  // wire (no $PM sentence carries them), and a manual override bypasses the curve altogether — in
+  // both cases the plot shows no operating point rather than a plausible one. The override is read
+  // from the firmware, not from the checkbox, so the mark can never contradict the clock.
+  dacLive() {
+    if (!this.emu || !this.CH || this.appMode() === 'connected') return null;
+    if (this.emu.brightnessOverride && this.emu.brightnessOverride() >= 0) return null;
+    const adc = this.state.ambientAdc;
+    return { adc, dac: this.CH.dacAt(this.state.dacCurve, adc) };
   }
   // Firmware brightness-curve keys. PLAIN human DAC value — the firmware stores 4095−value
   // internally (invert=1); do NOT pre-invert here (survey must-do #1).
   dacCommands() { return this.state.dacCurve.map((p, i) => `BS${i + 1} = ${p.adc},${p.dac}`); }
   applyDacCurve() { for (const cmd of this.dacCommands()) this.devSend(cmd); }
+  // One stop, not five — the macOS pane's per-row Send. Same transport, same RAM-only lifetime.
+  sendDacPoint(i) { const p = this.state.dacCurve[i]; if (p) this.devSend(`BS${i + 1} = ${p.adc},${p.dac}`); }
+  // Back to what the clock's own config.txt said. Inert until a drive has actually been read —
+  // there is no read-back over serial, so an unread device has told us nothing to revert to.
+  revertDacCurve() {
+    const c = this.state.deviceCurve;
+    if (!c || c.length !== 5) return;
+    this.setState({ dacCurve: c.map((p) => ({ adc: p.adc, dac: p.dac })) });
+    this.drawChart('dacCurve');
+  }
+  // ---------- named curves (this browser only; never reaches the clock) ----------
+  saveDacPresets() { try { localStorage.setItem('pccweb.dacPresets', JSON.stringify(this.state.dacPresets)); } catch (e) {} }
+  saveDacPreset() {
+    const el = this.els.dacPresetName;
+    const name = String((el && el.value) || '').trim();
+    if (!name || this.state.dacCurve.length !== 5) return;   // empty names rejected, five points or nothing
+    const pts = this.state.dacCurve.map((p) => [p.adc, p.dac]);
+    this.setState({ dacPresets: this.state.dacPresets.filter((p) => p.name !== name).concat([{ name, pts }]) },
+      () => this.saveDacPresets());
+    if (el) el.value = '';
+  }
+  loadDacCustom(name) {
+    const p = this.state.dacPresets.find((x) => x.name === name);
+    if (!p || !Array.isArray(p.pts) || p.pts.length !== 5) return;   // re-checked here, not just on load
+    this.setState({ dacCurve: p.pts.map(([adc, dac]) => ({ adc, dac })) });
+    this.drawChart('dacCurve');
+  }
+  deleteDacCustom(name) {
+    this.setState({ dacPresets: this.state.dacPresets.filter((p) => p.name !== name) }, () => this.saveDacPresets());
+  }
 
   // ---------- REST data sources ----------
   saveDataSources() { try { localStorage.setItem('pccweb.dataSources', JSON.stringify(this.state.dataSources)); } catch (e) {} }
@@ -2699,7 +2791,7 @@ class Component extends DcLite {
         + ';border:0;box-shadow:' + (on ? 'inset 0 -2px 0 var(--led)' : 'none')
         + ';color:' + (on ? 'var(--txt-hi)' : 'var(--txt2)') + ';cursor:pointer;white-space:nowrap';
     }
-    for (const r of ['EntryBg', 'FoldStage', 'TimeHalf', 'DateHalf', 'LinkWrap', 'LinkPlate', 'PinTop', 'PinBot', 'EntryTime', 'EntryDate', 'Hint', 'EntryCap', 'FloorShadow', 'DockSlot', 'HdrDate', 'HdrTime', 'Main', 'Drawer', 'DispWrap', 'DispBar', 'DispDateHalf', 'DispTimeHalf', 'DispDate', 'DispTime', 'DispLink', 'DispPinA', 'DispPinB', 'GammaCurve', 'TextInput', 'CdInput', 'LatIn', 'LonIn', 'EmuLat', 'EmuLon', 'EmuCfg', 'EmuCfgFile', 'Sky', 'Cn0elev', 'Cn0time', 'PosScatter', 'Dop', 'Cont', 'Phase', 'Stair', 'Ppmtemp', 'Adev', 'Globe', 'Map', 'MonLog', 'MonFilter', 'Cmd', 'ReviewCanvas', 'Datalink', 'Tol1In', 'Tol10In', 'Tol100In']) {
+    for (const r of ['EntryBg', 'FoldStage', 'TimeHalf', 'DateHalf', 'LinkWrap', 'LinkPlate', 'PinTop', 'PinBot', 'EntryTime', 'EntryDate', 'Hint', 'EntryCap', 'FloorShadow', 'DockSlot', 'HdrDate', 'HdrTime', 'Main', 'Drawer', 'DispWrap', 'DispBar', 'DispDateHalf', 'DispTimeHalf', 'DispDate', 'DispTime', 'DispLink', 'DispPinA', 'DispPinB', 'GammaCurve', 'TextInput', 'CdInput', 'LatIn', 'LonIn', 'EmuLat', 'EmuLon', 'EmuCfg', 'EmuCfgFile', 'Sky', 'Cn0elev', 'Cn0time', 'PosScatter', 'Dop', 'Cont', 'Phase', 'Stair', 'Ppmtemp', 'Adev', 'Globe', 'Map', 'MonLog', 'MonFilter', 'Cmd', 'ReviewCanvas', 'Datalink', 'Tol1In', 'Tol10In', 'Tol100In', 'DacPresetName']) {
       out['ref' + r] = this.ref(r[0].toLowerCase() + r.slice(1));
     }
     return out;
@@ -2772,9 +2864,15 @@ class Component extends DcLite {
       rkRowV: em.m === 'text' ? 'TEXT' : em.m === 'countdown' ? 'COUNTDOWN' : st.standby ? 'BLANK' : 'MODES',
       rkRowS: dispName, rkRowSt: st.standby ? 'absent' : 'live',
 
+      // 3 · BRIGHTNESS — the number is the rail the face is running at; the sub-line is where it
+      // comes from. LOCK means the firmware's manual override holds it, and the app knows whether
+      // that came off the clock's config.txt or off this slider. Unlocked, the phototransistor
+      // curve owns it. (The old read of st.brightnessFixed was never assigned anywhere in the repo,
+      // so this cell said AUTO even while locked; and 'live' was hard-coded, claiming device
+      // provenance in standby. It now states the same three states as SOURCE, its neighbour.)
       rkBrtV: Math.round((st.brightness != null ? st.brightness : 0) * 100),
-      rkBrtS: st.brightnessFixed ? 'FIXED' : 'AUTO · AMBIENT',
-      rkBrtSt: 'live',
+      rkBrtS: st.brightLock ? ('FIXED · ' + (st.brightSrc === 'config' ? 'config.txt' : 'SLIDER')) : 'AUTO · AMBIENT',
+      rkBrtSt: sim ? 'sim' : standby ? 'absent' : 'live',
 
       rkZoneV: zoneV, rkZoneS: zoneS, rkZoneSt: 'live',
       rkGridV: gridV, rkGridS: gridS, rkGridSt: gridSt,
@@ -2985,12 +3083,29 @@ class Component extends DcLite {
         for (const l of ['Tolerance_time_1ms = ' + t1, 'Tolerance_time_10ms = ' + t10, 'Tolerance_time_100ms = ' + t100]) this.devSend(l);
         if (this.session && this.session.log) this.session.log('tx', 'holdover tolerances: ' + t1 + ' / ' + t10 + ' / ' + t100 + ' s');
       },
-      brightVal: Math.round(st.brightness * 100), brightPctLabel: Math.round(st.brightness * 100) + '%', brightLock: st.brightLock,
+      brightVal: Math.round(st.brightness * 100), brightPctLabel: Math.round(st.brightness * 100) + '%',
+      // AMBIENT (TEST) — the phototransistor code fed to the emulator, which is the only honest
+      // source of an operating point: no $PM sentence carries ADC or DAC, so a connected clock has
+      // no ambient to report and the control says so instead of pretending to command one.
+      ambientVal: st.ambientAdc, ambientLabel: st.ambientAdc + ' / 4095',
+      ambientDisabled: this.appMode() === 'connected',
+      ambientNote: this.appMode() === 'connected'
+        ? 'NO TELEMETRY FROM HARDWARE'
+        : 'FED TO THE EMULATOR PHOTOTRANSISTOR (ADC1_IN10)',
+      onAmbient: (e) => {
+        const v = Math.max(0, Math.min(4095, (+e.target.value) | 0));
+        this.setState({ ambientAdc: v });
+        if (this.emu && this.emu.setAdc) this.emu.setAdc(v);
+        this.drawChart('dacCurve');
+      },
       // LED balance calibration read-back (#16): the seg/colon brightness equalisation was applied
       // blind — surface the firmware's actual state (OFF / AUTO / manual strength) here.
       balSeg: this.emu && this.emu.balanceState ? this.emu.balanceState().seg : '—',
       balColon: this.emu && this.emu.balanceState ? this.emu.balanceState().colon : '—',
-      onBright: (e) => { const b = (+e.target.value) / 100; this.setState({ brightness: b }); this.allFaces((f) => f.setBrightness(Math.pow(b, this.state.gamma))); this.drawChart('gammaCurve'); this.devBright(b); },
+      // The slider always drives the on-screen face. It reaches the clock and the emulator only
+      // while LOCK is on — that is what the override means, and moving a slider that the sensor is
+      // about to overrule would be a control with no effect.
+      onBright: (e) => { const b = (+e.target.value) / 100; this.setState({ brightness: b, brightSrc: 'slider' }); this.allFaces((f) => f.setBrightness(Math.pow(b, this.state.gamma))); this.drawChart('gammaCurve'); if (this.state.brightLock) { this.devBright(b); this.emuBright(b); } },
       // Observer location shim: drives the emulator's virtual GPS (sidereal/solar/grid + real sky).
       emuLatVal: this.emu ? this.emu.state().lat.toFixed(4) : '51.4779',
       emuLonVal: this.emu ? this.emu.state().lon.toFixed(4) : '-0.0015',
@@ -3049,13 +3164,34 @@ class Component extends DcLite {
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       },
       onEmuCfgImport: () => { if (this.els.emuCfgFile) this.els.emuCfgFile.click(); },
-      cbBrightLock: this.cb(st.brightLock), oBrightLock: () => this.setState({ brightLock: !st.brightLock }),
+      cbBrightLock: this.cb(st.brightLock), oBrightLock: () => this.toggleBrightLock(),
+      brightLockNote: st.brightLock ? 'UNLOCK RESTORES AUTO (SENSOR)' : 'LOCK TO HOLD THIS VALUE ON THE CLOCK',
       gammaVal: st.gamma, gammaLabel: st.gamma.toFixed(2),
       onGamma: (e) => { const g = +e.target.value; this.setState({ gamma: g }); this.allFaces((f) => f.setBrightness(Math.pow(this.state.brightness, g))); this.drawChart('gammaCurve'); },
-      // DAC-curve editor (Brightness tab). Points drag on the canvas; the numeric grid mirrors them.
-      dacPts: st.dacCurve.map((p, i) => ({ k: i, n: 'P' + (i + 1), adc: p.adc, dac: p.dac })),
+      // DAC-curve editor (Brightness tab). Points drag on the canvas; the numeric grid mirrors them
+      // and each row sends its own stop. The key ENCODES the row (dc-lite's forKey short-circuits on
+      // `k`), so a drag or a connect/disconnect actually re-renders the rail — keyed on the index
+      // alone the grid froze at its first paint and the SEND buttons never re-gated.
+      dacPts: st.dacCurve.map((p, i) => ({
+        k: (i + 1) + ':' + p.adc + ':' + p.dac + ':' + (S && S.real ? 1 : 0),
+        n: 'P' + (i + 1), adc: p.adc, dac: p.dac, off: !(S && S.real),
+        onSend: () => this.sendDacPoint(i),
+      })),
+      apDacRevC: this.dacPresetName() === 'revc' ? 'true' : 'false',
+      apDacGl: this.dacPresetName() === 'gl5549' ? 'true' : 'false',
+      apDacRevD: this.dacPresetName() === 'revd' ? 'true' : 'false',
       oDacRevC: () => this.loadDacPreset('revc'), oDacGl: () => this.loadDacPreset('gl5549'), oDacRevD: () => this.loadDacPreset('revd'),
+      // Named curves, this browser only. LOAD/DEL ride their own row, the macOS submenu flattened.
+      dacPresets: st.dacPresets.map((p) => ({
+        k: p.name, name: p.name,
+        onLoad: () => this.loadDacCustom(p.name), onDel: () => this.deleteDacCustom(p.name),
+      })),
+      dacPresetsEmpty: st.dacPresets.length === 0,
+      onDacSavePreset: () => this.saveDacPreset(),
+      onDacRevert: () => this.revertDacCurve(),
+      dacRevertOff: !(st.deviceCurve && st.deviceCurve.length === 5),
       onDacApply: () => this.applyDacCurve(),
+      dacApplyOff: !(S && S.real),
       onDacCopy: () => { try { navigator.clipboard.writeText(this.dacCommands().join('\n')); } catch (e) {} },
       dacApplyNote: (S && S.real) ? 'APPLY → BS1..BS5 OVER SERIAL' : 'CONNECT A CLOCK TO SEND · OR COPY THE BS LINES',
       rbColSlow: this.rb(st.colon === 'slowfade'), rbColHeart: this.rb(st.colon === 'heartbeat'), rbColSaw: this.rb(st.colon === 'sawtooth'), rbColAlt: this.rb(st.colon === 'alt_sawtooth'), rbColTog: this.rb(st.colon === 'toggle'), rbColSolid: this.rb(st.colon === 'solid'),

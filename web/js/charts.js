@@ -1043,10 +1043,37 @@ export function drawGamma(canvas, tok, gamma, brightness) {
   ctx.fillStyle = tok.led; sq(ctx, bx * w, h - by * h, 5);
 }
 
+// The firmware's OWN ADC→DAC lookup (generateDACbuffer, main.c:5686-5705): piecewise-linear over
+// the five stops, EXTRAPOLATED past the ends — the linear search leaves i on the last segment, so
+// `factor` runs beyond 0..1 — and then the RESULT clamped to the rails. macOS flattens at the
+// endpoint DAC instead, and the two disagree below BS1 whenever BS1 isn't at (0,0). This is the law
+// the clock runs, so it is the one the editor draws. Evaluated in the app's human DAC convention:
+// the firmware stores each stop as 4095−out, and a linear interpolation commutes with that
+// inversion, so the human answer needs no un-inverting.
+export function dacAt(points, adc) {
+  const n = points.length;
+  if (!n) return 0;
+  if (n === 1) return Math.max(0, Math.min(4095, points[0].dac));
+  let i = 1;
+  for (; i < n - 1; i++) if (points[i].adc > adc) break;
+  const p0 = points[i - 1], p1 = points[i];
+  const f = (adc - p0.adc) / (p1.adc - p0.adc);   // NO max(1,…) guard — the firmware has none either
+  const out = p0.dac * (1 - f) + p1.dac * f;
+  // Two coincident stops divide by zero, and the clock's answer to that is the dim rail, not a
+  // sensible interpolation. Same guard, same order: out>4095 || !isfinite -> 4095, then floor at 0.
+  if (!Number.isFinite(out) || out > 4095) return 4095;
+  return out < 0 ? 0 : out;
+}
+
 // The 5-point ambient-light DAC curve (ADC 0..4095 → DAC 0..4095), ported from
 // BrightnessView.swift's curveGraph. Accent polyline + dots over a dashed linear reference;
 // the point being dragged is filled. Pure renderer — the controller owns the points + drag.
-export function drawDacCurve(canvas, tok, points, dragIdx) {
+// `o` adds the three things the Mac needed a modal 3-D surface for:
+//   presets — the factory responses as ghost curves, so an edit reads against them in place
+//   interp  — the EFFECTIVE curve (dacAt above), which shows the extrapolated/clamped tails
+//   live    — the operating point: where the ambient code currently sits on that curve
+// x is sensor ADC, not time, so this plot never calls nowEdge — it has no "now" to mark.
+export function drawDacCurve(canvas, tok, points, dragIdx, o = {}) {
   const { ctx, w, h } = c2d(canvas);
   clear(ctx, w, h, tok);
   ctx.strokeStyle = tok.line; ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
@@ -1057,15 +1084,54 @@ export function drawDacCurve(canvas, tok, points, dragIdx) {
   ctx.strokeStyle = tok.txt3; ctx.setLineDash([3, 3]); ctx.globalAlpha = 0.55;
   ctx.beginPath(); ctx.moveTo(0, h); ctx.lineTo(w, 0); ctx.stroke();
   ctx.setLineDash([]); ctx.globalAlpha = 1;
+  if (o.presets) {
+    ctx.strokeStyle = tok.txt3; ctx.globalAlpha = 0.35;
+    for (const g of o.presets) {
+      ctx.beginPath();
+      g.forEach((p, i) => { const x = X(p.adc), y = Y(p.dac); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
   ctx.strokeStyle = tok.led; ctx.lineWidth = 1.6; ctx.beginPath();
   points.forEach((p, i) => { const x = X(p.adc), y = Y(p.dac); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
   ctx.stroke(); ctx.lineWidth = 1;
+  // Over the chords: the curve the clock actually follows. Identical between BS1 and BS5, so all it
+  // adds is the truth outside them — the extrapolated ramp and the rail it clamps against.
+  if (o.interp) {
+    ctx.strokeStyle = tok.led; ctx.lineWidth = 2.2; ctx.beginPath();
+    for (let i = 0; i <= 96; i++) {
+      const adc = i / 96 * 4095, x = X(adc), y = Y(dacAt(points, adc));
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke(); ctx.lineWidth = 1;
+  }
   points.forEach((p, i) => {
     const x = X(p.adc), y = Y(p.dac);
     ctx.beginPath(); ctx.arc(x, y, i === dragIdx ? 5.5 : 4, 0, Math.PI * 2);
     ctx.fillStyle = i === dragIdx ? tok.led : tok.inset; ctx.fill();
     ctx.strokeStyle = tok.led; ctx.lineWidth = 1.4; ctx.stroke(); ctx.lineWidth = 1;
   });
+  // The operating point — ambient code in, rail out. Ticks on both axes give it a reading on each
+  // scale; the square is the point itself. Absent (null) whenever nothing honest drives it.
+  if (o.live) {
+    const lx = X(o.live.adc), ly = Y(o.live.dac);
+    ctx.save();
+    ctx.strokeStyle = tok.led; ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.24; ctx.setLineDash([2, 3]);
+    ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx, h); ctx.moveTo(lx, ly); ctx.lineTo(0, ly); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 0.65;
+    ctx.beginPath();
+    ctx.moveTo(lx, h); ctx.lineTo(lx, h - 7); ctx.moveTo(lx, 0); ctx.lineTo(lx, 7);
+    ctx.moveTo(0, ly); ctx.lineTo(7, ly); ctx.moveTo(w, ly); ctx.lineTo(w - 7, ly);
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = tok.led; sq(ctx, lx, ly, 7);
+    const right = lx > w - 78;
+    ctx.font = F9; ctx.fillStyle = tok.txtHi;
+    ctx.textAlign = right ? 'right' : 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(Math.round(o.live.adc) + ' → ' + Math.round(o.live.dac), lx + (right ? -9 : 9), Math.max(12, ly - 9));
+  }
 }
 
 // ---- pccd flight-recorder archive -----------------------------------------------------------------

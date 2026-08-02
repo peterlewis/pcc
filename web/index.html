@@ -8,7 +8,7 @@
 <meta name="description" content="Precision Clock Mk IV companion — emulator, GNSS sky, and GPS timing analytics. Static, offline-capable.">
 <link rel="stylesheet" href="css/base.css?v=96">
 <link rel="stylesheet" href="css/pcc-tokens.css?v=5">
-<link rel="stylesheet" href="css/pcc-components.css?v=12">
+<link rel="stylesheet" href="css/pcc-components.css?v=13">
 </head>
 <body>
 <div id="root">
@@ -331,31 +331,42 @@
 
         <sc-if value="{{sec_devbright}}" hint-placeholder-val="{{false}}">
           <div class="pcc-cards" data-screen-label="devbright" style="animation:pcc-in var(--t-room) var(--ease-ui) both;padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:stretch;max-width:1420px">
+            <!-- FACE — a CONTROL module (Law 2, depth 2): everything here is operable, so nothing
+                 here sits on the panel face except the LED BALANCE read-back, which the device
+                 wrote and therefore goes in a well. AMBIENT lives with the controls because it
+                 commands the emulator's phototransistor; it is an input, not a reading. -->
             <section class="mod">
-                <div class="panelhead">
-                  <span class="lbl">FACE</span>
+                <div class="mod__strip">
+                  <span>FACE</span>
                 </div>
-                <div style="padding:14px var(--pad-panel-x) var(--pad-panel-x);display:flex;flex-direction:column;gap:14px">
-                  <div style="display:flex;flex-direction:column;gap:6px">
-                    <div style="display:flex;justify-content:space-between;align-items:center">
+                <div class="mod__field mod__field--col">
+                  <div class="col">
+                    <div class="between">
                       <span class="lbl">BRIGHTNESS</span>
-                      <span style="font-family:var(--mono);font-size:var(--fs-label);color:var(--txt)">{{brightPctLabel}}</span>
+                      <span class="val">{{brightPctLabel}}</span>
                     </div>
-                    <input type="range" min="5" max="100" step="1" value="{{brightVal}}" onChange="{{onBright}}" disabled="{{brightLock}}">
-                    <button onClick="{{oBrightLock}}" style="display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:2px 0 0;cursor:pointer;font-family:var(--sans);font-size:var(--fs-data-sm);color:var(--txt);align-self:flex-start">
-                      <span style="{{cbBrightLock}}"></span>LOCK BRIGHTNESS
-                    </button>
+                    <input type="range" min="5" max="100" step="1" value="{{brightVal}}" onChange="{{onBright}}">
+                    <button onClick="{{oBrightLock}}" class="cbtn"><span style="{{cbBrightLock}}"></span>LOCK BRIGHTNESS</button>
+                    <span class="meta meta--wide">{{brightLockNote}}</span>
                   </div>
-                  <div style="display:flex;gap:12px;align-items:flex-start">
-                    <div style="flex:1;display:flex;flex-direction:column;gap:6px">
-                      <div style="display:flex;justify-content:space-between;align-items:center">
-                        <span class="lbl">DAC CURVE γ</span>
-                        <span style="font-family:var(--mono);font-size:var(--fs-label);color:var(--txt)">{{gammaLabel}}</span>
-                      </div>
-                      <input type="range" min="0.5" max="2.4" step="0.05" value="{{gammaVal}}" onChange="{{onGamma}}">
-                      <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3)">MASTER DAC — PERCEPTUAL LAW</span>
+                  <div class="col">
+                    <div class="between">
+                      <span class="lbl">AMBIENT (TEST)</span>
+                      <span class="val">{{ambientLabel}}</span>
                     </div>
-                    <canvas ref="{{refGammaCurve}}" style="width:64px;height:46px;flex:none"></canvas>
+                    <input type="range" min="0" max="4095" step="1" value="{{ambientVal}}" onChange="{{onAmbient}}" disabled="{{ambientDisabled}}">
+                    <span class="meta meta--wide">{{ambientNote}}</span>
+                  </div>
+                  <div class="col">
+                    <div class="between">
+                      <span class="lbl">FACE PREVIEW γ</span>
+                      <span class="val">{{gammaLabel}}</span>
+                    </div>
+                    <div class="slidrow">
+                      <input type="range" min="0.5" max="2.4" step="0.05" value="{{gammaVal}}" onChange="{{onGamma}}">
+                      <div class="well well--chart"><canvas ref="{{refGammaCurve}}" style="width:64px;height:46px"></canvas></div>
+                    </div>
+                    <span class="meta meta--wide">APP ONLY · NOT SENT TO THE CLOCK</span>
                   </div>
                   <div class="col">
                     <span class="lbl">COLON STYLE</span>
@@ -367,48 +378,64 @@
                       <button onClick="{{oColTog}}" class="cbtn"><span style="{{rbColTog}}"></span>TOGGLE</button>
                       <button onClick="{{oColSolid}}" class="cbtn"><span style="{{rbColSolid}}"></span>SOLID</button>
                     </div>
-                    <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3)">{{colonFreezeNote}}</span>
+                    <span class="meta meta--wide">{{colonFreezeNote}}</span>
                   </div>
-                  <div style="display:flex;flex-direction:column;gap:5px;border-top:1px solid var(--line);padding-top:11px">
+                  <div class="col">
                     <span class="lbl">LED BALANCE</span>
-                    <div style="display:flex;justify-content:space-between"><span class="sub">Per-segment</span><span class="val">{{balSeg}}</span></div>
-                    <div style="display:flex;justify-content:space-between"><span class="sub">Colon</span><span class="val">{{balColon}}</span></div>
+                    <div class="well">
+                      <div class="kv"><span class="kv__k">Per-segment</span><span class="kv__v">{{balSeg}}</span></div>
+                      <div class="kv"><span class="kv__k">Colon</span><span class="kv__v">{{balColon}}</span></div>
+                    </div>
                     <span class="meta meta--wide">CURRENT-SHARING COMPENSATION · OFF / AUTO / MANUAL STRENGTH · SET VIA config.txt OR MENU</span>
                   </div>
                 </div>
+                <div class="mod__legend">Ambient is an emulator input, not a hardware reading. Gamma shapes this app's face and is never transmitted.</div>
               </section>
 
-            <section style="background:var(--panel);border:1px solid var(--line);grid-column:1/-1;max-width:1000px">
-              <div style="display:flex;align-items:center;justify-content:space-between;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)">
-                <span class="lbl">POINT VALUES · DAC CURVE</span>
-                <span class="meta meta--wide">{{dacApplyNote}}</span>
+            <section class="mod" style="grid-column:1/-1;max-width:1000px">
+              <div class="mod__strip">
+                <span>POINT VALUES · DAC CURVE</span>
+                <span class="mod__stat">{{dacApplyNote}}</span>
               </div>
-              <div style="padding:14px var(--pad-panel-x) var(--pad-panel-x);display:flex;gap:16px;flex-wrap:wrap">
-                <div style="flex:1;min-width:280px;display:flex;flex-direction:column;gap:8px">
-                  <canvas ref="{{refDacCurve}}" style="width:100%;height:220px;display:block;background:var(--well);border:1px solid var(--line2)"></canvas>
-                  <span class="meta meta--wide">DRAG A POINT · X = SENSOR ADC 0–4095 · Y = DAC BRIGHTNESS 0–4095</span>
+              <div class="mod__field dacwrap">
+                <div class="dacwrap__plot">
+                  <div class="well well--chart"><canvas ref="{{refDacCurve}}" style="width:100%;height:220px"></canvas></div>
+                  <span class="cap">DRAG A POINT · X = SENSOR ADC 0–4095 · Y = DAC BRIGHTNESS 0–4095 · GHOSTS = FACTORY CURVES</span>
                 </div>
-                <div style="width:230px;display:flex;flex-direction:column;gap:12px">
-                  <div style="display:flex;flex-direction:column;gap:3px">
-                    <div style="display:grid;grid-template-columns:32px 1fr 1fr;gap:6px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.1em;color:var(--txt3);padding-bottom:3px;border-bottom:1px solid var(--line)"><span>PT</span><span>ADC</span><span>DAC</span></div>
+                <div class="dacwrap__rail">
+                  <div>
+                    <div class="dacpts__row dacpts__row--head"><span>PT</span><span>ADC</span><span>DAC</span><span></span></div>
                     <sc-for list="{{dacPts}}" as="r">
-                      <div style="display:grid;grid-template-columns:32px 1fr 1fr;gap:6px;font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt);padding:2px 0"><span style="color:var(--txt3)">{{r.n}}</span><span>{{r.adc}}</span><span>{{r.dac}}</span></div>
+                      <div class="dacpts__row"><span class="dacpts__n">{{r.n}}</span><span>{{r.adc}}</span><span>{{r.dac}}</span><button class="btn btn--mini" onClick="{{r.onSend}}" disabled="{{r.off}}">SEND</button></div>
                     </sc-for>
                   </div>
-                  <div style="display:flex;flex-direction:column;gap:5px">
-                    <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.1em;color:var(--txt3)">PRESETS</span>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap">
-                      <button onClick="{{oDacRevC}}" style="font-family:var(--mono);font-size:var(--fs-nano);padding:4px 8px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">REV C</button>
-                      <button onClick="{{oDacGl}}" style="font-family:var(--mono);font-size:var(--fs-nano);padding:4px 8px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">GL5549</button>
-                      <button onClick="{{oDacRevD}}" style="font-family:var(--mono);font-size:var(--fs-nano);padding:4px 8px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">REV D</button>
+                  <div class="col">
+                    <span class="lbl lbl--nano">FACTORY</span>
+                    <div class="seg">
+                      <button class="seg__btn" aria-pressed="{{apDacRevC}}" onClick="{{oDacRevC}}">REV C</button>
+                      <button class="seg__btn" aria-pressed="{{apDacGl}}" onClick="{{oDacGl}}">GL5549</button>
+                      <button class="seg__btn" aria-pressed="{{apDacRevD}}" onClick="{{oDacRevD}}">REV D</button>
                     </div>
                   </div>
-                  <div style="display:flex;gap:6px;margin-top:2px">
-                    <button onClick="{{onDacApply}}" style="flex:1;font-family:var(--sans);font-size:var(--fs-data-sm);padding:6px 0;background:transparent;border:1px solid var(--led);color:var(--txt);cursor:pointer" style-hover="background:var(--led-fill)">APPLY</button>
-                    <button onClick="{{onDacCopy}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:6px 12px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="color:var(--txt);border-color:var(--txt3)">COPY BS</button>
+                  <div class="col">
+                    <span class="lbl lbl--nano">SAVED CURVES</span>
+                    <div class="ctl">
+                      <input ref="{{refDacPresetName}}" class="inp" placeholder="NAME" maxLength="24" style="flex:1">
+                      <button class="btn" onClick="{{onDacSavePreset}}">SAVE</button>
+                    </div>
+                    <sc-if value="{{dacPresetsEmpty}}" hint-placeholder-val="{{false}}"><span class="meta meta--wide">NONE IN THIS BROWSER</span></sc-if>
+                    <sc-for list="{{dacPresets}}" as="p">
+                      <div class="ctl"><span class="val">{{p.name}}</span><span class="spacer"></span><button class="btn btn--mini" onClick="{{p.onLoad}}">LOAD</button><button class="btn btn--mini" onClick="{{p.onDel}}">DEL</button></div>
+                    </sc-for>
+                  </div>
+                  <div class="ctl">
+                    <button class="btn btn--primary" onClick="{{onDacApply}}" disabled="{{dacApplyOff}}">APPLY</button>
+                    <button class="btn" onClick="{{onDacRevert}}" disabled="{{dacRevertOff}}">REVERT TO CLOCK</button>
+                    <button class="btn" onClick="{{onDacCopy}}">COPY BS</button>
                   </div>
                 </div>
               </div>
+              <div class="mod__legend">Apply sends BS1&#8211;BS5 over serial: RAM only, lost on power cycle. To persist, write config.txt from the CONFIG FILE tab.</div>
             </section>
           </div>
         </sc-if>
@@ -1833,6 +1860,6 @@
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=285"></script>
+<script type="module" src="js/app-controller.js?v=286"></script>
 </body>
 </html>

@@ -139,6 +139,9 @@
 .mod__stat[data-state="sim"]   { color: var(--acq); }
 .mod__stat[data-state="alert"] { color: var(--none); }
 .mod__field { padding: var(--pad-panel-y) var(--pad-panel-x); }
+/* The working field's usual shape: groups stacked down the panel with room between them.
+   Retyped 11x as `display:flex;flex-direction:column;gap:14px` — same decision, given a name. */
+.mod__field--col { display: flex; flex-direction: column; gap: var(--sp-4); }
 .mod__legend {                         /* silkscreen. Two lines MAX — enforced in build */
   border-top: 1px solid var(--line-soft);
   padding: 8px var(--pad-panel-x);
@@ -287,6 +290,48 @@
   color: var(--beta); background: var(--beta-fill); border: 1px solid var(--beta);
   border-radius: var(--r-1); padding: 3px 5px; line-height: 1;
 }
+
+/* ---- the field ------------------------------------------------------------
+   A control at depth 2 whose SURFACE is a well: you type into a recess. Counted
+   before extraction: the same seven declarations retyped 34x in index.html,
+   varying only by width — so width stays inline and the rest becomes this. */
+.inp {
+  font-family: var(--mono); font-size: var(--fs-data-sm);
+  background: var(--well); border: 1px solid var(--line-well); border-radius: var(--r-1);
+  color: var(--txt); padding: 5px 8px; min-width: 0;
+}
+.inp:focus-visible { outline: 1px solid var(--led); outline-offset: -1px; }
+.inp[disabled] { color: var(--txt3); cursor: not-allowed; }
+
+/* ---- a chart is a readout --------------------------------------------------
+   Law 2 puts every plot at depth 0, so the well IS the chart's bezel and its
+   padding drops to the hairline. Used by the DAC-curve editor and the gamma
+   sparkline beside its slider; the canvas carries its own size. */
+.well--chart { padding: var(--sp-1); }
+.well--chart > canvas { display: block; }
+
+/* ---- BRIGHTNESS · the ADC->DAC curve editor --------------------------------
+   One module at two depths, which is Law 2's enforcing rule made literal: the
+   plot is the device's law (a well), the points rail beside it is control (the
+   panel face). Dragging edits the points ON the readout — the same hybrid the
+   macOS pane has, and the only place a well accepts a gesture. */
+.dacwrap { display: flex; gap: var(--sp-4); flex-wrap: wrap; }
+.dacwrap__plot { flex: 1; min-width: 280px; display: flex; flex-direction: column; gap: var(--sp-2); }
+.dacwrap__rail { width: 236px; display: flex; flex-direction: column; gap: var(--sp-4); }
+.dacpts__row {
+  display: grid; grid-template-columns: 24px 1fr 1fr 52px; gap: var(--sp-2); align-items: center;
+  padding: 2px 0; font-family: var(--mono); font-size: var(--fs-data-sm); color: var(--txt);
+}
+.dacpts__row--head {
+  font-size: var(--fs-meta); letter-spacing: .1em; color: var(--txt3);
+  padding-bottom: 3px; border-bottom: 1px solid var(--line-soft);
+}
+.dacpts__n { color: var(--txt3); }
+.btn--mini { padding: 3px 5px; letter-spacing: .06em; }   /* a row action, sized to its row */
+
+/* A slider and the readout it feeds, side by side. */
+.slidrow { display: flex; align-items: center; gap: var(--sp-3); }
+.slidrow > input[type="range"] { flex: 1; min-width: 0; }
 
 /* ---- the shared work surface ---------------------------------------------- */
 .grid12 { display: grid; grid-template-columns: repeat(12, 1fr); gap: var(--gap-grid); }

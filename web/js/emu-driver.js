@@ -74,6 +74,8 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     adevPush: w('emu_adev_push','void',['number']),   // feed one phase sample (DWT ticks) straight into the accumulator
     segBalance: w('emu_seg_balance','number'), colonBalance: w('emu_colon_balance','number'),
     colonPreview: w('emu_colon_preview','number'),   // §3.5 preview (0xFF = none)
+    brightnessOvr: w('emu_brightness','number'), setBrightnessOvr: w('emu_set_brightness','void',['number']),  // config.brightness_override (<0 = AUTO)
+    colonScale: w('emu_colon_scale','number',['number']),   // the 2-anchor colon curve at any rail
     hadPps: w('emu_had_pps','number'), sincePps: w('emu_since_pps','number'),
     satcount: w('emu_satcount','number'),
     colonMode: w('emu_colon_mode','number'),
@@ -325,6 +327,19 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
                preview: E.colonPreview ? E.colonPreview() : 0xFF };
     },
     setBrightness(v01) { state.adc = Math.max(0, Math.min(4095, Math.round(v01*4095))); E.setAdc(state.adc); },
+    // The phototransistor reading itself (ADC1_IN10, 0..4095) — the raw code the firmware's AUTO
+    // branch interpolates the brightness curve against. setBrightness above is the same injection
+    // expressed 0..1; this one speaks the units the curve is drawn in.
+    setAdc(adc) { state.adc = Math.max(0, Math.min(4095, Math.round(adc))); E.setAdc(state.adc); },
+    // The MANUAL brightness override (config.brightness_override) — the same field the serial
+    // `brightness = 0.850` key writes. Human 0..1 in and out, exactly as parseBrightness(v, invert=1)
+    // reads it: the firmware stores (1−v)·4095, so 1.0 is the brightest rail. -1 = AUTO, sensor drives.
+    brightnessOverride() { const v = E.brightnessOvr(); return v < 0 ? -1 : 1 - v / 4095; },
+    setBrightnessOverride(v01) { E.setBrightnessOvr(v01 < 0 ? -1 : (1 - Math.max(0, Math.min(1, v01))) * 4095); },
+    // AUTO colon scale (of 256) at a given rail — the firmware's own two-anchor law (colon_scale_for,
+    // colon_full_at / colon_floor). The colons are TIM2 PWM, outside the segment scan, so they carry
+    // their own curve to dim with the digits.
+    colonScale(dac) { return E.colonScale(dac | 0); },
     setLocation(la, lo, src = 'manual') { return setLoc(la, lo, src); },   // returns a promise → resolved zone (manual)
     denyGeo,   // browser refused / failed geolocation → keep DEFAULT but flag it honestly
     // real sats currently reported (with az/el/cn0) — for the app to plot the true constellation
