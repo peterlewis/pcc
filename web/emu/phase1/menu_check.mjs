@@ -57,8 +57,10 @@ ev(EVT.S1);
 check(`L1 stage 1 shows "${row()}"`, row() === 'ENTER');
 
 // (5) ENTER DISP -> L2 item ring, landing directly on the first item (no section banner).
+// BRIGHT boots at AUTO (readConfigFile's -1), and a STEP item keeps its value whole by trimming its
+// label: "BRIGHT AUTO" is 11 chars, so the row reads "BRIGH AUTO".
 ev(EVT.REL);
-check(`ENTER -> L2 on the first item "${row()}"`, layer() === L2 && row().startsWith('BRIGHT') && midx() === 0);
+check(`ENTER -> L2 on the first item "${row()}"`, layer() === L2 && row() === 'BRIGH AUTO' && midx() === 0);
 
 // (6) item scroll stays WITHIN the section (BRIGHT -> BALANCE -> COLON -> COLONALT, then back).
 ev(EVT.BTN1);
@@ -68,7 +70,7 @@ check(`item fwd -> "${row()}"`, row().startsWith('COLON') && !row().startsWith('
 ev(EVT.BTN1);
 check(`item fwd -> "${row()}"`, row().startsWith('ACOLON'));   // renamed so the value fits at L2
 ev(EVT.BTN2); ev(EVT.BTN2); ev(EVT.BTN2);
-check(`item back -> "${row()}"`, row().startsWith('BRIGHT') && midx() === 0);
+check(`item back -> "${row()}"`, row() === 'BRIGH AUTO' && midx() === 0);
 
 // (7) EDIT BRIGHT -> L3, live-preview a step.
 ev(EVT.S1);
@@ -87,7 +89,7 @@ check(`L3 stage 2 is the "----" buffer ("${row()}")`, row() === '----');
 ev(EVT.S3);
 check(`L3 stage 3 shows "${row()}"`, row() === 'CANCEL');
 ev(EVT.REL);
-check(`CANCEL -> L2 on BRIGHT, restored "${row()}"`, layer() === L2 && row().startsWith('BRIGHT') && row().includes(before.trim()));
+check(`CANCEL -> L2 on BRIGHT, restored "${row()}"`, layer() === L2 && row() === 'BRIGH AUTO' && row().includes(before.trim()));
 
 // (9) BACK -> L1 section ring (still DISP).
 ev(EVT.S2);

@@ -1,6 +1,7 @@
 // pmext.mjs — parse the Precision Clock Mk IV's newer proprietary sentences: the
-// star-transit predictor's "$PMSTAR" (MODE_STAR) and the oscillator-stability
-// ladders "$PMADEV" / "$PMHDEV" (MODE_ADEV). Sibling to ppsts.js, which owns the
+// star-transit predictor's "$PMSTAR" (MODE_STAR), the oscillator-stability
+// ladders "$PMADEV" / "$PMHDEV" (MODE_ADEV), and the auto-dimmer's operating
+// point "$PMBRIT" (brightness_report). Sibling to ppsts.js, which owns the
 // $PMTXT* family; same NMEA-style framing ($…*CC, XOR checksum of the chars
 // between '$' and '*'). Must stay in sync with the firmware emitters.
 //
@@ -86,4 +87,25 @@ export function parsePMADEV(line) {
     sigmas.push(s);
   }
   return { kind, epoch, tau0, valid, noct, taus, sigmas };
+}
+
+// Parse one $PMBRIT line — the auto-dimmer's operating point, once a second while
+// the clock has `brightness_report = on`:
+//   $PMBRIT,<adc>,<dac>,<src>,<segk>,<colon>*CC
+//   adc    ambient light, the raw ADC code 0..4095
+//   dac    display brightness 0..4095 on the BSn scale (0 dark, 4095 full) — the
+//          firmware's 4095 - dac_target, so it reads the same way as a BS line
+//   src    'A' auto (following the BS curve) | 'M' manual override | 'S' standby
+//   segk   effective per-segment balance strength: 0 off/unavailable, AUTO 10..90,
+//          a manual seg_balance up to 300
+//   colon  applied colon animation scale, of 256 (256 = full, the stock behaviour)
+// Returns { adc, dac, src, segk, colon } or null on any framing/field violation.
+export function parsePMBRIT(line) {
+  const f = checkedFields(line, 'PMBRIT');
+  if (!f || f.length !== 6) return null;
+  const [, a, d, src, k, c] = f;
+  if (![a, d, k, c].every((v) => /^\d{1,4}$/.test(v)) || !/^[AMS]$/.test(src)) return null;
+  const adc = +a, dac = +d, segk = +k, colon = +c;
+  if (adc > 4095 || dac > 4095 || segk > 300 || colon > 256) return null;
+  return { adc, dac, src, segk, colon };
 }

@@ -15,7 +15,7 @@
 import { Clock, BridgeClock } from './serial.js?v=22';
 import { parseGGA, parseRMC, parseGSA, GSVBuffer } from './nmea.js?v=2';
 import { parsePMTXTS, parsePMTXTC, centrePhase, foldPhase1ms } from './ppsts.js?v=15';
-import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=1';
+import { parsePMSTAR, parsePMADEV, parsePMBRIT } from './pmext.mjs?v=2';
 // subSatellitePoint reconstructs a sat's ground point from observer-relative
 // az/el (all GSV gives us) — the exact inverse of the sim's forward azel(). The
 // import also runs satpass.js's augmentConstellations() IIFE, which sets
@@ -116,6 +116,7 @@ export function createRealDevice(session) {
         ppsLastCalerr = null;
         S.star = null;   // $PMSTAR transit list — real-device data, leaves with the device
         S.stab = null;   // $PMADEV/$PMHDEV stability ladders — likewise
+        S.bright = null; // $PMBRIT auto-dimmer operating point — likewise
         S.fixAgeT = 0;   // freshness stamp is per-session — never bleed a prior fix/sim value
         lastRxT = 0;     // RX-staleness watchdog resets with the session
         lastHistT = 0; lastCn0T = 0;
@@ -456,6 +457,16 @@ export function createRealDevice(session) {
             return;
         }
 
+        // $PMBRIT — the auto-dimmer's operating point, once a second (reply to "brightness_report = on"):
+        // the ambient code the sensor read, the rail it chose on the BS scale, what chose it (A auto ·
+        // M manual · S standby), and the balance values that follow the rail. Latest wins; `at` (ms)
+        // lets readers drop it once the stream stops, so a silent clock never shows a frozen rail.
+        if (text.startsWith('$PMBRIT,')) {
+            const r = parsePMBRIT(text);
+            if (r) S.bright = { ...r, at: Date.now() };
+            return;
+        }
+
         // tc_dump's human header carries the learn-state letter (A applying · F frozen · L learning ·
         // S seeded · - idle) and the observed die range — the only place the firmware reports them.
         if (text.startsWith('# tempcomp:')) {
@@ -555,6 +566,9 @@ export function createRealDevice(session) {
             // populates it; app-controller re-polls while the TIMING room is open.
             clock.send('adev_dump = on');   // → $PMADEV → S.stab.adev
             clock.send('hdev_dump = on');   // → $PMHDEV → S.stab.hdev
+            // The dimmer's operating point streams at 1 Hz once asked → $PMBRIT → S.bright. Firmware
+            // without the key ignores it, and S.bright stays null. Left on at disconnect, like pps.
+            clock.send('brightness_report = on');
 
             // Enter real-device mode. Clear any stale sim telemetry so the rooms
             // start from the device's honest state and fill in as sentences land.
@@ -604,6 +618,7 @@ export function createRealDevice(session) {
             S.tc = null;   // learned model belongs to ONE device — never show a previous clock's
             S.star = null; // same rule for the transit list and stability ladders: they arrive
             S.stab = null; // fresh from THIS device or not at all
+            S.bright = null;
             S.fixAgeT = 0; // no fix seen yet this session — FIX AGE dashes until a valid GGA lands
             S.lastRxT = 0; lastRxT = 0;   // watchdog clock starts when the first line arrives
         },
@@ -776,6 +791,14 @@ export function createRealDevice(session) {
             const sb = fake.S.stab;
             checks.push({ name: 'PMADEV → S.stab.adev (taus 1/2/4)', ok: !!sb && !!sb.adev && sb.adev.kind === 'adev' && JSON.stringify(sb.adev.taus) === '[1,2,4]', detail: `adev=${JSON.stringify(sb && sb.adev)}` });
             checks.push({ name: 'PMHDEV → S.stab.hdev + history of 2', ok: !!sb && !!sb.hdev && sb.hdev.kind === 'hdev' && sb.hist.length === 2, detail: `hdev=${JSON.stringify(sb && sb.hdev)} hist=${sb && sb.hist.length}` });
+
+            //   PMBRIT: ambient 400 → rail 666 on the BS scale, AUTO, segment balance 63, colons full
+            const BRIT = '$PMBRIT,400,666,A,63,256*4B';
+            rd.ingestLine(BRIT);
+            const br = fake.S.bright;
+            checks.push({ name: 'PMBRIT → S.bright (adc/dac/src/segk/colon)', ok: !!br && br.adc === 400 && br.dac === 666 && br.src === 'A' && br.segk === 63 && br.colon === 256 && br.at > 0, detail: `bright=${JSON.stringify(br)}` });
+            rd.ingestLine(BRIT.slice(0, -2) + '00');   // corrupt checksum must not replace the good reading
+            checks.push({ name: 'PMBRIT corrupt line dropped', ok: fake.S.bright === br, detail: 'S.bright replaced by a bad-checksum line' });
 
             const pass = checks.every((c) => c.ok);
             return { pass, checks };

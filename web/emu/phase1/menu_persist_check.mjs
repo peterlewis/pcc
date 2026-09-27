@@ -34,7 +34,7 @@ const results = [];
 const check = (n, pass) => results.push({ n, pass: !!pass });
 
 // Drive the menu to set BRIGHT (row 0) to +256 and SAVE, then exit to L0. Stamps ovr with the
-// current config.txt mtime. (BRIGHT boots at 0; one +256 step -> 256.)
+// current config.txt mtime. (BRIGHT boots at AUTO; pinned to 0 first, one +256 step -> 256.)
 function setBrightViaMenu() {
   setBright(0);                          // deterministic start so one +256 step always lands on 256
   ev(EVT.S1); ev(EVT.REL);               // L0 -> L1 SECTION ring

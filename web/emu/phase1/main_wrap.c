@@ -34,6 +34,9 @@
 #ifndef EMU_HAS_STAR
 #  define EMU_HAS_STAR 0
 #endif
+#ifndef EMU_HAS_BRIT
+#  define EMU_HAS_BRIT 0
+#endif
 #include "shim_redirect.h"
 
 #ifdef EMU_NATIVE64
@@ -136,6 +139,7 @@ void emu_boot(unsigned int t){
   currentTime = (time_t)t; last_pps_time = (uint32_t)t; had_pps = 1;
   displayMode = MODE_ISO8601_STD; countMode = COUNT_NORMAL;
   config.tolerance_1ms = 1000; config.tolerance_10ms = 10000; config.tolerance_100ms = 100000;
+  config.brightness_override = -1.0f;   /* AUTO: readConfigFile's reset, before any config line */
   config.modes_enabled[MODE_ISO8601_STD] = 1;
   setNextTimestamp(currentTime);
   setPrecision();
@@ -183,6 +187,9 @@ void emu_poll(void){
 #endif
 #if EMU_HAS_SEGBAL
   segbal_poll();           /* per-segment brightness balance — same main-loop hook as hardware */
+#endif
+#if EMU_HAS_BRIT
+  brightness_report_poll();   /* $PMBRIT once a second (brightness_report) — same main-loop hook */
 #endif
 #if EMU_HAS_STAR
   if (displayMode == MODE_STAR) star_update();   /* refresh the transit list, like astro_update */
@@ -425,7 +432,7 @@ const char* emu_star_name(int i){ (void)i; return ""; }
 
 /* --- brightness inject: firmware reads ADC1 (phototransistor); make it settable --- */
 static uint32_t emu_adc = 2048;
-void emu_set_adc(unsigned int v){ emu_adc = v; }
+void emu_set_adc(unsigned int v){ emu_adc = v; ADC1->DR = v; }   /* the dimmer loop and $PMBRIT read the register itself */
 void emu_set_dac(unsigned int v){ dac_target = (float)v; }   /* rail level: 4095 = dimmest (segbal tests) */
 uint32_t HAL_ADC_GetValue(ADC_HandleTypeDef* h){ (void)h; return emu_adc; }
 
@@ -445,6 +452,7 @@ void emu_boot_cold(unsigned int t){
   had_pps = 0; data_valid = 0; rtc_good = 0; new_position = 1;
   displayMode = MODE_ISO8601_STD; countMode = COUNT_NORMAL;
   config.tolerance_1ms = 1000; config.tolerance_10ms = 10000; config.tolerance_100ms = 100000;
+  config.brightness_override = -1.0f;   /* AUTO: readConfigFile's reset, before any config line */
   config.modes_enabled[MODE_ISO8601_STD] = 1;
   latitude = 0.0f; longitude = 0.0f;
   /* ZONE 2 globals are .data on silicon — power-on restores their initialisers. Mirror that. */
@@ -469,6 +477,10 @@ void emu_boot_cold(unsigned int t){
   tc_seed=0; tc_seed_pending=0; tc_seed_lo=tc_seed_hi=0; tc_learn=tc_apply=tc_rtc=0; tc_disp_state='-';
   for (int i=0;i<40;i++){ tc_bins[i].hse_sum=tc_bins[i].lse_sum=0; tc_bins[i].hse_n=tc_bins[i].lse_n=0; }
 #endif
+#if EMU_HAS_BRIT
+  brightness_report = 0; brit_win = 0;   /* power-on: the $PMBRIT switch is off, as .data restores it */
+#endif
+  ADC1->DR = emu_adc;           /* power-on: the sensor register holds what HAL_ADC_GetValue reports */
   colon_dma_ms = 0;             /* power-on: colon DMA starts from table index 0 */
   setNextTimestamp(currentTime);
   SetPPS( &PPS );          /* PPS_Init's job: COUNT_NORMAL setPrecision never installs one */
@@ -596,7 +608,9 @@ int emu_MODE_MODIFIED_JD(void){ return MODE_MODIFIED_JD; }
  * byte-faithfully-formatted $PMTXTS (same snprintf, same NMEA checksum) for comparison against a
  * bench capture. (Replaces the stubs.js no-op; native_stubs.c's copy is weak so this wins there.) */
 static char emu_pmtxts_buf[224];   /* $PMSTAR with 8 x 4-field entries (~160 B) outgrew 128 */
+static int emu_cdc_busy = 0;      /* test hook: the next N submits find the endpoint BUSY */
 uint8_t CDC_Copy_Transmit(uint8_t* buf, uint16_t Len){
+  if (emu_cdc_busy > 0) { emu_cdc_busy--; return USBD_BUSY; }
   uint16_t n = Len < (uint16_t)(sizeof(emu_pmtxts_buf)-1) ? Len : (uint16_t)(sizeof(emu_pmtxts_buf)-1);
   for (uint16_t i = 0; i < n; i++) emu_pmtxts_buf[i] = (char)buf[i];
   emu_pmtxts_buf[n] = 0;
@@ -615,6 +629,28 @@ const char* emu_pmtxts_line(void){
 #endif
   return emu_pmtxts_buf;
 }
+/* $PMBRIT: one emit through the firmware's own emitBrightnessReport() — like the other *_line helpers
+ * it bypasses the switch and the 1 Hz window, so a check can read the format on demand. */
+const char* emu_pmbrit_line(void){
+  emu_pmtxts_buf[0] = 0;
+#if EMU_HAS_BRIT
+  hUsbDeviceFS.dev_state = USBD_STATE_CONFIGURED;  /* satisfy the host-present gate */
+  emitBrightnessReport();
+#endif
+  return emu_pmtxts_buf;
+}
+/* Read-and-clear the last CDC submit, so a check can let emu_poll pace a sentence and count what
+ * actually went out. */
+static char emu_take_buf[sizeof emu_pmtxts_buf];
+const char* emu_cdc_take(void){ memcpy(emu_take_buf, emu_pmtxts_buf, sizeof emu_take_buf); emu_pmtxts_buf[0] = 0; return emu_take_buf; }
+void emu_cdc_busy_next(int n){ emu_cdc_busy = n; }
+void emu_usb_host(int on){ hUsbDeviceFS.dev_state = on ? USBD_STATE_CONFIGURED : USBD_STATE_DEFAULT; }
+/* One pass of the firmware's own dimmer loop — the DAC DMA half-buffer callback: sensor -> BS curve ->
+ * smoothed rail. The emulator never runs it by itself; checks call it to drive the real loop. */
+void emu_dac_step(void){ static uint16_t b[DAC_BUFFER_SIZE]; generateDACbuffer(b); }
+double emu_dac_target(void){ return (double)dac_target; }   /* the rail as stored: 0 brightest .. 4095 dimmest */
+/* colon_balance_poll() can't run here (NVIC isn't shimmed); set the applied scale it would land. */
+void emu_set_colon_scale(int v){ colonScale = (uint16_t)v; }
 /* Drive one $PMADEV emit from the current phase ring (whatever emu_adev_push has fed) and return the
  * sentence — the firmware's OWN adev_dump_step() formatting + NMEA checksum, byte-faithful. */
 const char* emu_adev_line(void){

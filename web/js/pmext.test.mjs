@@ -1,7 +1,7 @@
 // pmext parser conformance: fixed sentences (checksums computed here, so every case is
-// framing-exact) through parsePMSTAR / parsePMADEV. No hardware, no randomness.
+// framing-exact) through parsePMSTAR / parsePMADEV / parsePMBRIT. No hardware, no randomness.
 // Run: `node web/js/pmext.test.mjs`.
-import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=1';
+import { parsePMSTAR, parsePMADEV, parsePMBRIT } from './pmext.mjs?v=2';
 
 let pass = 0, fail = 0;
 const ok = (name, cond, extra = '') => { if (cond) { pass++; console.log(`  ok   ${name}`); } else { fail++; console.log(`  FAIL ${name} ${extra}`); } };
@@ -51,6 +51,27 @@ ok('PMADEV corrupt checksum → null', parsePMADEV(ADEV.slice(0, -2) + '00') ===
 ok('PMADEV noct=4 but 3 sigmas → null', parsePMADEV(frame('PMADEV,1767225600,1,512,4,1e-10,2e-10,3e-10')) === null);
 ok('PMADEV non-numeric sigma → null', parsePMADEV(frame('PMADEV,1767225600,1,512,1,zap')) === null);
 ok('PMADEV tau0=0 → null', parsePMADEV(frame('PMADEV,1767225600,0,512,1,1e-10')) === null);
+
+// 6. $PMBRIT — the three sources, and the bounds each field carries.
+const BRIT = frame('PMBRIT,400,666,A,21,256');
+const b = parsePMBRIT(BRIT);
+ok('PMBRIT parses', b && j(b) === j({ adc: 400, dac: 666, src: 'A', segk: 21, colon: 256 }), j(b));
+ok('PMBRIT manual', j(parsePMBRIT(frame('PMBRIT,3800,2048,M,0,256'))) === j({ adc: 3800, dac: 2048, src: 'M', segk: 0, colon: 256 }));
+ok('PMBRIT standby', j(parsePMBRIT(frame('PMBRIT,12,0,S,0,0'))) === j({ adc: 12, dac: 0, src: 'S', segk: 0, colon: 0 }));
+ok('PMBRIT extremes accepted', !!parsePMBRIT(frame('PMBRIT,4095,4095,A,300,256')) && !!parsePMBRIT(frame('PMBRIT,0,0,A,0,0')));
+ok('PMBRIT trailing CRLF tolerated', !!parsePMBRIT(BRIT + '\r\n'));
+
+// 7. $PMBRIT rejections.
+ok('PMBRIT corrupt checksum → null', parsePMBRIT(BRIT.slice(0, -2) + '00') === null);
+ok('PMBRIT adc 4096 → null', parsePMBRIT(frame('PMBRIT,4096,666,A,21,256')) === null);
+ok('PMBRIT dac 4096 → null', parsePMBRIT(frame('PMBRIT,400,4096,A,21,256')) === null);
+ok('PMBRIT segk 301 → null', parsePMBRIT(frame('PMBRIT,400,666,A,301,256')) === null);
+ok('PMBRIT colon 257 → null', parsePMBRIT(frame('PMBRIT,400,666,A,21,257')) === null);
+ok('PMBRIT src X → null', parsePMBRIT(frame('PMBRIT,400,666,X,21,256')) === null);
+ok('PMBRIT negative → null', parsePMBRIT(frame('PMBRIT,400,-1,A,21,256')) === null);
+ok('PMBRIT field missing → null', parsePMBRIT(frame('PMBRIT,400,666,A,21')) === null);
+ok('PMBRIT extra field → null', parsePMBRIT(frame('PMBRIT,400,666,A,21,256,9')) === null);
+ok('PMBRIT not-my-sentence → null', parsePMBRIT(ADEV) === null);
 
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'} — ${pass} ok, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

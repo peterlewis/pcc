@@ -167,6 +167,10 @@ MODE_ZONE2 = disabled
 nmea = off
 # Emit a $PMTXTS PPS-edge timing sentence for host-side jitter/drift analysis
 pps = off
+# Report the auto-dimmer once a second as $PMBRIT: the ambient light reading, the brightness it
+# chose (BSn scale), what chose it (A auto, M manual, S standby) and the balance values that
+# follow it. PCC Web asks for it when it connects; left commented, a config reload won't stop it.
+#brightness_report = on
 `;
 
 // --- config.txt grammar (mirrors the firmware): `key = value`, `#`/`;` comments, case-insensitive

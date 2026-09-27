@@ -334,7 +334,8 @@
             <!-- FACE — a CONTROL module (Law 2, depth 2): everything here is operable, so nothing
                  here sits on the panel face except the LED BALANCE read-back, which the device
                  wrote and therefore goes in a well. AMBIENT lives with the controls because it
-                 commands the emulator's phototransistor; it is an input, not a reading. -->
+                 commands the emulator's phototransistor; it is an input, not a reading — except
+                 from a connected clock, whose own reading ($PMBRIT) the disabled slider shows. -->
             <section class="mod">
                 <div class="mod__strip">
                   <span>FACE</span>
@@ -386,10 +387,10 @@
                       <div class="kv"><span class="kv__k">Per-segment</span><span class="kv__v">{{balSeg}}</span></div>
                       <div class="kv"><span class="kv__k">Colon</span><span class="kv__v">{{balColon}}</span></div>
                     </div>
-                    <span class="meta meta--wide">CURRENT-SHARING COMPENSATION · OFF / AUTO / MANUAL STRENGTH · SET VIA config.txt OR MENU</span>
+                    <span class="meta meta--wide">{{balNote}}</span>
                   </div>
                 </div>
-                <div class="mod__legend">Ambient is an emulator input, not a hardware reading. Gamma shapes this app's face and is never transmitted.</div>
+                <div class="mod__legend">Ambient drives the emulator's sensor; a connected clock reports its own in $PMBRIT. Gamma shapes this app's face and is never transmitted.</div>
               </section>
 
             <section class="mod" style="grid-column:1/-1;max-width:1000px">
@@ -1860,6 +1861,6 @@
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=286"></script>
+<script type="module" src="js/app-controller.js?v=287"></script>
 </body>
 </html>

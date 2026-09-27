@@ -45,6 +45,7 @@ addToLibrary({
   HAL_TIM_PWM_ConfigChannel: function(){ return 0; },
   HAL_TIM_PWM_Init: function(){ return 0; },
   HAL_TIM_PWM_Start: function(){ return 0; },
+  HAL_TIM_PWM_Stop: function(){ return 0; },
   HAL_TIMEx_MasterConfigSynchronization: function(){ return 0; },
   HAL_UART_AbortTransmit: function(){ return 0; },
   HAL_UART_Init: function(){ return 0; },

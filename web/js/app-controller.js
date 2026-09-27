@@ -8,8 +8,8 @@ import * as DS from './datasources.js?v=90';
 import { TelemetryLog } from './telemetrylog.js?v=4';
 import { prepReview, drawReview, sampleAt, tAtX } from './review.js?v=1';
 import { subSatellitePoint } from './satpass.js?v=1';
-import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=1';
-import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=6';
+import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=2';
+import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=7';
 import { REC as PF_REC, RANGE as PF_RANGE, modelStream, runPrefilter } from './prefilter.mjs?v=2';
 
 // config.txt is the single source of truth: the clock-behaviour defaults (enabled modes, colon,
@@ -114,7 +114,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=110'), import('./realdev.js?v=117'), import('./emu-driver.js?v=38'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=2')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=110'), import('./realdev.js?v=118'), import('./emu-driver.js?v=39'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=2')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.SB = SB;
       try { localStorage.removeItem('pccweb.cuckoo'); } catch (e) {}   // parked feature's persisted setting — clear the ghost
       this.session = SIM.createSession({ preroll: 1560 });
@@ -2017,16 +2017,37 @@ class Component extends DcLite {
     }
     return '';
   }
-  // The operating point to mark on the curve: the ambient code the emulator's phototransistor is
-  // reading, through the firmware's own lookup. Real hardware reports neither ADC nor DAC on the
-  // wire (no $PM sentence carries them), and a manual override bypasses the curve altogether — in
-  // both cases the plot shows no operating point rather than a plausible one. The override is read
-  // from the firmware, not from the checkbox, so the mark can never contradict the clock.
+  // The operating point to mark on the curve. In simulation: the ambient code the emulator's
+  // phototransistor is reading, through the firmware's own lookup. Connected: the clock's own report
+  // ($PMBRIT) — the code its sensor read and the rail its loop chose, so the mark sits on the curve the
+  // clock is RUNNING, which is not necessarily the one being edited here until it is applied. A manual
+  // override or standby bypasses the curve altogether, and firmware without brightness_report says
+  // nothing — in those cases the plot shows no operating point rather than a plausible one. The source
+  // is read from the firmware, not from the checkbox, so the mark can never contradict the clock.
   dacLive() {
-    if (!this.emu || !this.CH || this.appMode() === 'connected') return null;
+    if (!this.CH) return null;
+    if (this.appMode() === 'connected') {
+      const b = this.brightLive();
+      return b && b.src === 'A' ? { adc: b.adc, dac: b.dac } : null;
+    }
+    if (!this.emu) return null;
     if (this.emu.brightnessOverride && this.emu.brightnessOverride() >= 0) return null;
     const adc = this.state.ambientAdc;
     return { adc, dac: this.CH.dacAt(this.state.dacCurve, adc) };
+  }
+  // The connected clock's dimmer report — $PMBRIT at 1 Hz once asked (brightness_report = on) — or
+  // null when there is none to trust: not connected, firmware without the key, or a stream that has
+  // stopped (three missed seconds, the rack's own 'live' horizon).
+  brightLive() {
+    if (this.appMode() !== 'connected') return null;
+    const b = this.session && this.session.S && this.session.S.bright;
+    return b && Date.now() - b.at < 3000 ? b : null;
+  }
+  // Connected long enough that a first $PMBRIT is overdue (it follows the connect-time request within
+  // a second), so its absence says something about the firmware rather than the link coming up.
+  brightOverdue() {
+    const S = this.session && this.session.S;
+    return !!(this.appMode() === 'connected' && S && S.realConnectedAt && Date.now() - S.realConnectedAt > 5000);
   }
   // Firmware brightness-curve keys. PLAIN human DAC value — the firmware stores 4095−value
   // internally (invert=1); do NOT pre-invert here (survey must-do #1).
@@ -2817,6 +2838,7 @@ class Component extends DcLite {
     const standby = mode === 'standby';
     const sim = mode === 'simulation';
     const dash = '—';
+    const bl = this.brightLive();
 
     // 1 · SIGNIFICANT TO — the finest digit that is still true, and its 3σ bound.
     const P = { P3: ['1', 'ms'], P2: ['10', 'ms'], P1: ['0.1', 's'], P0: ['1', 's'] };
@@ -2870,8 +2892,14 @@ class Component extends DcLite {
       // curve owns it. (The old read of st.brightnessFixed was never assigned anywhere in the repo,
       // so this cell said AUTO even while locked; and 'live' was hard-coded, claiming device
       // provenance in standby. It now states the same three states as SOURCE, its neighbour.)
-      rkBrtV: Math.round((st.brightness != null ? st.brightness : 0) * 100),
-      rkBrtS: st.brightLock ? ('FIXED · ' + (st.brightSrc === 'config' ? 'config.txt' : 'SLIDER')) : 'AUTO · AMBIENT',
+      // A connected clock that reports its dimmer ($PMBRIT) replaces the number with the rail it is
+      // actually on, as a percentage of the BS scale, and says what put it there. A manual override
+      // the app did not set came from the clock itself (its config.txt, or BRIGHT in its menu).
+      rkBrtV: bl ? Math.round(bl.dac / 4095 * 100) : Math.round((st.brightness != null ? st.brightness : 0) * 100),
+      rkBrtS: bl && bl.src === 'A' ? 'AUTO · AMBIENT ' + bl.adc
+        : bl && bl.src === 'S' ? 'STANDBY · DISPLAY OFF'
+        : bl && !st.brightLock ? 'FIXED · ON THE CLOCK'
+        : st.brightLock ? ('FIXED · ' + (st.brightSrc === 'config' ? 'config.txt' : 'SLIDER')) : 'AUTO · AMBIENT',
       rkBrtSt: sim ? 'sim' : standby ? 'absent' : 'live',
 
       rkZoneV: zoneV, rkZoneS: zoneS, rkZoneSt: 'live',
@@ -2920,6 +2948,7 @@ class Component extends DcLite {
     const _pl = _mode === 'standby' ? 'NO FIX'
       : 'RES ' + (this.emu && this.emu.precision ? (_RES[this.emu.precision().level] || '1 s') : (_RES['P' + st.precision] || '1 s'));
     const _dispName = _mode === 'standby' ? 'SYSTEM TIME' : (st.standby ? 'STANDBY' : (names[em.m] || em.m.toUpperCase()));
+    const _bl = this.brightLive();   // a connected clock's own rail, when it reports one
     const acc = st.accessoryOpen || {};
     return {
       // Accessory tier (Move 5) — disclosure toggles + live glance summaries for the folded panels.
@@ -2931,7 +2960,7 @@ class Component extends DcLite {
       accStatDs: (st.dataSources && st.dataSources.length) ? (st.dataSources.length + ' SOURCE' + (st.dataSources.length === 1 ? '' : 'S')) : 'NONE',
       accTogWx: () => this.toggleAccessory('weather'), accOpenWx: acc.weather ? 'true' : 'false', accChevWx: acc.weather ? '▾' : '▸',
       accStatWx: st.wxOffline ? 'UNAVAILABLE' : 'AT FIX',
-      faceStatusLine: _modeLbl + ' · ' + _dispName + ' · BRT ' + Math.round(st.brightness * 100) + '% · ' + _pl + ' · ' + (st.utc ? 'UTC' : 'LOCAL'),
+      faceStatusLine: _modeLbl + ' · ' + _dispName + ' · BRT ' + (_bl ? Math.round(_bl.dac / 4095 * 100) : Math.round(st.brightness * 100)) + '% · ' + _pl + ' · ' + (st.utc ? 'UTC' : 'LOCAL'),
       // ---- THE RACK (Law 1) — the six numbers FACE is accountable for. These values all existed
       // already; five of them were being crammed into faceStatusLine at 9.5px. Promoting them to
       // cells is what lets the tutorial prose below be deleted rather than merely shortened.
@@ -3084,14 +3113,22 @@ class Component extends DcLite {
         if (this.session && this.session.log) this.session.log('tx', 'holdover tolerances: ' + t1 + ' / ' + t10 + ' / ' + t100 + ' s');
       },
       brightVal: Math.round(st.brightness * 100), brightPctLabel: Math.round(st.brightness * 100) + '%',
-      // AMBIENT (TEST) — the phototransistor code fed to the emulator, which is the only honest
-      // source of an operating point: no $PM sentence carries ADC or DAC, so a connected clock has
-      // no ambient to report and the control says so instead of pretending to command one.
-      ambientVal: st.ambientAdc, ambientLabel: st.ambientAdc + ' / 4095',
-      ambientDisabled: this.appMode() === 'connected',
-      ambientNote: this.appMode() === 'connected'
-        ? 'NO TELEMETRY FROM HARDWARE'
-        : 'FED TO THE EMULATOR PHOTOTRANSISTOR (ADC1_IN10)',
+      // AMBIENT (TEST) — in simulation, the phototransistor code fed to the emulator. A connected
+      // clock cannot be commanded, but firmware with brightness_report sends its own sensor reading
+      // ($PMBRIT), so the disabled control becomes a read-out of it. Without that the clock has no
+      // ambient to report, and the control says so instead of pretending to know one.
+      ...(() => {
+        const conn = this.appMode() === 'connected', b = this.brightLive();
+        return {
+          ambientVal: b ? b.adc : st.ambientAdc,
+          ambientLabel: (b ? b.adc : conn ? '—' : st.ambientAdc) + ' / 4095',
+          ambientDisabled: conn,
+          ambientNote: !conn ? 'FED TO THE EMULATOR PHOTOTRANSISTOR (ADC1_IN10)'
+            : b ? 'MEASURED BY THE CLOCK · $PMBRIT'
+            : this.brightOverdue() ? 'NO $PMBRIT FROM THIS CLOCK · NEEDS FIRMWARE WITH brightness_report'
+            : 'WAITING FOR $PMBRIT',
+        };
+      })(),
       onAmbient: (e) => {
         const v = Math.max(0, Math.min(4095, (+e.target.value) | 0));
         this.setState({ ambientAdc: v });
@@ -3099,9 +3136,25 @@ class Component extends DcLite {
         this.drawChart('dacCurve');
       },
       // LED balance calibration read-back (#16): the seg/colon brightness equalisation was applied
-      // blind — surface the firmware's actual state (OFF / AUTO / manual strength) here.
-      balSeg: this.emu && this.emu.balanceState ? this.emu.balanceState().seg : '—',
-      balColon: this.emu && this.emu.balanceState ? this.emu.balanceState().colon : '—',
+      // blind — surface the firmware's actual state here. The emulator reports its settings (OFF /
+      // AUTO / manual strength). A connected clock reports what they are doing right now ($PMBRIT):
+      // the strength applied at this rail and the colon scale, of 256. The emulator's settings are not
+      // the clock's, so without that report there is nothing honest to show.
+      ...(() => {
+        if (this.appMode() !== 'connected') {
+          const bs = this.emu && this.emu.balanceState ? this.emu.balanceState() : null;
+          return { balSeg: bs ? bs.seg : '—', balColon: bs ? bs.colon : '—',
+            balNote: 'CURRENT-SHARING COMPENSATION · OFF / AUTO / MANUAL STRENGTH · SET VIA config.txt OR MENU' };
+        }
+        const b = this.brightLive(), dark = b && b.src === 'S';
+        return {
+          balSeg: !b ? '—' : dark ? 'DISPLAY OFF' : b.segk ? String(b.segk) : 'OFF',
+          balColon: !b ? '—' : dark ? 'DISPLAY OFF' : b.colon + ' / 256',
+          balNote: b ? 'LIVE FROM THE CLOCK · STRENGTH AT THIS RAIL · COLON SCALE OF 256'
+            : this.brightOverdue() ? 'NO READ-BACK FROM THIS CLOCK · NEEDS FIRMWARE WITH brightness_report'
+            : 'WAITING FOR $PMBRIT',
+        };
+      })(),
       // The slider always drives the on-screen face. It reaches the clock and the emulator only
       // while LOCK is on — that is what the override means, and moving a slider that the sensor is
       // about to overrule would be a control with no effect.
