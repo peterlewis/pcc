@@ -561,6 +561,13 @@ int emu_cuckoo_level(int d, int s){
   (void)d; (void)s; return 16;
 #endif
 }
+int emu_cuckoo_setting(void){   /* the `cuckoo` config value (CK_OFF..), -1 without the feature */
+#if EMU_HAS_CUCKOO
+  return (int)cuckoo;
+#else
+  return -1;
+#endif
+}
 void emu_cuckoo_set(int anim, int op){
 #if EMU_HAS_CUCKOO
   if (anim >= 0 && anim < CK_PIECES) cuckoo = (uint8_t)anim;   /* 0 off, 1 trust (shipped catalogue) */
@@ -648,6 +655,13 @@ void emu_usb_host(int on){ hUsbDeviceFS.dev_state = on ? USBD_STATE_CONFIGURED :
 /* One pass of the firmware's own dimmer loop — the DAC DMA half-buffer callback: sensor -> BS curve ->
  * smoothed rail. The emulator never runs it by itself; checks call it to drive the real loop. */
 void emu_dac_step(void){ static uint16_t b[DAC_BUFFER_SIZE]; generateDACbuffer(b); }
+int  emu_brit_report(void){   /* the switch itself: serial, config or SYS > BRT MSG; -1 without it */
+#if EMU_HAS_BRIT
+  return brightness_report;
+#else
+  return -1;
+#endif
+}
 double emu_dac_target(void){ return (double)dac_target; }   /* the rail as stored: 0 brightest .. 4095 dimmest */
 /* colon_balance_poll() can't run here (NVIC isn't shimmed); set the applied scale it would land. */
 void emu_set_colon_scale(int v){ colonScale = (uint16_t)v; }

@@ -7,9 +7,10 @@
 //     (file offsets 0x0000 and 0x1000), 64 slots of 64-byte records each. (Sectors 2–3 hold the
 //     independent tempcomp store, magic "MK4T" — not parsed here; tc read-back has $PMTXTC.)
 //   · Record layout (little-endian):  0 magic u32 "MK4E" | 4 gen u32 | 8 schema u16 | 10 fdate u16 |
-//     12 ftime u16 | 14 simple_mask u16 | 16 modes_mask u32 | 20 modes_val u32 | 24 brightness i16 |
+//     12 ftime u16 | 14 simple_mask u16 | 16 modes_mask_lo u32 | 20 modes_val_lo u32 | 24 brightness i16 |
 //     26 colon u8 | 27 alt_colon u8 | 28 page_ms u16 | 30 sig_fade u8 | 31 pps u8 | 32 nmea u8 |
-//     33 matrix_freq u32 | 37 tc u8 | 38 bal u8 | 39..61 rsvd | 62 crc16.
+//     33 matrix_freq u32 | 37 tc u8 | 38 bal u8 | 39 cuckoo u8 | 40 modes_mask_hi u32 |
+//     44 modes_val_hi u32 | 48 brit u8 | 49..61 rsvd | 62 crc16.
 //   · CRC-16-CCITT (poly 0x1021, init 0xFFFF) over bytes 0..61; the winner is the highest-generation
 //     record that passes magic + schema + CRC (a torn write self-rejects, exactly like ee_scan).
 //   · MERGE RULE (menu_apply_overrides): an override applies iff the key was menu-set AND
@@ -35,12 +36,15 @@ export const KIDS = [
   { kid: 8, id: 'matrixFreq', label: 'MATRIX', cfgKeys: ['matrix_frequency'] },
   { kid: 9, id: 'tempcomp', label: 'TEMPCOMP', cfgKeys: ['tc_learn', 'tc_apply', 'tc_persist'] },
   { kid: 10, id: 'balance', label: 'LED BALANCE', cfgKeys: ['seg_balance', 'colon_balance'] },
+  { kid: 12, id: 'cuckoo', label: 'CUCKOO', cfgKeys: ['cuckoo'] },
+  { kid: 13, id: 'brit', label: 'DIMMER REPORT', cfgKeys: ['brightness_report'] },
 ];
 
 // Display-name tables (enum order from main.h — used to render values, and to synthesize the
 // config-equivalent value when merging an override into PCC's parsed-config object).
 export const COLON_NAMES = ['slowfade', 'heartbeat', 'sawtooth', 'alt_sawtooth', 'toggle', 'solid'];
 export const NMEA_NAMES = ['all', 'rmc', 'off'];   // NMEA_ALL=0, NMEA_RMC, NMEA_NONE
+export const CUCKOO_NAMES = ['off', 'trust'];      // CK_OFF=0, CK_TRUST
 
 // Every MODE_* enum name (main.h). Consumers must NOT trust this order — resolve each name to its
 // ordinal through the emulator's modeId export at runtime (the emu IS the firmware, so the mapping
@@ -87,15 +91,17 @@ export function parseSettingsBin(buf) {
   out.gen = best.gen;
   out.stamp = { fdate: dv.getUint16(o + 10, true), ftime: dv.getUint16(o + 12, true) };
   out.simpleMask = dv.getUint16(o + 14, true);
-  out.modesMask = dv.getUint32(o + 16, true) >>> 0;
-  out.modesVal = dv.getUint32(o + 20, true) >>> 0;
+  // Mode masks are u64 (MODE_ZONE2 is ordinal 33): low words at 16/20, high words at 40/44.
+  const u64 = (lo, hi) => (BigInt(dv.getUint32(o + hi, true)) << 32n) | BigInt(dv.getUint32(o + lo, true));
+  out.modesMask = u64(16, 40);
+  out.modesVal = u64(20, 44);
   out.fields = {
     brightness: dv.getInt16(o + 24, true),
     colon: u8[o + 26], colonAlt: u8[o + 27],
     pageMs: dv.getUint16(o + 28, true),
     sigFade: u8[o + 30], pps: u8[o + 31], nmea: u8[o + 32],
     matrixFreq: dv.getUint32(o + 33, true) >>> 0,   // unaligned — DataView handles it
-    tempcomp: u8[o + 37], balance: u8[o + 38],
+    tempcomp: u8[o + 37], balance: u8[o + 38], cuckoo: u8[o + 39], brit: u8[o + 48],
   };
   return out;
 }
@@ -152,6 +158,8 @@ export function winningOverrides(parsed, cfgText, cfgMtimeMs, modeName) {
     matrixFreq: () => `${(f.matrixFreq / 1000).toFixed(f.matrixFreq % 1000 ? 1 : 0)} KHZ`,
     tempcomp: () => (f.tempcomp ? 'ARMED (LEARN+APPLY+PERSIST)' : 'OFF'),
     balance: () => (f.balance ? 'AUTO (SEG+COLON)' : 'OFF'),
+    cuckoo: () => (CUCKOO_NAMES[f.cuckoo] || `#${f.cuckoo}`).toUpperCase(),
+    brit: () => (f.brit ? 'ON ($PMBRIT)' : 'OFF'),
   };
   const entries = [];
   for (const k of KIDS) {
@@ -160,11 +168,37 @@ export function winningOverrides(parsed, cfgText, cfgMtimeMs, modeName) {
     entries.push({ id: k.id, label: k.label, value: fmt[k.id](), wins: !cfgHasIt || stampOk, cfgHasIt });
   }
   const modes = [];
-  for (let m = 0; m < 32; m++) {
-    if (!(parsed.modesMask & (1 << m))) continue;
+  for (let m = 0; m < 64; m++) {
+    if (!((parsed.modesMask >> BigInt(m)) & 1n)) continue;
     const name = (modeName && modeName(m)) || `MODE #${m}`;
     const cfgHasIt = def.modeKeys.has(name);
-    modes.push({ ordinal: m, name, on: !!((parsed.modesVal >> m) & 1), wins: !cfgHasIt || stampOk, cfgHasIt });
+    modes.push({ ordinal: m, name, on: !!((parsed.modesVal >> BigInt(m)) & 1n), wins: !cfgHasIt || stampOk, cfgHasIt });
   }
   return { stampOk, stamp: parsed.stamp, gen: parsed.gen, entries, modes };
+}
+
+/// The menu's stored values as config.txt `key = value` pairs, for transposing into the editor: one
+/// entry per menu-set key (bundles expand to every key they cover), then the menu-set modes. A null
+/// value means the menu holds AUTO brightness, which config.txt spells by leaving the key out. Values
+/// are in config.txt's own units — BRIGHT is stored as the rail (0 brightest), and `brightness = N` is
+/// read inverted, so the line carries 4095 - N.
+export function menuToConfigLines(parsed, ovr) {
+  if (!parsed || !parsed.found) return [];
+  const f = parsed.fields;
+  const has = (id) => { const k = KIDS.find((x) => x.id === id); return !!(k && (parsed.simpleMask & (1 << k.kid))); };
+  const kv = [];
+  if (has('brightness')) kv.push(['brightness', f.brightness < 0 ? null : String(4095 - f.brightness)]);
+  if (has('colon')) kv.push(['colon_mode', COLON_NAMES[f.colon] || 'slowfade']);
+  if (has('colonAlt')) kv.push(['colon_alt_mode', COLON_NAMES[f.colonAlt] || 'slowfade']);
+  if (has('pageMs')) kv.push(['page_ms', String(f.pageMs)]);
+  if (has('sigFade')) kv.push(['significance_fade', f.sigFade ? 'on' : 'off']);
+  if (has('pps')) kv.push(['pps', f.pps ? 'on' : 'off']);
+  if (has('nmea')) kv.push(['nmea', NMEA_NAMES[f.nmea] || 'all']);
+  if (has('matrixFreq')) kv.push(['matrix_frequency', String(f.matrixFreq)]);
+  if (has('tempcomp')) { const v = f.tempcomp ? 'on' : 'off'; kv.push(['tc_learn', v], ['tc_apply', v], ['tc_persist', v]); }
+  if (has('balance')) { const v = f.balance ? 'on' : 'off'; kv.push(['seg_balance', v], ['colon_balance', v]); }
+  if (has('cuckoo')) kv.push(['cuckoo', CUCKOO_NAMES[f.cuckoo] || 'off']);
+  if (has('brit')) kv.push(['brightness_report', f.brit ? 'on' : 'off']);
+  for (const m of (ovr ? ovr.modes : [])) kv.push([m.name, m.on ? 'on' : 'off']);
+  return kv;
 }

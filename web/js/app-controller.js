@@ -114,7 +114,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=110'), import('./realdev.js?v=119'), import('./emu-driver.js?v=39'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=2')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=110'), import('./realdev.js?v=119'), import('./emu-driver.js?v=40'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=3')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.SB = SB;
       try { localStorage.removeItem('pccweb.cuckoo'); } catch (e) {}   // parked feature's persisted setting — clear the ghost
       this.session = SIM.createSession({ preroll: 1560 });
@@ -3499,21 +3499,7 @@ class Component extends DcLite {
       onMenuOvrMerge: () => {
         const p = this._menuOvrParsed, ovr = this._menuOvr, SB = this.SB;
         if (!p || !ovr || !SB || !this.els.cfgEditor) return;
-        const f = p.fields;
-        const kidOf = (id) => (SB.KIDS.find((k) => k.id === id) || {}).kid;
-        const has = (id) => !!(p.simpleMask & (1 << kidOf(id)));
-        const kv = [];   // [key, value|null]; null = menu says AUTO → the key must be ABSENT (comment out only)
-        if (has('brightness')) kv.push(['brightness', f.brightness < 0 ? null : String(f.brightness)]);
-        if (has('colon')) kv.push(['colon_mode', SB.COLON_NAMES[f.colon] || 'slowfade']);
-        if (has('colonAlt')) kv.push(['colon_alt_mode', SB.COLON_NAMES[f.colonAlt] || 'slowfade']);
-        if (has('pageMs')) kv.push(['page_ms', String(f.pageMs)]);
-        if (has('sigFade')) kv.push(['significance_fade', f.sigFade ? 'on' : 'off']);
-        if (has('pps')) kv.push(['pps', f.pps ? 'on' : 'off']);
-        if (has('nmea')) kv.push(['nmea', SB.NMEA_NAMES[f.nmea] || 'all']);
-        if (has('matrixFreq')) kv.push(['matrix_frequency', String(f.matrixFreq)]);
-        if (has('tempcomp')) { const v = f.tempcomp ? 'on' : 'off'; kv.push(['tc_learn', v], ['tc_apply', v], ['tc_persist', v]); }
-        if (has('balance')) { const v = f.balance ? 'on' : 'off'; kv.push(['seg_balance', v], ['colon_balance', v]); }
-        for (const m of ovr.modes) kv.push([m.name, m.on ? 'on' : 'off']);
+        const kv = SB.menuToConfigLines(p, ovr);   // [key, value|null]; null = menu says AUTO → the key must be ABSENT (comment out only)
         if (!kv.length) return;
         const keys = new Set(kv.map(([k]) => k.toLowerCase()));
         const lines = this.els.cfgEditor.value.split(/\r?\n/).map((ln) => {

@@ -4,7 +4,8 @@
 // and the sentence is paced by the firmware's own main-loop poll, then read back through the app's
 // own parser. Covers: off by default and after a reboot; framing + checksum; AUTO on the baked
 // VTT9812FH curve and its settling; manual override; standby; the balance values that follow the
-// rail; 1 Hz pacing; the retry on a BUSY endpoint; and the silent drop with no USB host.
+// rail; 1 Hz pacing; the retry on a BUSY endpoint; the silent drop with no USB host; and the
+// SYS > BRT MSG menu row — beside PPS MSG, stored like it, with config.txt keeping precedence.
 // Run: node brit_check.mjs   (from phase1/, after build.sh)
 import factory from '../clock-fw.mjs';
 import { parsePMBRIT } from '../../js/pmext.mjs';
@@ -31,6 +32,14 @@ const E = {
   dacStep: w('emu_dac_step'),
   dacTarget: w('emu_dac_target', 'number'),
   setColonScale: w('emu_set_colon_scale', 'void', ['number']),
+  britReport: w('emu_brit_report', 'number'),
+  menuEvent: w('emu_menu_event', 'void', ['number']),
+  menuLayer: w('emu_menu_layer', 'number'), menuSection: w('emu_menu_section', 'number'),
+  daterow: w('emu_daterow', 'number'),
+  eeReset: w('emu_ee_reset'), eeCommit: w('emu_ee_commit', 'number'), eeLoad: w('emu_ee_load'),
+  eeApply: w('emu_ee_apply'), ovrClear: w('emu_ovr_clear'),
+  setMtime: w('emu_set_mtime', 'void', ['number', 'number']),
+  cfgDefined: w('emu_cfg_defined', 'void', ['number', 'number']),
 };
 
 const results = [];
@@ -223,6 +232,50 @@ E.configLine('brightness_report = 1');
 check('brightness_report = 1 is truthy', drive(1000).length === 1);
 boot();
 check('reboot: back off (the switch is power-on state, not persisted)', drive(3000).length === 0);
+
+// 12. SYS > BRT MSG: the on-device row for the same switch. It sits right after PPS MSG, renders its
+//     state whole (the label trims, as PPS MSG's does), is recorded in the menu store as KID 13, is
+//     restored at boot, and yields to a config.txt that sets brightness_report — the usual rule.
+{
+  const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95 };
+  const SEC_SYS = 4, KID_BRIT = 13;
+  const row = () => { const p = E.daterow(); let s = ''; for (let i = 1; i <= 10; i++) { const c = M.HEAPU8[p + i]; if (c < 32 || c > 126) break; s += String.fromCharCode(c); } return s.trimEnd(); };
+  const ev = (e) => E.menuEvent(e);
+  const toL0 = () => { for (let i = 0; i < 6 && E.menuLayer() !== 0; i++) { ev(EVT.S2); ev(EVT.REL); } };
+  const toSys = () => { ev(EVT.S1); ev(EVT.REL); for (let g = 0; E.menuSection() !== SEC_SYS && g < 8; g++) ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL); };
+  const seek = (prefix) => { for (let h = 0; !row().startsWith(prefix) && h < 14; h++) ev(EVT.BTN1); return row().startsWith(prefix); };
+  boot();
+  toSys();
+  if (!seek('BRT')) {
+    console.log('SKIP  SYS > BRT MSG — this firmware has no BRT MSG row (it arrives with the menu tier)');
+  } else {
+    const off = row();
+    ev(EVT.BTN2);
+    const before = row();
+    ev(EVT.BTN1);
+    check('menu: BRT MSG is the SYS row right after PPS MSG', before.startsWith('PPS MS') && row() === off, `${before} -> ${off}`);
+    check('menu: the row reads "BRT MS OFF" (label trims so the state stays whole, like PPS MSG)', off === 'BRT MS OFF', off);
+    E.eeReset(); E.setMtime(0x5AA5, 0x1234); E.cfgDefined(0, 0);
+    ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL);   // EDIT, toggle ON, DONE (recorded)
+    check('menu: toggled on, the row reads "BRT MSG ON"', row() === 'BRT MSG ON', row());
+    check('menu: BRT MSG drives the same switch as brightness_report', E.britReport() === 1);
+    toL0();
+    const g = drive(1500);
+    check('menu: the switch it set paces $PMBRIT at 1 Hz', g.length === 1 || g.length === 2, `${g.length}`);
+    check('menu: the edit is committed to the store', E.eeCommit() === 1);
+    boot();   // power-on: the switch is .data again, off
+    check('menu: power-on starts with the switch off', E.britReport() === 0);
+    E.eeLoad(); E.eeApply();
+    check('menu: the stored BRT MSG is restored at boot', E.britReport() === 1);
+    boot(); E.eeLoad();
+    E.cfgDefined(1 << KID_BRIT, 0); E.setMtime(0x1111, 0x2222); E.eeApply();
+    check('menu: a config.txt that sets brightness_report, saved after the edit, wins', E.britReport() === 0);
+    boot(); E.eeLoad();
+    E.cfgDefined(1 << KID_BRIT, 0); E.setMtime(0x5AA5, 0x1234); E.eeApply();
+    check('menu: the same config.txt, unchanged since the edit, lets the menu win', E.britReport() === 1);
+    E.cfgDefined(0, 0); E.eeReset();
+  }
+}
 
 let all = true;
 for (const r of results) { if (!r.pass) all = false; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.x ? '  [' + r.x + ']' : ''}`); }

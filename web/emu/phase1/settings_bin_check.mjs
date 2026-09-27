@@ -12,7 +12,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 const _here = fileURLToPath(new URL('.', import.meta.url));
 const _tmp = mkdtempSync(join(tmpdir(), 'sbin-'));
 copyFileSync(join(_here, '../../js/settings-bin.js'), join(_tmp, 'settings-bin.mjs'));
-const { parseSettingsBin, winningOverrides, fatStamp, crc16ccitt, EE_MAGIC } =
+const { parseSettingsBin, winningOverrides, fatStamp, crc16ccitt, EE_MAGIC, MODE_NAMES, menuToConfigLines } =
   await import(pathToFileURL(join(_tmp, 'settings-bin.mjs')).href);
 
 const M = await factory();
@@ -26,8 +26,15 @@ const setBright = w('emu_set_brightness', 'void', ['number']);
 const eePeek = w('emu_ee_peek', 'number', ['number']);
 const eePoke = w('emu_ee_poke', 'void', ['number', 'number']);
 const modeId = w('emu_mode_id', 'number', ['string']);
+const configLine = w('emu_config_line', 'void', ['string']);
+const bright = w('emu_brightness', 'number');
+const britReport = w('emu_brit_report', 'number');
+const cuckooSetting = w('emu_cuckoo_setting', 'number');
+const modeEnabled = w('emu_mode_enabled', 'number', ['number']);
+const layer = w('emu_menu_layer', 'number');
+const rowPtr = w('emu_daterow', 'number');
 
-const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94 };
+const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95 };
 const SEC_DISP = 2;
 const secOf = w('emu_menu_section', 'number');
 
@@ -95,11 +102,7 @@ eePoke(tornOff + 24, img[tornOff + 24]);                        // restore
 
 // ---- (4) precedence verdicts mirror menu_apply_overrides ----------------------------------------
 p = parseSettingsBin(snapshot());
-const nameFor = (m) => {
-  for (const n of ['MODE_ISO8601_STD','MODE_ISO_ORDINAL','MODE_ISO_WEEK','MODE_UNIX','MODE_JULIAN_DATE','MODE_MODIFIED_JD','MODE_SHOW_OFFSET','MODE_SHOW_TZ_NAME','MODE_WEEKDAY','MODE_WEEKDA_DD','MODE_WDY_MM_DD','MODE_STANDBY','MODE_COUNTDOWN','MODE_SATVIEW','MODE_TEXT','MODE_VBAT','MODE_DISPLAYTEST','MODE_TTFF','MODE_SUN','MODE_SUN_AZEL','MODE_MOON','MODE_GRID','MODE_LATLON','MODE_TEMPCOMP','MODE_LST','MODE_SOLAR','MODE_ADEV','MODE_STAR'])
-    if (modeId(n) === m) return n;
-  return null;
-};
+const nameFor = (m) => MODE_NAMES.find((n) => modeId(n) === m) || null;
 // (a) config.txt does NOT define brightness → override wins regardless of stamp
 let v = winningOverrides(p, 'colon_mode = heartbeat\n', Date.now(), nameFor);
 let e = v.entries.find((x) => x.id === 'brightness');
@@ -123,6 +126,58 @@ check('config-defined + matching stamp → override wins', v.stampOk === true &&
 const rec = snapshot().subarray(0, 64);
 check('JS CRC16 matches the firmware CRC in record 0',
   crc16ccitt(rec, 62) === (rec[62] | (rec[63] << 8)));
+
+// ---- (6) the rest of the store: CUCKOO (KID 12, byte 39), BRT MSG (KID 13, byte 48) and a mode
+//      above ordinal 31 (ZONE2, whose bit lives in the u64 masks' high words at 40/44) --------------
+const row = () => { const q = rowPtr(); let t = ''; for (let i = 1; i <= 10; i++) { const c = M.HEAPU8[q + i]; if (c < 32 || c > 126) break; t += String.fromCharCode(c); } return t.trimEnd(); };
+const toL0 = () => { for (let i = 0; i < 6 && layer() !== 0; i++) { ev(EVT.S2); ev(EVT.REL); } };
+const SEC = { CAL: 0, DISP: 2, SYS: 4 };
+function setViaMenu(sec, prefix) {   // enter the section, find the row, EDIT, one step, DONE (recorded)
+  toL0();
+  ev(EVT.S1); ev(EVT.REL);
+  for (let g = 0; secOf() !== sec && g < 8; g++) ev(EVT.BTN1);
+  ev(EVT.S1); ev(EVT.REL);
+  for (let h = 0; !row().startsWith(prefix) && h < 16; h++) ev(EVT.BTN1);
+  const found = row().startsWith(prefix);
+  if (found) { ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL); }
+  toL0();
+  return found;
+}
+eeReset();
+setMtime(0x5aa5, 0x1234);
+setBright(0);
+configLine('MODE_ZONE2 = off');
+toL0(); editBrightViaMenu(); toL0();                           // BRIGHT 0 -> 256 (the rail: bright)
+check('menu has DISP > CUCKOO', setViaMenu(SEC.DISP, 'CUCKOO'));  // OFF -> TRUST
+check('menu has SYS > BRT MSG', setViaMenu(SEC.SYS, 'BRT'));      // off -> on
+check('menu has CAL > ZONE 2', setViaMenu(SEC.CAL, 'ZONE'));      // off -> on
+check('commit succeeds', eeCommit() === 1);
+p = parseSettingsBin(snapshot());
+const zone2 = modeId('MODE_ZONE2');
+check('CUCKOO: bit 12 set, byte 39 = TRUST', (p.simpleMask & (1 << 12)) !== 0 && p.fields.cuckoo === 1);
+check('BRT MSG: bit 13 set, byte 48 = on', (p.simpleMask & (1 << 13)) !== 0 && p.fields.brit === 1);
+check(`ZONE2 (ordinal ${zone2}) read from the high mask words`, zone2 >= 32 && ((p.modesMask >> BigInt(zone2)) & 1n) === 1n && ((p.modesVal >> BigInt(zone2)) & 1n) === 1n);
+v = winningOverrides(p, 'brightness_report = off\n', Date.now(), nameFor);
+const eb = v.entries.find((x) => x.id === 'brit'), ec = v.entries.find((x) => x.id === 'cuckoo');
+check('verdict rows: DIMMER REPORT = ON, CUCKOO = TRUST', eb && eb.label === 'DIMMER REPORT' && /^ON/.test(eb.value) && ec && ec.value === 'TRUST');
+check('config.txt that sets brightness_report, re-saved since → config wins', eb && eb.cfgHasIt === true && eb.wins === false);
+const mz = v.modes.find((x) => x.ordinal === zone2);
+check('ZONE2 verdict row names the mode', mz && mz.name === 'MODE_ZONE2' && mz.on === true);
+
+// ---- (7) MERGE INTO config.txt round-trips through the firmware's own parser ---------------------
+// Every transposed line, applied to a fresh boot with config.txt's parser, must leave the firmware
+// exactly where the menu left it. BRIGHT is the sharp case: stored as the rail (256 = bright), while
+// `brightness = N` is read inverted — so the line must carry 3839, not 256.
+const kv = menuToConfigLines(p, winningOverrides(p, '', Date.now(), nameFor));
+const kvb = kv.find(([k]) => k === 'brightness');
+check('brightness transposes as 4095 - rail (3839)', kvb && kvb[1] === '3839');
+bootCold(1783627200);
+configLine('brightness = '); configLine('brightness_report = off'); configLine('cuckoo = off'); configLine('MODE_ZONE2 = off');
+for (const [k, val] of kv) if (val != null) configLine(`${k} = ${val}`);
+check('round trip: BRIGHT lands on the stored rail (256)', bright() === 256);
+check('round trip: brightness_report on', britReport() === 1);
+check('round trip: cuckoo = trust', cuckooSetting() === 1);
+check('round trip: MODE_ZONE2 enabled', modeEnabled(zone2) === 1);
 
 const pass = results.filter((r) => r.pass).length;
 console.log(`${pass}/${results.length} ${pass === results.length ? 'ALL PASS' : 'FAILURES ABOVE'}`);
