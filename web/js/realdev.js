@@ -720,7 +720,7 @@ export function createRealDevice(session) {
 
             // A CONNECTED device: real+connected (mergeSats and the other writers gate on these) and
             // ingesting armed (ingestLine's guard). selfTest exercises the exact consume-a-real-device path.
-            const fake = { S: { real: true, connected: true, nmeaLog: [], fix: {}, sats: [], obs: { lat: 52.2053, lon: 0.1218, alt: 21.0 }, gtrails: new Map(), trails: new Map(), cn0Hist: new Map(), posHist: [], dopHist: [], fixHist: [] } };
+            const fake = { S: { real: true, connected: true, nmeaLog: [], fix: {}, sats: [], obs: { lat: 52.2053, lon: 0.1218, alt: 21.0 }, gtrails: new Map(), trails: new Map(), cn0Hist: new Map(), posHist: [], dopHist: [], fixHist: [], bins: new Set(), passes: 0, peakEl: 0, obsCount: 0 } };
             const rd = createRealDevice(fake); // isolated instance → its own GSVBuffer
             rd.beginIngest();                   // ingestLine now no-ops unless consuming (the connect guard) — arm it
 
@@ -748,13 +748,14 @@ export function createRealDevice(session) {
             });
 
             rd.ingestLine(GSV); // GSVBuffer flush is debounced; force it deterministically
-            // The onSatellites callback runs on a ~100ms timer — call the flush
-            // synchronously so selfTest returns without awaiting a timer.
-            if (typeof rd._flushGsvNow === 'function') rd._flushGsvNow();
-            else { /* fall through: assert after microtask below is not needed */ }
+            // The onSatellites callback runs on a ~100ms timer — flush synchronously in its place, so
+            // selfTest returns without awaiting and leaves no timer behind. A throw here is a real
+            // mergeSats failure (the fake state lacking a field the live one has), so report it.
+            let gsvErr = null;
+            try { rd._flushGsvNow(); } catch (e) { gsvErr = e; }
 
             const s0 = fake.S.sats[0] || {};
-            checks.push({ name: 'GSV sat count = 3', ok: fake.S.sats.length === 3, detail: `count=${fake.S.sats.length}` });
+            checks.push({ name: 'GSV sat count = 3', ok: fake.S.sats.length === 3, detail: gsvErr ? `mergeSats threw: ${gsvErr.message}` : `count=${fake.S.sats.length}` });
             checks.push({ name: 'GSV sat[0] has az/el/cn0', ok: Number.isFinite(s0.az) && Number.isFinite(s0.el) && Number.isFinite(s0.cn0), detail: `az=${s0.az} el=${s0.el} cn0=${s0.cn0}` });
             checks.push({ name: 'GSV sat[0] constellation GPS', ok: s0.constId === 'G' && s0.tok === 'gps', detail: `constId=${s0.constId} tok=${s0.tok}` });
             checks.push({ name: 'GSV sat[0] key formatted', ok: s0.key === 'G02', detail: `key=${s0.key}` });
@@ -804,8 +805,8 @@ export function createRealDevice(session) {
             return { pass, checks };
         },
 
-        // Test hook: force the GSV buffer to flush synchronously (bypass the
-        // debounce timer) so selfTest is deterministic without awaiting.
-        _flushGsvNow() { try { gsv._flush(); } catch { /* no frame yet */ } },
+        // Test hook: flush the GSV buffer synchronously in place of its debounce timer, which is
+        // cancelled so nothing fires later, making selfTest deterministic without awaiting.
+        _flushGsvNow() { clearTimeout(gsv._debounceTimer); gsv._debounceTimer = null; gsv._flush(); },
     };
 }
