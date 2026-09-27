@@ -7,7 +7,8 @@
 // Covers: commit a well-supported model -> "power cycle" (clear the RAM model, keep flash) -> the boot
 // seed sequence restores it as the live model; config.txt precedence (tc_seed = off wins); load-sanity
 // rejection of an implausible model; power-loss CRC fallback (torn newest record -> prior generation);
-// tc_forget erase; and the persist-worthiness gate (samples / coverage / residual).
+// tc_forget erase; the persist-worthiness gate (samples / coverage / residual); and a live config.txt
+// reload that must not roll the learned model back to the stored snapshot.
 // Run: node tc_persist_check.mjs   (from phase1/, after build.sh)
 import factory from '../clock-fw.mjs';
 
@@ -102,6 +103,18 @@ setModel(B, C, LO, HI, N, RES);
 check(`well-sampled model persist-worthy`, supported() === 1);
 setModel(B, C, 20, 22, N, RES);    // 2 °C coverage < 4
 check(`narrow-coverage model not persist-worthy`, supported() === 0);
+
+// (7) a live config.txt reload keeps what the clock has learned since boot. readConfigFile ends with the
+// same seed tail on every reload (flash seed -> apply -> after-seed); restoring the stored counts and
+// residual belongs to the boot pass only, or each edit of config.txt rolls the model back to the last
+// stored snapshot.
+ee2Reset(); cfgTcDef(0); persistSet(1);
+setModel(B, C, LO, HI, N, RES); ee2Commit();              // stored snapshot: residual 1.2 ppm
+clearModel(); persistSet(1); ee2Load(); seedBoot();       // power-up: seeded from flash
+check(`boot pass restores the stored residual (${tcProbe(7).toFixed(2)} ppm)`, approx(tcProbe(7), RES));
+setModel(B, C, LO, HI, N + 5000, 0.4);                    // learning since boot: more samples, tighter fit
+seedBoot();                                               // a config.txt edit -> readConfigFile -> same tail
+check(`live reload keeps the learned residual (${tcProbe(7).toFixed(2)} ppm, not the stored ${RES})`, approx(tcProbe(7), 0.4));
 
 let fail = 0;
 for (const r of results) { if (!r.pass) fail++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}`); }

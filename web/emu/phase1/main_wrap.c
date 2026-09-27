@@ -760,6 +760,10 @@ int emu_load_zone(const char* zone){
   setNextTimestamp(currentTime);
   return r;
 }
+/* One pass of the main loop's deferred FATFS loader (checkDelayedLoadRules): resolves a pending
+ * ZONE_OVERRIDE / zone2 IANA name against the registered /TZRULES.BIN. emu_poll doesn't run it, so
+ * checks call it where the hardware's main loop would. */
+void emu_check_delayed_rules(void){ checkDelayedLoadRules(); }
 /* The firmware's tz offset (seconds) that applies at epoch t — walks the loaded rules[] via the
  * real setNextTimestamp. */
 int emu_offset_at(unsigned t){ setNextTimestamp((time_t)t); return currentOffset; }

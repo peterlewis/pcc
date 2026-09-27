@@ -9,6 +9,7 @@
 // lives at ordinal 32, so this is the load-bearing proof the widened ee record works).
 // Run: node zone2_check.mjs   (from phase1/, after build.sh)
 import factory from '../clock-fw.mjs';
+import { readFileSync } from 'node:fs';
 
 const M = await factory();
 const w = (n, r = 'void', a = []) => M.cwrap(n, r, a);
@@ -100,5 +101,23 @@ check('MODE_ZONE2 bit-32 survived commit->wipe->reload->apply', modeEn(MODE_ZONE
 // and a mode BELOW the ceiling still round-trips (no regression from the split)
 recMode(4 /*MODE_JULIAN_DATE*/, 1); eeCommit(); ovrClear(); eeLoad(); eeApply();
 check('a low-ordinal mode still round-trips (no widen regression)', modeEn(4) === 1 && modeEn(MODE_ZONE2) === 1);
+
+// (d) an IANA name, the way config.txt's "zone2 = Europe/Madrid" reaches it on the clock: dashes while
+// the name waits for the main loop's deferred loader, then the zone's own DST rules from the real
+// /TZRULES.BIN (the file the CLOCK drive carries) — CEST (UTC+2) in July, CET (UTC+1) in January.
+{
+  const reg = w('emu_register_file', 'void', ['string', 'number', 'number']);
+  const checkDelayed = w('emu_check_delayed_rules');
+  const rules = readFileSync(new URL('../tzrules.bin', import.meta.url));
+  const ptr = M._malloc(rules.length); M.HEAPU8.set(rules, ptr); reg('/TZRULES.BIN', ptr, rules.length);
+  const onTimePage = (t) => { for (let k = 0; k < 8 && (t % 8) < 2; k++) t++; return t; };
+  const madrid = (t) => { bootCold(t); setTz(0); cfg('zone2 = Europe/Madrid'); renderM(MODE_ZONE2); const pending = row(); checkDelayed(); renderM(MODE_ZONE2); return [pending, row()]; };
+  const tSum = onTimePage(Date.UTC(2026, 6, 20, 12, 34, 56) / 1000), tWin = onTimePage(Date.UTC(2026, 0, 20, 12, 34, 56) / 1000);
+  const [pending, summer] = madrid(tSum);
+  check(`Europe/Madrid: dashes until the deferred loader runs ("${pending}")`, pending === '-');
+  check(`Europe/Madrid in July -> CEST, UTC+2 ("${summer}" ~ "${hhmmss(tSum + 7200)}")`, summer.startsWith(hhmmss(tSum + 7200)));
+  const [, winter] = madrid(tWin);
+  check(`Europe/Madrid in January -> CET, UTC+1 ("${winter}" ~ "${hhmmss(tWin + 3600)}")`, winter.startsWith(hhmmss(tWin + 3600)));
+}
 
 done();
