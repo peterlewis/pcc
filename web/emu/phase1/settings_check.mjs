@@ -1,5 +1,5 @@
-// settings_check.mjs — the QSPI SETTINGS.BIN store (Design C): the RC-silicon fix for settings that
-// never survived a power cycle. The emu models the real medium with NOR physics (program ANDs bits
+// settings_check.mjs — the QSPI SETTINGS.BIN store (Design C): the settings store on every clock,
+// first built as the RC-silicon fix for settings that never survived a power cycle. The emu models the real medium with NOR physics (program ANDs bits
 // 1->0, erase refills a 4 KB sector to 0xFF) and a host-visible mapping generation, so every scenario
 // here is one the W25Q128 can actually produce:
 //   provisioning (0xFF vs naive 0x00 fill), absent/fragmented file -> honest RAM-only fallback,
@@ -30,13 +30,14 @@ const eePeek   = w('emu_ee_peek', 'number', ['number']);
 const eePoke   = w('emu_ee_poke', 'void', ['number','number']);
 const attach   = w('emu_settings_attach', 'void', ['number','number','number']);
 const hostWr   = w('emu_settings_host_write', 'void', ['number','number','number']);
-const backing  = w('emu_ee_backing', 'number');        // 0 NONE / 1 INTERNAL / 2 QSPI
+const backing  = w('emu_ee_backing', 'number');        // EEBacking, see BK
 const sfState  = w('emu_ee_sfile_state', 'number');    // 0 no file / 1 ok / 2 fragmented
 const eeNext   = w('emu_ee_next', 'number');
 const row = () => { const p = rowPtr(); let s = ''; for (let i = 1; i <= 10; i++) { const c = M.HEAPU8[p + i]; if (c < 32 || c > 126) break; s += String.fromCharCode(c); } return s.trimEnd(); };
 
 const EVT = { BTN1: 0x91, BTN2: 0x92, REL: 0x93, S1: 0x94, S2: 0x95, S3: 0x96 };
 const SEC_DISP = 2;
+const BK = { NONE: 0, QSPI: 1 };   // EEBacking in main.c; the RG internal-flash backend (was 1) is retired
 const results = [];
 const check = (n, pass) => results.push({ n, pass: !!pass });
 
@@ -61,7 +62,7 @@ bootCold(1783627200);
 
 // (1) default provisioning: SETTINGS.BIN attached, 0xFF-filled -> QSPI backing engages.
 attach(1, 0, 0xFF); eeReset(); setMtime(0x5AA5, 0x1234);
-check(`provisioned card -> QSPI backing (bk=${backing()}, file=${sfState()})`, backing() === 2 && sfState() === 1);
+check(`provisioned card -> QSPI backing (bk=${backing()}, file=${sfState()})`, backing() === BK.QSPI && sfState() === 1);
 
 // (2) NOR physics: program can only clear bits — poke 0x00 then "program" 0xFF over it must stay 0x00.
 eePoke(4000, 0x00);
@@ -94,7 +95,7 @@ check(`post-clobber record survives the next power cycle`, segBal() === 1);
 
 // (6) no file on the card -> honest RAM-only: backing NONE, commits refuse, live value still works.
 attach(0, 0, 0xFF); setBal(0, 0); ovrClear(); eeLoad();
-check(`no SETTINGS.BIN -> RAM-only (bk=${backing()}, file=${sfState()})`, backing() === 0 && sfState() === 0);
+check(`no SETTINGS.BIN -> RAM-only (bk=${backing()}, file=${sfState()})`, backing() === BK.NONE && sfState() === 0);
 setBal(1, 1);
 check(`commit refuses without a store`, eeCommit() === 0);
 ovrClear(); eeLoad();
@@ -102,14 +103,14 @@ check(`nothing persists without a store`, ovrValid() === 0);
 
 // (7) fragmented file -> resolver rejects -> RAM-only with the distinct diagnostic state.
 attach(1, 1, 0xFF); ovrClear(); eeLoad();
-check(`fragmented SETTINGS.BIN -> RAM-only (bk=${backing()}, file=${sfState()})`, backing() === 0 && sfState() === 2);
+check(`fragmented SETTINGS.BIN -> RAM-only (bk=${backing()}, file=${sfState()})`, backing() === BK.NONE && sfState() === 2);
 
 // (8) naive 0x00-filled provisioning (host tool wrote zeros, not 0xFF): first use must erase the
 // pair to true NOR-blank, then persist normally. Without the first-use erase every record would
 // AND into garbage and fail CRC forever — the permanent-wedge failure the design review killed
 // Design B over.
 attach(1, 0, 0x00); ovrClear(); eeLoad();
-check(`0x00-filled file -> QSPI backing engages (bk=${backing()})`, backing() === 2);
+check(`0x00-filled file -> QSPI backing engages (bk=${backing()})`, backing() === BK.QSPI);
 setMtime(0x5AA5, 0x1234); setBal(0, 0); toggleBalanceOn();
 check(`commit into recovered file works`, ovrValid() === 1 && eeCommit() === 1);
 powerCycle();

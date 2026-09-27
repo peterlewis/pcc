@@ -257,7 +257,7 @@ void   emu_settings_host_write(unsigned off, unsigned len, int val){
   for (unsigned i=0; i<len && off+i<sizeof ee_sfile; i++) ee_sfile[off+i]=(uint8_t)val;
   settings_map_gen++;
 }
-int    emu_ee_backing(void){ return (int)ee_backing; }        /* 0 NONE / 1 INTERNAL / 2 QSPI */
+int    emu_ee_backing(void){ return (int)ee_backing; }        /* 0 NONE / 1 QSPI */
 int    emu_ee_sfile_state(void){ return (int)ee_sfile_state; }/* 0 no file / 1 ok / 2 fragmented */
 int    emu_ee_next(void){ return (int)ee_next; }              /* append cursor (skip-to-blank checks) */
 int    emu_menu_dirty(void){ return menu_dirty; }
