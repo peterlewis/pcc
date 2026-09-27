@@ -1,12 +1,14 @@
-// zone2_check.mjs — MODE_ZONE2, a second civil timezone on the date row, plus the u64 mode-mask
-// widen that makes room for it (MODE_ZONE2 is ordinal 32 — the first mode past the old uint32 ceiling).
+// zone2_check.mjs — MODE_ZONE2, a second civil timezone as a live clock on the TIME row (the
+// alternate-timebase family, beside MODE_LST / MODE_SOLAR), plus the u64 mode-mask widen that makes
+// room for it (MODE_ZONE2 is ordinal 33 — past the old uint32 ceiling).
 //
-// Covers: (a) the honest blank — unset/unresolved zone2 shows dashes, never a fake time; (b) the
-// fixed-offset literal path (UTC / +HH:MM / -HH:MM) computed from GPS-disciplined UTC, so no FATFS
-// needed; (c) the live remote clock ticks and matches an independent oracle; (d) the day-difference
-// marker (+1/-1) vs the local calendar day; (e) the paged city/zone label; (f) the u64 persistence
-// round-trip: MODE_ZONE2's enable bit survives commit -> RAM wipe -> flash re-scan -> apply (the bit
-// lives at ordinal 32, so this is the load-bearing proof the widened ee record works).
+// Covers: (a) the honest blank — unset/unresolved zone2 dashes the time row, never a fake time;
+// (b) the fixed-offset literal path (UTC / +HH:MM / -HH:MM), computed from GPS-disciplined UTC, so no
+// FATFS needed; (c) the time row ticks with civil seconds; (d) the date row keeps the LOCAL civil date,
+// even when the second zone is on another day, and the colons take colon_alt_mode so it never reads as
+// local time; (e) leaving the mode restores the civil clock; (f) the u64 persistence round-trip:
+// MODE_ZONE2's enable bit survives commit -> RAM wipe -> flash re-scan -> apply; (g) an IANA name
+// resolved by the main loop's deferred loader from the real /TZRULES.BIN.
 // Run: node zone2_check.mjs   (from phase1/, after build.sh)
 import factory from '../clock-fw.mjs';
 import { readFileSync } from 'node:fs';
@@ -15,11 +17,20 @@ const M = await factory();
 const w = (n, r = 'void', a = []) => M.cwrap(n, r, a);
 const bootCold = w('emu_boot_cold', 'void', ['number']);
 const cfg      = w('emu_config_line', 'void', ['string']);
-const renderM  = w('emu_render_mode', 'void', ['number']);
 const modeId   = w('emu_mode_id', 'number', ['string']);
+const mode     = w('emu_mode', 'number');
+const button1  = w('emu_button1');
+const tick     = w('emu_tick');
+const pendsv   = w('emu_pendsv');
+const pendsvPending = w('emu_pendsv_pending', 'number');
+const poll     = w('emu_poll');
 const rowPtr   = w('emu_daterow', 'number');
+const bufb     = w('emu_bufb', 'number', ['number']);
+const bufcLo   = w('emu_bufc_low', 'number', ['number']);
+const colon    = w('emu_colon_mode', 'number');
+const colonAlt = w('emu_colon_alt', 'number');
+const colonCiv = w('emu_colon_civil', 'number');
 const setTz    = w('emu_set_tz_offset', 'void', ['number']);
-const tzOff    = w('emu_tz_offset', 'number');
 // persistence store (same handles menu_persist_check uses)
 const eeReset  = w('emu_ee_reset', 'void');
 const eeLoad   = w('emu_ee_load', 'void');
@@ -30,79 +41,85 @@ const setMtime = w('emu_set_mtime', 'void', ['number', 'number']);
 const recMode  = w('emu_record_mode', 'void', ['number', 'number']);
 const modeEn   = w('emu_mode_enabled', 'number', ['number']);
 
-const row = () => { const p = rowPtr(); let s = ''; for (let i = 1; i <= 10; i++) { const c = M.HEAPU8[p + i]; if (c < 32 || c > 126) break; s += String.fromCharCode(c); } return s; };
+const dateRow = () => { const p = rowPtr(); let s = ''; for (let i = 1; i <= 10; i++) { const c = M.HEAPU8[p + i]; if (c < 32 || c > 126) break; s += String.fromCharCode(c); } return s; };
+// The latched time row: buffer_b[0..4] = tens of hours .. tens of seconds (segments on bits 2..8),
+// buffer_c[0].low = units of seconds (latchSegments). A dash is segment g alone.
+const LUT = [63, 6, 91, 79, 102, 109, 125, 7, 127, 111];
+const digit = (v) => { const i = LUT.indexOf(v & 0x7f); return i >= 0 ? String(i) : ((v & 0x7f) === 64 ? '-' : '?'); };
+const timeRow = () => { const d = [0, 1, 2, 3, 4].map((i) => digit(bufb(i) >> 2)); d.push(digit(bufcLo(0))); return `${d[0]}${d[1]}:${d[2]}${d[3]}:${d[4]}${d[5]}`; };
 const results = [];
 const check = (n, pass) => results.push({ n, pass: !!pass });
 const done = () => { let f = 0; for (const r of results) { if (!r.pass) f++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}`); } console.log(f ? `\n${f} FAIL` : `\nALL PASS`); process.exit(f ? 1 : 0); };
+const run = (ms) => { for (let i = 0; i < ms; i++) { tick(); if (pendsvPending()) pendsv(); poll(); } };   // SysTick, PendSV, main loop
 
-// A UTC epoch with a known wall clock. 2026-07-20 12:34:56 UTC.
-const T = Date.UTC(2026, 6, 20, 12, 34, 56) / 1000;
 const hhmmss = (sec) => { const s = ((sec % 86400) + 86400) % 86400; const p = (n) => String(n).padStart(2, '0'); return `${p(Math.floor(s / 3600))}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}`; };
+const isoDate = (sec) => new Date(sec * 1000).toISOString().slice(0, 10);
+// Boot at t with the local zone at UTC+tz, name the second zone, and switch to MODE_ZONE2 the way the
+// clock does (enabling a mode in config requests it -> nextMode's transition seeds the alternate row).
+const show = (t, zone, tz = 0) => { bootCold(t); setTz(tz); cfg(`zone2 = ${zone}`); cfg('MODE_ZONE2 = on'); poll(); };
 
+const T = Date.UTC(2026, 6, 20, 12, 34, 56) / 1000;   // 2026-07-20 12:34:56 UTC
 bootCold(T);
 const MODE_ZONE2 = modeId('MODE_ZONE2');
 check('MODE_ZONE2 exists and is ordinal 33 (past the old u32 ceiling)', MODE_ZONE2 === 33);
 if (MODE_ZONE2 < 0) done();
 
-// (a) honest blank — no zone2 configured yet.
-renderM(MODE_ZONE2);
-check(`unset zone2 -> dashes ("${row()}")`, row() === '-');
+// (a) honest blank — no zone2 configured: the time row dashes, the date row keeps the civil date.
+show(T, '');
+check(`entering the mode shows it (mode ${mode()})`, mode() === MODE_ZONE2);
+check(`unset zone2 -> time row dashes ("${timeRow()}")`, timeRow() === '--:--:--');
+check(`the date row keeps the civil date ("${dateRow()}")`, dateRow() === isoDate(T));
 
-// (b)+(c) fixed literal +05:30 (India). Render the TIME sub-page: currentTime%8 >= 2.
-//   Choose T so T%8 lands in the time window; T from Date.UTC above — verify and nudge if needed.
-setTz(0);                         // primary = UTC, so the day-diff marker is measured against UTC
-cfg('zone2 = +05:30');
+// (b) fixed literal +05:30 (India), local zone UTC.
 const O2 = 5 * 3600 + 30 * 60;
-// Pick a second where the label/time paging shows the TIME page (t%8>=2) AND is a clean tick.
-const atTime = (t) => { bootCold(t); setTz(0); cfg('zone2 = +05:30'); renderM(MODE_ZONE2); return row(); };
-let tTime = T; for (let k = 0; k < 8; k++) { if ((tTime % 8) >= 2) break; tTime++; }
-check(`+05:30 literal -> live remote clock ("${atTime(tTime)}" == "${hhmmss(tTime + O2)}")`, atTime(tTime).startsWith(hhmmss(tTime + O2)));
+show(T, '+05:30');
+check(`+05:30 literal -> time row ${hhmmss(T + O2)} ("${timeRow()}")`, timeRow() === hhmmss(T + O2));
+check(`colons take colon_alt_mode (colon ${colon()}, alt ${colonAlt()})`, colon() === colonAlt() && colonAlt() !== colonCiv());
+// (c) it ticks with civil seconds
+run(2000);
+check(`ticks: 2 s later -> ${hhmmss(T + O2 + 2)} ("${timeRow()}")`, timeRow() === hhmmss(T + O2 + 2));
 
-// negative offset -08:00 (US Pacific standard)
-const tW = (() => { let t = T; for (let k = 0; k < 8; k++) { if ((t % 8) >= 2) break; t++; } return t; })();
-bootCold(tW); setTz(0); cfg('zone2 = -08:00'); renderM(MODE_ZONE2);
-check(`-08:00 literal -> ${hhmmss(tW - 8 * 3600)} ("${row()}")`, row().startsWith(hhmmss(tW - 8 * 3600)));
+// negative offset -08:00 (US Pacific standard) and the UTC literal
+show(T, '-08:00');
+check(`-08:00 literal -> ${hhmmss(T - 8 * 3600)} ("${timeRow()}")`, timeRow() === hhmmss(T - 8 * 3600));
+show(T, 'UTC', 3600);
+check(`UTC literal with local UTC+1 -> ${hhmmss(T)} ("${timeRow()}")`, timeRow() === hhmmss(T));
 
-// UTC literal equals the emulator's own UTC wall clock.
-bootCold(tW); setTz(0); cfg('zone2 = UTC'); renderM(MODE_ZONE2);
-check(`UTC literal -> ${hhmmss(tW)} ("${row()}")`, row().startsWith(hhmmss(tW)));
+// (d) the second zone is on the NEXT calendar day: 20:00 UTC + 5:30 = 01:30 on the 21st — the time row
+//     shows the zone's clock, the date row stays the local (UTC) date.
+const tPlus = Date.UTC(2026, 6, 20, 20, 0, 0) / 1000;
+show(tPlus, '+05:30');
+check(`next-day zone -> time row ${hhmmss(tPlus + O2)} ("${timeRow()}")`, timeRow() === hhmmss(tPlus + O2));
+check(`... while the date row keeps the local date ${isoDate(tPlus)} ("${dateRow()}")`, dateRow() === isoDate(tPlus));
 
-// (d) day-difference marker: pick a UTC time where +05:30 lands on the NEXT calendar day.
-//   2026-07-20 20:00:00 UTC + 5:30 = 2026-07-21 01:30 -> "+1". Ensure time page (t%8>=2).
-let tPlus = Date.UTC(2026, 6, 20, 20, 0, 0) / 1000; for (let k = 0; k < 8; k++) { if ((tPlus % 8) >= 2) break; tPlus++; }
-bootCold(tPlus); setTz(0); cfg('zone2 = +05:30'); renderM(MODE_ZONE2);
-check(`remote next-day -> "+1" marker ("${row()}")`, row().endsWith('+1'));
-// and a "-1": 2026-07-20 02:00 UTC with -08:00 = previous day 18:00 -> "-1"
-let tMinus = Date.UTC(2026, 6, 20, 2, 0, 0) / 1000; for (let k = 0; k < 8; k++) { if ((tMinus % 8) >= 2) break; tMinus++; }
-bootCold(tMinus); setTz(0); cfg('zone2 = -08:00'); renderM(MODE_ZONE2);
-check(`remote prev-day -> "-1" marker ("${row()}")`, row().endsWith('-1'));
+// empty value clears back to dashes within a second (honest), still in the mode
+show(T, '+05:30'); cfg('zone2 = '); run(1100);
+check(`zone2 = (empty) -> time row dashes again ("${timeRow()}")`, timeRow() === '--:--:--');
 
-// (e) the label sub-page (t%8 < 2) shows the literal verbatim.
-let tLabel = T; for (let k = 0; k < 8; k++) { if ((tLabel % 8) < 2) break; tLabel++; }
-bootCold(tLabel); setTz(0); cfg('zone2 = +05:30'); renderM(MODE_ZONE2);
-check(`label page shows the literal ("${row()}")`, row() === '+05:30');
+// (e) leaving the mode restores the civil clock and colons
+cfg('MODE_ISO8601_STD = on'); show(T, '+05:30');
+for (let k = 0; k < 40 && mode() !== 0; k++) button1();
+run(1100);
+check(`back on the civil clock -> ${hhmmss(T + 1)} ("${timeRow()}")`, timeRow() === hhmmss(T + 1) || timeRow() === hhmmss(T + 2));
+check(`civil colons back (colon ${colon()}, civil ${colonCiv()})`, colon() === colonCiv());
 
-// empty value clears back to dashes (honest).
-cfg('zone2 = +05:30'); cfg('zone2 = '); renderM(MODE_ZONE2);
-check(`zone2 = (empty) -> back to dashes ("${row()}")`, row() === '-');
-
-// (f) THE u64 PROOF: MODE_ZONE2's enable bit (ordinal 32) round-trips through the widened ee record.
+// (f) THE u64 PROOF: MODE_ZONE2's enable bit (ordinal 33) round-trips through the widened ee record.
 bootCold(T);
 eeReset();
 setMtime(0x5AA5, 0x1234);
-recMode(MODE_ZONE2, 1);                 // firmware menu_record_key: ovr.modes_mask |= 1ull<<32
+recMode(MODE_ZONE2, 1);                 // firmware menu_record_key: ovr.modes_mask |= 1ull<<33
 check('MODE_ZONE2 enabled live', modeEn(MODE_ZONE2) === 1);
 check('commit writes the record', eeCommit() === 1);
 recMode(MODE_ZONE2, 0);                 // scribble the live value off
 ovrClear();                             // simulate RAM loss on reboot
 eeLoad();                               // re-scan flash -> ee_unpack reads hi-word at byte 40/44
-eeApply();                              // menu_apply_overrides: 1ull<<32 shift
-check('MODE_ZONE2 bit-32 survived commit->wipe->reload->apply', modeEn(MODE_ZONE2) === 1);
+eeApply();                              // menu_apply_overrides: 1ull<<33 shift
+check('MODE_ZONE2 bit-33 survived commit->wipe->reload->apply', modeEn(MODE_ZONE2) === 1);
 // and a mode BELOW the ceiling still round-trips (no regression from the split)
 recMode(4 /*MODE_JULIAN_DATE*/, 1); eeCommit(); ovrClear(); eeLoad(); eeApply();
 check('a low-ordinal mode still round-trips (no widen regression)', modeEn(4) === 1 && modeEn(MODE_ZONE2) === 1);
 
-// (d) an IANA name, the way config.txt's "zone2 = Europe/Madrid" reaches it on the clock: dashes while
+// (g) an IANA name, the way config.txt's "zone2 = Europe/Madrid" reaches it on the clock: dashes while
 // the name waits for the main loop's deferred loader, then the zone's own DST rules from the real
 // /TZRULES.BIN (the file the CLOCK drive carries) — CEST (UTC+2) in July, CET (UTC+1) in January.
 {
@@ -110,14 +127,14 @@ check('a low-ordinal mode still round-trips (no widen regression)', modeEn(4) ==
   const checkDelayed = w('emu_check_delayed_rules');
   const rules = readFileSync(new URL('../tzrules.bin', import.meta.url));
   const ptr = M._malloc(rules.length); M.HEAPU8.set(rules, ptr); reg('/TZRULES.BIN', ptr, rules.length);
-  const onTimePage = (t) => { for (let k = 0; k < 8 && (t % 8) < 2; k++) t++; return t; };
-  const madrid = (t) => { bootCold(t); setTz(0); cfg('zone2 = Europe/Madrid'); renderM(MODE_ZONE2); const pending = row(); checkDelayed(); renderM(MODE_ZONE2); return [pending, row()]; };
-  const tSum = onTimePage(Date.UTC(2026, 6, 20, 12, 34, 56) / 1000), tWin = onTimePage(Date.UTC(2026, 0, 20, 12, 34, 56) / 1000);
-  const [pending, summer] = madrid(tSum);
-  check(`Europe/Madrid: dashes until the deferred loader runs ("${pending}")`, pending === '-');
-  check(`Europe/Madrid in July -> CEST, UTC+2 ("${summer}" ~ "${hhmmss(tSum + 7200)}")`, summer.startsWith(hhmmss(tSum + 7200)));
+  const madrid = (t) => { show(t, 'Europe/Madrid', 3600); const pending = timeRow(); checkDelayed(); poll(); return [pending, timeRow(), dateRow()]; };
+  const tSum = Date.UTC(2026, 6, 20, 12, 34, 56) / 1000, tWin = Date.UTC(2026, 0, 20, 12, 34, 56) / 1000;
+  const [pending, summer, sumDate] = madrid(tSum);
+  check(`Europe/Madrid: dashes until the deferred loader runs ("${pending}")`, pending === '--:--:--');
+  check(`Europe/Madrid in July -> CEST, UTC+2 ("${summer}" == "${hhmmss(tSum + 7200)}")`, summer === hhmmss(tSum + 7200));
+  check(`... with the local date below ("${sumDate}")`, sumDate === isoDate(tSum + 3600));
   const [, winter] = madrid(tWin);
-  check(`Europe/Madrid in January -> CET, UTC+1 ("${winter}" ~ "${hhmmss(tWin + 3600)}")`, winter.startsWith(hhmmss(tWin + 3600)));
+  check(`Europe/Madrid in January -> CET, UTC+1 ("${winter}" == "${hhmmss(tWin + 3600)}")`, winter === hhmmss(tWin + 3600));
 }
 
 done();

@@ -9,7 +9,7 @@ import { TelemetryLog } from './telemetrylog.js?v=4';
 import { prepReview, drawReview, sampleAt, tAtX } from './review.js?v=1';
 import { subSatellitePoint } from './satpass.js?v=1';
 import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=2';
-import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=7';
+import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=8';
 import { REC as PF_REC, RANGE as PF_RANGE, modelStream, runPrefilter } from './prefilter.mjs?v=2';
 
 // config.txt is the single source of truth: the clock-behaviour defaults (enabled modes, colon,
@@ -114,7 +114,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=110'), import('./realdev.js?v=119'), import('./emu-driver.js?v=41'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=3')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=110'), import('./realdev.js?v=119'), import('./emu-driver.js?v=42'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=3')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.SB = SB;
       try { localStorage.removeItem('pccweb.cuckoo'); } catch (e) {}   // parked feature's persisted setting — clear the ghost
       this.session = SIM.createSession({ preroll: 1560 });
@@ -2366,7 +2366,7 @@ class Component extends DcLite {
       { key: 'solar', mode: 'MODE_SOLAR', label: 'SOLAR TIME', group: 'TIME ROW' },
       { key: 'offset', mode: 'MODE_SHOW_OFFSET', label: 'UTC OFFSET', group: 'TIME ROW' },
       { key: 'tz', mode: 'MODE_SHOW_TZ_NAME', label: 'TZ NAME', group: 'TIME ROW' },
-      // Second civil timezone on the date row — target set by the zone2 config key.
+      // Second civil timezone as a live clock on the time row, like LST/SOLAR — target set by the zone2 config key.
       { key: 'zone2', mode: 'MODE_ZONE2', label: 'ZONE 2', group: 'TIME ROW' },
       { key: 'sun', mode: 'MODE_SUN', label: 'SUN RISE/SET', group: 'ASTRO' },
       { key: 'sun_azel', mode: 'MODE_SUN_AZEL', label: 'SUN AZ·EL', group: 'ASTRO' },

@@ -24,7 +24,7 @@ MATRIX_FREQUENCY = 20000
 # Europe/London; Etc/GMT+5 for a fixed offset; Etc/UTC for UTC.
 #ZONE_OVERRIDE = Europe/London
 
-# Second timezone for MODE_ZONE2 (shown on the date row). Same format as ZONE_OVERRIDE:
+# Second timezone for MODE_ZONE2 (a live clock on the time row). Same format as ZONE_OVERRIDE:
 # an IANA name (full DST) or a fixed offset (Etc/UTC, Etc/GMT+5). Leave commented for none.
 #zone2 = America/New_York
 
@@ -157,8 +157,9 @@ MODE_TEMPCOMP = disabled
 # times on the date row ("1s 3.2e-11" ... "1024s 3e-11"). The honest, undisciplined crystal signal.
 MODE_ADEV = disabled
 
-# Second civil timezone on the date row (label screen, then HH:MM:SS with a +1/-1 day
-# marker). Set the zone with the 'zone2' key up by ZONE_OVERRIDE; shows "----" until set.
+# Second civil timezone as a live clock on the time row, like sidereal and solar time: the date
+# row keeps the local date and the colons take colon_alt_mode. Set the zone with the 'zone2' key
+# up by ZONE_OVERRIDE; the time row shows dashes until it's set.
 MODE_ZONE2 = disabled
 
 
