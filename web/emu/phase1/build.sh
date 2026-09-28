@@ -104,6 +104,11 @@ echo "[2/3] compile main_wrap.c -> main_redir.o"
 emcc -c main_wrap.c -o main_redir.o "${CFLAGS[@]}"
 
 echo "[3/3] link -> ../clock-fw.mjs"
+# GROWABLE_ARRAYBUFFERS=0: emscripten 6.0.2's default (1) puts the growable heap on
+# memory.toResizableBuffer(), yet still decodes any string over 16 bytes from a HEAPU8.subarray().
+# Chromium's TextDecoder rejects a view onto a resizable buffer (node's accepts it), so every
+# string-returning export threw in the browser: $PMSTAR, every simulated second. With 0 the heap is
+# a plain buffer whose views emscripten rebuilds on growth. strings_check.mjs covers it.
 emcc main_redir.o $ASTRO_O zonedetect.o stm32_shim.c emu_data.o hal_behav.o \
   "${INCS[@]}" "${DEFS[@]}" -O2 \
   --js-library stubs.js \
@@ -111,7 +116,7 @@ emcc main_redir.o $ASTRO_O zonedetect.o stm32_shim.c emu_data.o hal_behav.o \
   -sEXPORTED_RUNTIME_METHODS='["ccall","cwrap","HEAPU8"]' \
   -sEXPORTED_FUNCTIONS="$EXPORTS" \
   -sMODULARIZE=1 -sEXPORT_ES6=1 -sENVIRONMENT=node,web \
-  -sALLOW_MEMORY_GROWTH=1 \
+  -sALLOW_MEMORY_GROWTH=1 -sGROWABLE_ARRAYBUFFERS=0 \
   -sSINGLE_FILE=1 \
   -o ../clock-fw.mjs
 
