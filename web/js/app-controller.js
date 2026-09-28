@@ -114,7 +114,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=110'), import('./realdev.js?v=119'), import('./emu-driver.js?v=42'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=3')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=110'), import('./realdev.js?v=119'), import('./emu-driver.js?v=43'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=3')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.SB = SB;
       try { localStorage.removeItem('pccweb.cuckoo'); } catch (e) {}   // parked feature's persisted setting — clear the ghost
       this.session = SIM.createSession({ preroll: 1560 });
@@ -3073,7 +3073,7 @@ class Component extends DcLite {
       cbTrSol: this.cb(!!st.modesEnabled.solar), oTrSol: () => this.toggleMode('solar'),
       cbTrOff: this.cb(!!st.modesEnabled.offset), oTrOff: () => this.toggleMode('offset'),
       cbTrTz: this.cb(!!st.modesEnabled.tz), oTrTz: () => this.toggleMode('tz'),
-      cbTrZone2: this.cb(!!st.modesEnabled.zone2), oTrZone2: () => this.toggleMode('zone2'),   // MODE_ZONE2 — second civil timezone on the date row
+      cbTrZone2: this.cb(!!st.modesEnabled.zone2), oTrZone2: () => this.toggleMode('zone2'),   // MODE_ZONE2 — second civil timezone as a live clock on the time row
       // Capability note: when a stock clock is connected whose firmware lacks some rollup modes,
       // say so (they still work in the emulator). Empty for the emulator / an unread device = full.
       modesCapNote: (() => {

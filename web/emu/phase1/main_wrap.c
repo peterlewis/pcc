@@ -175,6 +175,11 @@ void emu_tick(void){
 /* main-loop housekeeping the emulator needs each frame. Mirrors the firmware while(1): the astro
  * date-row modes recompute their payload via astro_update(); the alt time-row staging is always. */
 void emu_poll(void){
+  /* The deferred FATFS loader (checkDelayedLoadRules), ahead of alt_update as on the clock, so a
+   * named zone2 (e.g. Europe/Madrid) resolves against /TZRULES.BIN and reaches the time row in the
+   * same pass. The main zone is the app's (emu_load_zone / emu_set_tz_offset), so a pending
+   * ZONE_OVERRIDE is held back rather than loaded over it. */
+  if (delayedLoadZone2) { _Bool held = delayedLoadRules; delayedLoadRules = 0; checkDelayedLoadRules(); delayedLoadRules = held; }
 #if EMU_HAS_ASTRO
   if (displayMode==MODE_SUN || displayMode==MODE_SUN_AZEL || displayMode==MODE_MOON
       || displayMode==MODE_GRID || displayMode==MODE_LATLON || displayMode==MODE_DARK) astro_update();
@@ -457,6 +462,7 @@ void emu_boot_cold(unsigned int t){
   latitude = 0.0f; longitude = 0.0f;
   /* ZONE 2 globals are .data on silicon — power-on restores their initialisers. Mirror that. */
   loadedZone2[0] = 0; offset2 = 0; zone2_fixed = 0; delayedLoadZone2 = 0; preloadZone2[0] = 0;
+  delayedLoadRules = 0;   /* likewise a ZONE_OVERRIDE that emu_poll held back: power-on drops it */
   for (int i=0;i<SV_COUNT;i++) satview[i] = 255;   /* nothing in view yet */
   satview_stale = 0;
   /* Tempcomp learned state is .bss/.data on real silicon — a power-on clears it and the startup
@@ -760,9 +766,9 @@ int emu_load_zone(const char* zone){
   setNextTimestamp(currentTime);
   return r;
 }
-/* One pass of the main loop's deferred FATFS loader (checkDelayedLoadRules): resolves a pending
- * ZONE_OVERRIDE / zone2 IANA name against the registered /TZRULES.BIN. emu_poll doesn't run it, so
- * checks call it where the hardware's main loop would. */
+/* One whole pass of the main loop's deferred FATFS loader (checkDelayedLoadRules): resolves a pending
+ * ZONE_OVERRIDE / zone2 IANA name against the registered /TZRULES.BIN. emu_poll runs only its zone2
+ * half, so checks call this where the hardware's main loop would load a ZONE_OVERRIDE. */
 void emu_check_delayed_rules(void){ checkDelayedLoadRules(); }
 /* The firmware's tz offset (seconds) that applies at epoch t — walks the loaded rules[] via the
  * real setNextTimestamp. */

@@ -8,7 +8,7 @@
 // even when the second zone is on another day, and the colons take colon_alt_mode so it never reads as
 // local time; (e) leaving the mode restores the civil clock; (f) the u64 persistence round-trip:
 // MODE_ZONE2's enable bit survives commit -> RAM wipe -> flash re-scan -> apply; (g) an IANA name
-// resolved by the main loop's deferred loader from the real /TZRULES.BIN.
+// resolved from the real /TZRULES.BIN by the next emu_poll, as the main loop's deferred loader does.
 // Run: node zone2_check.mjs   (from phase1/, after build.sh)
 import factory from '../clock-fw.mjs';
 import { readFileSync } from 'node:fs';
@@ -119,22 +119,37 @@ check('MODE_ZONE2 bit-33 survived commit->wipe->reload->apply', modeEn(MODE_ZONE
 recMode(4 /*MODE_JULIAN_DATE*/, 1); eeCommit(); ovrClear(); eeLoad(); eeApply();
 check('a low-ordinal mode still round-trips (no widen regression)', modeEn(4) === 1 && modeEn(MODE_ZONE2) === 1);
 
-// (g) an IANA name, the way config.txt's "zone2 = Europe/Madrid" reaches it on the clock: dashes while
-// the name waits for the main loop's deferred loader, then the zone's own DST rules from the real
-// /TZRULES.BIN (the file the CLOCK drive carries) — CEST (UTC+2) in July, CET (UTC+1) in January.
+// (g) an IANA name, the way config.txt's "zone2 = Europe/Madrid" reaches it on the clock: the parse
+// defers it (dashes), and the next main-loop pass resolves it with the zone's own DST rules from the
+// real /TZRULES.BIN (the file the CLOCK drive carries) — CEST (UTC+2) in July, CET (UTC+1) in January.
+// That pass is plain emu_poll, the loop the app's driver runs, so the app's simulator shows it too.
 {
   const reg = w('emu_register_file', 'void', ['string', 'number', 'number']);
   const checkDelayed = w('emu_check_delayed_rules');
+  const tzOffset = w('emu_tz_offset', 'number');
   const rules = readFileSync(new URL('../tzrules.bin', import.meta.url));
   const ptr = M._malloc(rules.length); M.HEAPU8.set(rules, ptr); reg('/TZRULES.BIN', ptr, rules.length);
-  const madrid = (t) => { show(t, 'Europe/Madrid', 3600); const pending = timeRow(); checkDelayed(); poll(); return [pending, timeRow(), dateRow()]; };
+  const parse = (t, ...extra) => { bootCold(t); setTz(3600); for (const l of extra) cfg(l); cfg('zone2 = Europe/Madrid'); cfg('MODE_ZONE2 = on'); };
+  const madrid = (t) => { parse(t); const pending = timeRow(); poll(); return [pending, timeRow(), dateRow()]; };
   const tSum = Date.UTC(2026, 6, 20, 12, 34, 56) / 1000, tWin = Date.UTC(2026, 0, 20, 12, 34, 56) / 1000;
   const [pending, summer, sumDate] = madrid(tSum);
-  check(`Europe/Madrid: dashes until the deferred loader runs ("${pending}")`, pending === '--:--:--');
-  check(`Europe/Madrid in July -> CEST, UTC+2 ("${summer}" == "${hhmmss(tSum + 7200)}")`, summer === hhmmss(tSum + 7200));
+  check(`Europe/Madrid: dashes while the name waits for the main loop ("${pending}")`, pending === '--:--:--');
+  check(`... the next emu_poll resolves it: July -> CEST, UTC+2 ("${summer}" == "${hhmmss(tSum + 7200)}")`, summer === hhmmss(tSum + 7200));
   check(`... with the local date below ("${sumDate}")`, sumDate === isoDate(tSum + 3600));
+  run(1000);
+  check(`... and it ticks ("${timeRow()}" == "${hhmmss(tSum + 7201)}")`, timeRow() === hhmmss(tSum + 7201));
   const [, winter] = madrid(tWin);
   check(`Europe/Madrid in January -> CET, UTC+1 ("${winter}" == "${hhmmss(tWin + 3600)}")`, winter === hhmmss(tWin + 3600));
+
+  // The main zone is the app's (emu_load_zone / emu_set_tz_offset): emu_poll holds a pending
+  // ZONE_OVERRIDE back while zone2 resolves. The hold keeps it for the whole loader, and a cold boot
+  // drops it, as power-on does.
+  parse(tSum, 'ZONE_OVERRIDE = America/New_York'); run(1000);
+  check(`a pending ZONE_OVERRIDE leaves the main zone alone (offset ${tzOffset()}) while zone2 resolves ("${timeRow()}")`, tzOffset() === 3600 && timeRow() === hhmmss(tSum + 7201));
+  checkDelayed(); run(1000);
+  check(`... held, not dropped: the whole loader still applies it (offset ${tzOffset()} == -14400)`, tzOffset() === -14400);
+  parse(tSum, 'ZONE_OVERRIDE = America/New_York'); bootCold(tSum); setTz(3600); checkDelayed(); run(1000);
+  check(`... and a cold boot drops a held override (offset ${tzOffset()} == 3600)`, tzOffset() === 3600);
 }
 
 done();
