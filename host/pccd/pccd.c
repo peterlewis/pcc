@@ -588,8 +588,10 @@ static void hist_S(double now){
   }
   fputc('\n',f);
 }
-// GET /history?series=timing|sky&from=E&to=E&points=N  →  decimated CSV (server-side min/max/mean
-// buckets, so a 90-day chart is one small response). Returns a malloc'd body; caller frees.
+// GET /history?series=timing|sky|sats&from=E&to=E&points=N  →  decimated CSV (server-side min/max/mean
+// buckets, so a 90-day chart is one small response). series=sats is the per-satellite record for the
+// app's trails: each bucket's first S row, its satellite list passed through as `t,<TKprn:az:el:cn0;…>`.
+// Returns a malloc'd body; caller frees.
 // Exact-key query-param lookup (…&key=VALUE…). strstr-on-the-whole-string matches substrings — `?min=5`
 // would hijack an `n=` probe — so compare each token's key up to '=' against the exact key.
 static const char *qval(const char *qs, const char *key){
@@ -620,6 +622,30 @@ static char *hist_query(const char *qs, size_t *blen){
   if (to - from > span_max) from = to - span_max;
   if (to<=from || points<2) return NULL;
   if (points>4000) points=4000;
+  if (!strcmp(series,"sats")){
+    size_t cap=65536, o=0; char *out=malloc(cap); if(!out) return NULL;
+    o += (size_t)snprintf(out,cap,"t,sats\n");
+    long last=-1;                                               // bucket of the last row sent (rows are time-ordered)
+    for (time_t d = (time_t)from - ((time_t)from % 86400); d <= (time_t)to; d += 86400){
+      char day[16], path[4400]; hist_day_of(d,day,sizeof day);
+      snprintf(path,sizeof path,"%s/%s.log",opt_hist,day);
+      FILE *fp=fopen(path,"r"); if(!fp) continue;
+      char ln[2048];
+      while (fgets(ln,sizeof ln,fp)){
+        if (ln[0]!='S' || ln[1]!=',') continue;
+        double t=atof(ln+2); if (t<from||t>to) continue;
+        long i=(long)((t-from)*points/(to-from)); if (i<=last) continue;
+        const char *s=ln; for (int k=0;k<5 && s;k++){ s=strchr(s,','); if(s) s++; }   // past S,t,fix,used,hdop
+        if (!s) continue;
+        size_t sl=strcspn(s,"\r\n");
+        if (o+sl+32 > cap){ size_t nc=2*cap+sl; char *nb=realloc(out,nc); if(!nb){ free(out); fclose(fp); return NULL; } out=nb; cap=nc; }
+        o += (size_t)snprintf(out+o,cap-o,"%.0f,%.*s\n",t,(int)sl,s);
+        last=i;
+      }
+      fclose(fp);
+    }
+    *blen=o; return out;
+  }
   int sky = !strcmp(series,"sky");
   typedef struct { double mn,mx,sum,jit,ppm,tmp,hdop,cn0s; int n,fix,used,sats,cn0mx; } B;
   B *b = calloc(points,sizeof(B)); if(!b) return NULL;
@@ -788,6 +814,34 @@ static int self_test(void){
   for (int i=0;i<pt_n;i++)
     if (fabs(pt_off[i]-100e-6) > 3e-6){ fprintf(stderr,"prefilter FAIL: group %d mean %+.6fs (want ~+0.000100s)\n",i,pt_off[i]); fail=1; }
   pf_sink = NULL; pf_reset(); pf_rejects=0; pf_groups=0;
+  // Flight-recorder readout over a temp day of ten minutes (T + S rows every 60 s): series=sats sends
+  // the first S row of each 120 s bucket with its satellite list intact; series=sky still aggregates.
+  char hdir[] = "/tmp/pccd-selftest-XXXXXX";
+  if (mkdtemp(hdir)){
+    const char *keep = opt_hist; opt_hist = hdir;
+    char hp[4400]; snprintf(hp,sizeof hp,"%s/1970-01-02.log",hdir);   // the UTC day holding t=90000
+    FILE *hf = fopen(hp,"w");
+    if (hf){
+      for (int k=0;k<10;k++){
+        fprintf(hf,"T,%d,1.0,0.5,0.000,30.0\n",90000+k*60);
+        fprintf(hf,"S,%d,1,8,0.90,GP%d:%d:45:40;GA5:300:10:-1\n",90000+k*60,k+1,10*k);
+      }
+      fclose(hf);
+      size_t n=0; char *b=hist_query("series=sats&from=90000&to=90600&points=5",&n);
+      int rows=0; for (size_t i=0; b && i<n; i++) if (b[i]=='\n') rows++;
+      if (!b || strncmp(b,"t,sats\n",7) || rows!=6 || !strstr(b,"\n90000,GP1:0:45:40;GA5:300:10:-1\n")
+          || !strstr(b,"\n90480,GP9:80:45:40;GA5:300:10:-1\n")){
+        fprintf(stderr,"history sats FAIL: %.*s\n",(int)n,b?b:""); fail=1;
+      }
+      free(b);
+      b=hist_query("series=sky&from=90000&to=90600&points=5",&n);
+      if (!b || strncmp(b,"t,fix,used,hdop,nsats,cn0_mean,cn0_max\n",39)){ fprintf(stderr,"history sky FAIL\n"); fail=1; }
+      free(b);
+      unlink(hp);
+    }
+    rmdir(hdir);
+    opt_hist = keep;
+  }
   fprintf(stderr,"[pccd] self-test %s\n",fail?"FAILED":"OK");
   return fail;
 }
