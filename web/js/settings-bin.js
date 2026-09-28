@@ -170,15 +170,21 @@ export function winningOverrides(parsed, cfgText, cfgMtimeMs, modeName) {
   const modes = [];
   for (let m = 0; m < 64; m++) {
     if (!((parsed.modesMask >> BigInt(m)) & 1n)) continue;
-    const name = (modeName && modeName(m)) || `MODE #${m}`;
+    // A bit for an ordinal the firmware has no mode at (left by a build that numbered the modes
+    // differently: MODE_DARK sat at 34 on the July bench build) is skipped by menu_apply_overrides,
+    // so it never wins. Without a lookup there's no telling, so the row is taken at face value.
+    const fwName = modeName ? modeName(m) : null;
+    const known = !modeName || !!fwName;
+    const name = fwName || `MODE #${m}`;
     const cfgHasIt = def.modeKeys.has(name);
-    modes.push({ ordinal: m, name, on: !!((parsed.modesVal >> BigInt(m)) & 1n), wins: !cfgHasIt || stampOk, cfgHasIt });
+    modes.push({ ordinal: m, name, known, on: !!((parsed.modesVal >> BigInt(m)) & 1n), wins: known && (!cfgHasIt || stampOk), cfgHasIt });
   }
   return { stampOk, stamp: parsed.stamp, gen: parsed.gen, entries, modes };
 }
 
 /// The menu's stored values as config.txt `key = value` pairs, for transposing into the editor: one
-/// entry per menu-set key (bundles expand to every key they cover), then the menu-set modes. A null
+/// entry per menu-set key (bundles expand to every key they cover), then the menu-set modes the
+/// firmware has (a stored bit past its last mode has no config.txt key and is left out). A null
 /// value means the menu holds AUTO brightness, which config.txt spells by leaving the key out. Values
 /// are in config.txt's own units — BRIGHT is stored as the rail (0 brightest), and `brightness = N` is
 /// read inverted, so the line carries 4095 - N.
@@ -199,6 +205,6 @@ export function menuToConfigLines(parsed, ovr) {
   if (has('balance')) { const v = f.balance ? 'on' : 'off'; kv.push(['seg_balance', v], ['colon_balance', v]); }
   if (has('cuckoo')) kv.push(['cuckoo', CUCKOO_NAMES[f.cuckoo] || 'off']);
   if (has('brit')) kv.push(['brightness_report', f.brit ? 'on' : 'off']);
-  for (const m of (ovr ? ovr.modes : [])) kv.push([m.name, m.on ? 'on' : 'off']);
+  for (const m of (ovr ? ovr.modes : [])) if (m.known && m.name.startsWith('MODE_')) kv.push([m.name, m.on ? 'on' : 'off']);   // never a `MODE #34` line
   return kv;
 }

@@ -179,6 +179,36 @@ check('round trip: brightness_report on', britReport() === 1);
 check('round trip: cuckoo = trust', cuckooSetting() === 1);
 check('round trip: MODE_ZONE2 enabled', modeEnabled(zone2) === 1);
 
+// ---- (8) a stored bit past the last mode ----------------------------------------------------------
+// A build that numbered the modes differently can leave one (MODE_DARK sat at 34 on the July bench
+// build). The firmware skips it (menu_apply_overrides loops m < NUM_DISPLAY_MODES), so the verdict must
+// say so and MERGE must never write it as a config.txt line. Planted in the firmware's own record,
+// stored as ENABLED (the stronger case), with a fresh CRC.
+{
+  const eeLoad = w('emu_ee_load'), eeApply = w('emu_ee_apply');
+  const past = zone2 + 1;                                   // first ordinal past the last mode
+  const buf = snapshot();
+  let o = -1, g = -1;
+  for (const base of [0, 0x1000]) for (let s = 0; s < 64; s++) {
+    const d = new DataView(buf.buffer, base + s * 64, 64);
+    if (d.getUint32(0, true) === EE_MAGIC && d.getUint32(4, true) > g) { g = d.getUint32(4, true); o = base + s * 64; }
+  }
+  const d = new DataView(buf.buffer, o, 64), hb = 1 << (past - 32);
+  d.setUint32(40, d.getUint32(40, true) | hb, true); d.setUint32(44, d.getUint32(44, true) | hb, true);
+  d.setUint16(62, crc16ccitt(buf.subarray(o, o + 62), 62), true);
+  const p8 = parseSettingsBin(buf), v8 = winningOverrides(p8, '', Date.now(), nameFor);
+  const r8 = v8.modes.find((x) => x.ordinal === past);
+  check(`bit ${past} (past the last mode) decodes as unknown and never wins`, r8 && r8.known === false && r8.wins === false && r8.name === `MODE #${past}`);
+  const kv8 = menuToConfigLines(p8, v8);
+  check('MERGE leaves it out: every mode line is a real MODE_ key', kv8.length > 0 && kv8.every(([k]) => !/^mode/i.test(k) || k.startsWith('MODE_')));
+  // ...and IGNORED is literally true: the firmware enables the same modes with and without the bit.
+  const modesNow = () => { eeApply(); return Array.from({ length: past }, (_, m) => modeEnabled(m)).join(''); };
+  eeLoad(); const without = modesNow();
+  for (let i = 0; i < buf.length; i++) eePoke(i, buf[i]);
+  eeLoad(); const withBit = modesNow();
+  check('the firmware enables the same modes with the stray bit stored', withBit === without);
+}
+
 const pass = results.filter((r) => r.pass).length;
 console.log(`${pass}/${results.length} ${pass === results.length ? 'ALL PASS' : 'FAILURES ABOVE'}`);
 process.exit(pass === results.length ? 0 : 1);

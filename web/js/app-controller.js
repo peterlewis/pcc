@@ -120,7 +120,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=110'), import('./realdev.js?v=120'), import('./emu-driver.js?v=44'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=3')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=110'), import('./realdev.js?v=120'), import('./emu-driver.js?v=44'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=4')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.SB = SB;
       try { localStorage.removeItem('pccweb.cuckoo'); } catch (e) {}   // parked feature's persisted setting — clear the ghost
       this.session = SIM.createSession({ preroll: 1560 });
@@ -3458,7 +3458,7 @@ class Component extends DcLite {
           this.cfgHandle = r.fh; this._cfgOriginal = r.text; // handle/original are not serialisable state
           if (this.els.cfgEditor) this.els.cfgEditor.value = r.text;
           const en = Object.values(r.cfg.modes || {}).filter(Boolean).length;
-          const ovrN = ovr ? ovr.entries.length + ovr.modes.length : 0;
+          const ovrN = ovr ? ovr.entries.length + ovr.modes.filter((m) => m.known !== false).length : 0;
           if (this.session.log) this.session.log('rx', `[config] ${r.name}: colon=${r.cfg.colon || '?'} · ${en} modes enabled${ovrN ? ` · ${ovrN} menu override${ovrN === 1 ? '' : 's'} merged (SETTINGS.BIN gen ${ovr.gen})` : (r.settings ? ' · SETTINGS.BIN: no menu edits stored' : '')} — applied to face`);
           this.setState({ cfgName: r.name, cfgDirty: false });
         } catch (e) {
@@ -3495,7 +3495,8 @@ class Component extends DcLite {
         })),
         ...this._menuOvr.modes.map((m) => ({
           k: 'm' + m.ordinal, label: m.name.replace(/^MODE_/, '').replace(/_/g, ' '), value: m.on ? 'ENABLED' : 'DISABLED',
-          tag: m.wins ? (m.cfgHasIt ? 'OVERRIDES config.txt' : 'MENU-OWNED') : 'SUPERSEDED BY config.txt',
+          tag: m.known === false ? 'NOT IN THIS FIRMWARE · IGNORED'
+            : m.wins ? (m.cfgHasIt ? 'OVERRIDES config.txt' : 'MENU-OWNED') : 'SUPERSEDED BY config.txt',
           tagColor: m.wins ? 'var(--lock)' : 'var(--txt3)',
         })),
       ] : [],
