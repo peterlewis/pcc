@@ -17,6 +17,12 @@ import { REC as PF_REC, RANGE as PF_RANGE, modelStream, runPrefilter } from './p
 // default-config.js. UI-only state (theme, panels, sim, gamma, marquee) stays app-owned below.
 const CONFIG_DEFAULTS = configToState(DEFAULT_CONFIG);
 
+// A recorded or logged satellite is only an observer-relative az/el plus its constellation, so a ground
+// point comes from subSatellitePoint and the constellation's nominal orbit altitude (km), the one field
+// it reads. pccd's history names each satellite by its GSV talker (GP7, GB13), mapped to the sim's constId.
+const ORBIT_KM = { G: 20200, R: 19100, E: 23222, C: 21528 };
+const TALKER_CONST = { GP: 'G', GL: 'R', GA: 'E', GB: 'C', BD: 'C' };
+
 class Component extends DcLite {
   state = {
     phase: 'boot', entryVisible: true, docked: false, drawerOpen: false, hdrPose: 'open',
@@ -114,7 +120,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=110'), import('./realdev.js?v=119'), import('./emu-driver.js?v=44'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=3')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=110'), import('./realdev.js?v=120'), import('./emu-driver.js?v=44'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=3')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.SB = SB;
       try { localStorage.removeItem('pccweb.cuckoo'); } catch (e) {}   // parked feature's persisted setting — clear the ghost
       this.session = SIM.createSession({ preroll: 1560 });
@@ -125,6 +131,8 @@ class Component extends DcLite {
         if (this._pccdUpdating) return;   // don't null bridgeInfo mid-update — it would unmount the panel + its live progress
         return this.realdev.detectBridge().then((j) => {
         const next = j || null;
+        // A different pccd (updated, restarted, or gone) may answer the per-satellite series differently.
+        if ((next && next.version) !== (this.state.bridgeInfo && this.state.bridgeInfo.version)) { this._archTrail = null; this._archTrailNone = false; }
         if (JSON.stringify(next) !== JSON.stringify(this.state.bridgeInfo || null)) this.setState({ bridgeInfo: next });
         // First time we see a bridge this session, check GitHub once for a newer pccd (prompts in UPDATES).
         if (next && !this._pccdChecked) { this._pccdChecked = true; setTimeout(() => this.checkPccdUpdate(false), 600); }
@@ -1635,7 +1643,7 @@ class Component extends DcLite {
         if (s.section === 'ground' && s.groundProj !== 'flat' && s.phase === 'app' && (s.globeRotate || this._globeDrag)) {
           // Long computed trails (24h ≈ 24k points) are costly to reproject each frame, so throttle
           // the rotating globe to ~18 fps and step 3× per redraw — smooth spin, a third of the cost.
-          const heavy = s.globeTrails && s.skyTrailAge > 5400 && this.appMode() === 'simulation' && !this._globeDrag;
+          const heavy = s.globeTrails && s.skyTrailAge > 5400 && (this.appMode() === 'simulation' || !!this.archTrails(s.skyTrailAge)) && !this._globeDrag;
           if (heavy) {
             if (now - (this._globeHeavyAt || 0) >= 55) { this._globeHeavyAt = now; this.globeRot.lon += 0.084; this.drawChart('globe'); }
           } else {
@@ -1827,9 +1835,11 @@ class Component extends DcLite {
     if (name === 'sky') {
       const trails = new Map();
       // TRAIL control IS the trail span (decoupled from the chart WINDOW). For long windows (1h..24h)
-      // in SIMULATION, use the computed full-constellation tracks; otherwise the live accumulated buffer.
+      // in SIMULATION, use the computed full-constellation tracks; CONNECTED to a recorder, the recorded
+      // tracks (any window); otherwise the live accumulated buffer.
       const cut = st.skyTrailAge;
-      const comp = this.simTrails(cut);
+      const sim = this.simTrails(cut);
+      const comp = sim || this.archTrails(cut);
       const source = comp ? comp.trails : S.trails;
       if (st.skyTrails) for (const [k, tr] of source) {
         const f = tr.filter((p) => nowS - p.t <= cut);
@@ -1838,20 +1848,20 @@ class Component extends DcLite {
       // Long window in the polar view: the HEATMAP is the long-term record (heatLong), the trail-LINES
       // stay a short recent ribbon (lineAge ≤45 min) so it never becomes spaghetti. Ground tracks (the
       // long line trails) live on MAP + GLOBE, not here.
-      const heatLong = !!comp;
+      const heatLong = !!comp && cut > 5400;
       const lineAge = heatLong ? Math.min(cut, 2700) : cut;
-      // Connected honesty: a real clock's trail reaches back only to this tab's connect (nothing
-      // models a real sky, and the daemon archive has no per-sat record yet). When the recorded
-      // depth is younger than the TRAIL window, say so on the plot instead of looking broken.
+      // Connected honesty: a real clock's trail reaches back only as far as its record, pccd's recorder
+      // or else this tab's connect (nothing models a real sky). When that depth is younger than the
+      // TRAIL window, say so on the plot instead of looking broken.
       let accNote = '';
-      if (!comp && S.real && st.skyTrails) {
+      if (!sim && S.real && st.skyTrails) {
         let oldest = nowS;
-        for (const tr of S.trails.values()) if (tr.length && tr[0].t < oldest) oldest = tr[0].t;
+        for (const tr of source.values()) if (tr.length && tr[0].t < oldest) oldest = tr[0].t;
         if (nowS - oldest < cut * 0.95) {
           const m = Math.max(0, Math.round((nowS - oldest) / 60));
           const rec = m < 60 ? m + ' MIN' : (m / 60).toFixed(m % 60 ? 1 : 0) + ' H';
           const win = cut >= 3600 ? (cut / 3600) + ' H' : Math.round(cut / 60) + ' MIN';
-          accNote = 'TRAIL RECORDS LIVE · ' + rec + ' OF ' + win + ' SO FAR';
+          accNote = comp ? 'RECORDED · ' + rec + ' OF ' + win : 'TRAIL RECORDS LIVE · ' + rec + ' OF ' + win + ' SO FAR';
         }
       }
       return CH.drawSky(el, T, {
@@ -1891,8 +1901,8 @@ class Component extends DcLite {
     // Ground tracks carry no timestamps (gtrails = plain points at ~45 s cadence), so the TRAIL
     // length control maps to a tail slice: 45 s per point, full buffer (40 pts) at MAX.
     const gcut = (g) => {
-      const comp = this.simTrails(st.skyTrailAge);
-      if (comp) return comp.gtrails;   // computed sim ground tracks already span exactly the window
+      const comp = this.simTrails(st.skyTrailAge) || this.archTrails(st.skyTrailAge);
+      if (comp) return comp.gtrails;   // computed (sim) or recorded (connected) ground tracks already span the window
       const n = Math.round(st.skyTrailAge / 45);
       if (n >= 40) return g;
       const m = new Map();
@@ -3916,12 +3926,81 @@ class Component extends DcLite {
     this._simTrail = { key, at: now, trails, gtrails };
     return this._simTrail;
   }
+  // A CONNECTED clock's trails come from the flight recorder: pccd logs every satellite's az/el once a
+  // minute whether or not a tab is open, so the TRAIL window reaches back past this tab's connect. Rows
+  // come from /history?series=sats (one per bucket); this tab's live buffer is joined on for the newest
+  // minutes. Refetched at most once a minute. null without a recorder, from a pccd older than the series,
+  // or until the first reply lands (the live buffer draws meanwhile).
+  archTrails(winSec) {
+    const S = this.session.S, hi = this.state.bridgeInfo && this.state.bridgeInfo.history;
+    if (!hi || !S.real || !this.realdev || this._archTrailNone) return null;
+    const c = this._archTrail, now = Date.now();
+    if (!this._archTrailBusy && now >= (this._archTrailRetryAt || 0) && (!c || c.win !== winSec || now - c.at >= 60000)) this.fetchArchTrails(winSec);
+    if (!c || c.win !== winSec) return null;
+    // Ground points need the clock's position, which pccd's rows don't carry: take the observer the live
+    // fix set, and redo them when it moves (right after connect it can still be the default).
+    const obsKey = S.obs.lat.toFixed(3) + ',' + S.obs.lon.toFixed(3);
+    if (c.obsKey !== obsKey) { c.gtrails = this.archGround(c.trails, S.obs); c.obsKey = obsKey; c.merged = null; }
+    if (!c.merged || now - c.mergedAt >= 5000) { c.merged = this.joinLiveTrails(c); c.mergedAt = now; }
+    return c.merged;
+  }
+  fetchArchTrails(winSec) {
+    this._archTrailBusy = true;
+    const to = Math.floor(Date.now() / 1000);
+    this.realdev.fetchBridgeHistory({ series: 'sats', from: to - winSec, to, points: Math.min(720, Math.ceil(winSec / 60)) }).then((rows) => {
+      this._archTrailBusy = false;
+      if (rows.length && !('sats' in rows[0])) { this._archTrailNone = true; return; }   // pccd < 0.7 answers with the timing series
+      const trails = new Map();
+      for (const r of rows) {
+        if (typeof r.sats !== 'string') continue;
+        for (const e of r.sats.split(';')) {
+          const [id, az, el, cn0] = e.split(':');
+          const constId = TALKER_CONST[id.slice(0, 2)], a = +az, h = +el;
+          if (!constId || !(h > 0) || !Number.isFinite(a)) continue;   // below the horizon, or no position yet (0:0)
+          const key = constId + id.slice(2).padStart(2, '0');
+          let tr = trails.get(key); if (!tr) { tr = []; trails.set(key, tr); }
+          tr.push({ t: r.t, az: a, el: h, cn0: +cn0 });
+        }
+      }
+      this._archTrail = { win: winSec, at: Date.now(), trails, gtrails: null, obsKey: null, merged: null, mergedAt: 0 };
+      this.drawChart('sky'); this.drawChart('globe'); this.drawChart('map');
+    }).catch(() => { this._archTrailBusy = false; this._archTrailRetryAt = Date.now() + 60000; });
+  }
+  archGround(trails, obs) {
+    const gtrails = new Map();
+    for (const [key, tr] of trails) {
+      const g = [];
+      for (const p of tr) {
+        const sp = subSatellitePoint({ azDeg: p.az, elDeg: p.el, constellation: { altitudeKm: ORBIT_KM[key[0]] }, observerLat: obs.lat, observerLon: obs.lon });
+        if (sp) g.push({ lat: sp.lat, lon: sp.lon, t: p.t });
+      }
+      if (g.length) gtrails.set(key, g);
+    }
+    return gtrails;
+  }
+  // Recorded points older than the live buffer's first, then the live points: the live buffer is denser
+  // (30 s) and runs up to the current second, where the recorder can be a minute behind.
+  joinLiveTrails(c) {
+    const S = this.session.S;
+    const join = (rec, live) => {
+      const out = new Map(rec);
+      for (const [k, tr] of live) {
+        if (!tr.length) continue;
+        const r = out.get(k);
+        out.set(k, r ? r.filter((p) => p.t < tr[0].t).concat(tr) : tr);
+      }
+      return out;
+    };
+    return { trails: join(c.trails, S.trails), gtrails: join(c.gtrails, S.gtrails) };
+  }
   setTrailAge(s) {
     this._simTrail = null;
-    // A long window in SIM is the polar view's LONG-TERM record → auto-show the heatmap (the coverage
-    // field), since the trail-lines there stay short. Ground-track trails are the MAP/GLOBE story.
+    // A long window is the polar view's LONG-TERM record (computed in SIM, recorded when CONNECTED to a
+    // pccd with a recorder) → auto-show the heatmap (the coverage field), since the trail-lines there
+    // stay short. Ground-track trails are the MAP/GLOBE story.
     const patch = { skyTrailAge: s };
-    if (s > 5400 && this.appMode() === 'simulation' && !this.state.skyHeatmap) patch.skyHeatmap = true;
+    const recorded = this.session && this.session.S.real && this.state.bridgeInfo && this.state.bridgeInfo.history && !this._archTrailNone;
+    if (s > 5400 && (this.appMode() === 'simulation' || recorded) && !this.state.skyHeatmap) patch.skyHeatmap = true;
     this.setState(patch, () => { this.drawChart('sky'); this.drawChart('globe'); this.drawChart('map'); });
   }
 
@@ -4549,10 +4628,9 @@ class Component extends DcLite {
     // as faithfully as the polar plot instead of going empty (they skip any sat whose geo is NaN).
     // The log doesn't carry the raw CONSTELLATIONS object, only its id, so map id → nominal orbit
     // altitude (the only field subSatellitePoint reads).
-    const ALT = { G: 20200, R: 19100, E: 23222, C: 21528 };
     const subPt = (az, el, constId) => {
       if (!(el > 0) || az == null) return { lat: NaN, lon: NaN };
-      const sp = subSatellitePoint({ azDeg: az, elDeg: el, constellation: { altitudeKm: ALT[constId] || 20200 }, observerLat: refLat, observerLon: refLon });
+      const sp = subSatellitePoint({ azDeg: az, elDeg: el, constellation: { altitudeKm: ORBIT_KM[constId] || 20200 }, observerLat: refLat, observerLon: refLon });
       return sp ? { lat: sp.lat, lon: sp.lon } : { lat: NaN, lon: NaN };
     };
     const cur = win.length ? win[win.length - 1] : null;

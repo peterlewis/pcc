@@ -12,7 +12,7 @@
 //
 // Chromium only (Web Serial). Gate the connect button on isSupported().
 
-import { Clock, BridgeClock } from './serial.js?v=22';
+import { Clock, BridgeClock } from './serial.js?v=23';
 import { parseGGA, parseRMC, parseGSA, GSVBuffer } from './nmea.js?v=2';
 import { parsePMTXTS, parsePMTXTC, centrePhase, foldPhase1ms } from './ppsts.js?v=15';
 import { parsePMSTAR, parsePMADEV, parsePMBRIT } from './pmext.mjs?v=2';
