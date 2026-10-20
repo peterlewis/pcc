@@ -7,7 +7,7 @@ The Precision Clock Companion app — source. Built to `../docs/` by CI and serv
 
 ## Requirements
 
-- Chromium-based browser (Chrome, Edge, Arc, Brave, Opera) for the hardware connection — Safari and Firefox don't implement Web Serial, but can still run the emulator.
+- Chromium-based browser (Chrome, Edge, Arc, Brave, Opera) for a direct Web Serial connection — Safari and Firefox don't implement Web Serial, but can still run the emulator, and connect through the local copy of the app that [`pccd`](../host/pccd/README.md) serves at `http://localhost:4192` (the hosted page offers it when it sees a daemon).
 - HTTPS or `localhost`.
 
 ## Run locally
@@ -29,6 +29,7 @@ web/
 ├── index.html          # the UI: a dc-lite template with {{binding}} placeholders
 ├── css/                # base.css + pcc-tokens.css (inlined at build; light/dark via CSS vars)
 ├── build.mjs           # bundles the app + compiles the firmware WASM → ../docs/
+├── local/              # pcc.ptrl.ws/local — bounces to the local copy pccd serves (localhost:4192)
 ├── emu/                # the firmware emulator
 │   ├── firmware/       #   clock4 submodule (@ rollup) — the real C source
 │   ├── phase1/         #   emscripten shim (main_wrap.c + HAL stubs) + build.sh + conformance suite

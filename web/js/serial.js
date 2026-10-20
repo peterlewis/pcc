@@ -277,6 +277,31 @@ export class BridgeClock extends EventTarget {
         });
     }
 
+    /// The clock's USB drive as the daemon sees it (GET /drive): { mounted: path|null, files: [{name,size,mtime}] }.
+    /// pccd (0.8+) finds the mounted CLOCK volume itself, so the app reads config.txt with no picker, in any browser.
+    static async driveInfo() {
+        const r = await fetch(`http://${BridgeClock.authority()}/drive`, { cache: 'no-store' });
+        if (!r.ok) throw new Error('drive HTTP ' + r.status);
+        return r.json();
+    }
+    /// One root-level file off the clock's drive. Resolves { bytes: Uint8Array, mtime: ms|null }, or null when
+    /// the drive has no such file (404). Throws on any other failure (daemon too old, drive gone).
+    static async driveRead(name) {
+        const r = await fetch(`http://${BridgeClock.authority()}/drive?file=${encodeURIComponent(name)}`, { cache: 'no-store' });
+        if (r.status === 404) return null;
+        if (!r.ok) throw new Error('drive HTTP ' + r.status);
+        const mt = +r.headers.get('X-Mtime');
+        return { bytes: new Uint8Array(await r.arrayBuffer()), mtime: Number.isFinite(mt) && mt > 0 ? mt * 1000 : null };
+    }
+    /// Rewrite config.txt on the clock's drive through the daemon, which gates the write on this page's Origin
+    /// (the same allow-list as the WebSocket). A text/plain body keeps the request CORS-simple: no preflight.
+    static async driveWrite(name, text) {
+        const r = await fetch(`http://${BridgeClock.authority()}/drive?file=${encodeURIComponent(name)}`,
+            { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, body: text });
+        if (!r.ok) throw new Error('drive write HTTP ' + r.status + ' — ' + (await r.text()).trim());
+        return r.json();
+    }
+
     /// Trigger a pccd self-update over a throwaway socket, independent of any clock connection.
     /// Sends the `pccd:update` control frame, streams the daemon's `pccd:update <msg>` progress
     /// lines to onLine(), and settles: { ok:true } when the socket drops (daemon re-exec'd onto the

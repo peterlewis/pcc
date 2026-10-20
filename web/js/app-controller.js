@@ -22,6 +22,8 @@ const CONFIG_DEFAULTS = configToState(DEFAULT_CONFIG);
 // it reads. pccd's history names each satellite by its GSV talker (GP7, GB13), mapped to the sim's constId.
 const ORBIT_KM = { G: 20200, R: 19100, E: 23222, C: 21528 };
 const TALKER_CONST = { GP: 'G', GL: 'R', GA: 'E', GB: 'C', BD: 'C' };
+// Where pccd serves this same app on a machine that runs it (BridgeClock.PORT in serial.js, not imported here).
+const LOCAL_APP_URL = 'http://localhost:4192/';
 
 class Component extends DcLite {
   state = {
@@ -71,9 +73,12 @@ class Component extends DcLite {
     tzOverride: 'auto', matrixFreq: '1.6',
     skyHeatmap: false, skyHorizon: false, skyTrails: true, skyLabels: true,
     appStale: false,   // the served app moved under this tab (pccd overlay refresh / Pages deploy) — offer a reload
-    // SPAN (s): how much ribbon each sat drags in the sky/map/globe views. With 12 h of
-    // restored history a full 90 min per sat reads as clutter, so default mid (45 min); 5400 = MAX
-    // (the fade horizon / the full trail buffer — pre-control behaviour, bit-for-bit).
+    localBand: null,   // hosted page's hand-off to the local app: 'detected' | 'blocked' | 'absent' | null (see localHandoff)
+    cfgReopen: false,  // a CLOCK-drive handle is remembered but needs a click to re-open (permission not held)
+    cfgNote: '',       // one-line state of the drive read (overrides the derived cfgDriveNote while set)
+    // SPAN (s): how far back the TRAILS and HEATMAP layers reach in the sky/map/globe views — each
+    // trail is the whole span, age-faded; the heatmap is sky occupancy over the same span. Default
+    // 45 min; a connected clock reaches back through pccd's recorder (24 h), else the live buffer.
     skyTrailAge: 2700,
     sigMedian: true, sigFilter: 'all',
     posWindow: 1800,
@@ -130,10 +135,14 @@ class Component extends DcLite {
       const probeBridge = () => {
         if (this._pccdUpdating) return;   // don't null bridgeInfo mid-update — it would unmount the panel + its live progress
         return this.realdev.detectBridge().then((j) => {
-        const next = j || null;
-        // A different pccd (updated, restarted, or gone) may answer the per-satellite series differently.
-        if ((next && next.version) !== (this.state.bridgeInfo && this.state.bridgeInfo.version)) { this._archTrail = null; this._archTrailNone = false; }
-        if (JSON.stringify(next) !== JSON.stringify(this.state.bridgeInfo || null)) this.setState({ bridgeInfo: next });
+        const next = j || null, prev = this.state.bridgeInfo;
+        // A different pccd (updated, restarted, or gone) may answer the per-satellite / position series differently.
+        if ((next && next.version) !== (prev && prev.version)) { this._archTrail = null; this._archTrailNone = false; this._archHist = null; this._archPosNone = false; }
+        if (JSON.stringify(next) !== JSON.stringify(prev || null)) this.setState({ bridgeInfo: next });
+        // The hosted page with a daemon on this machine: offer the local app, or go there if that is remembered.
+        this.localHandoff(next);
+        // The clock's drive appeared under a live bridge connection → config.txt reads itself, no click.
+        if (next && next.drive && !(prev && prev.drive) && this.session && this.session.S.real && this.realdev.transport && this.realdev.transport() === 'bridge') this.readClockDrive('auto');
         // First time we see a bridge this session, check GitHub once for a newer pccd (prompts in UPDATES).
         if (next && !this._pccdChecked) { this._pccdChecked = true; setTimeout(() => this.checkPccdUpdate(false), 600); }
         // ...and, for a web-refresh-capable daemon, compare the served app to the latest on Pages.
@@ -143,6 +152,7 @@ class Component extends DcLite {
         if (next && next.history) this.fetchArchive();
       }).catch(() => {});
       };
+      try { this._localDismissed = sessionStorage.getItem('pcc.localDismissed') === '1'; } catch (e) { this._localDismissed = false; }
       probeBridge();
       this.bridgeTimer = setInterval(probeBridge, 15000);
       // The WASM firmware emulator drives the display faces (the emulator IS the clock). Async
@@ -502,6 +512,40 @@ class Component extends DcLite {
     const S = this.session && this.session.S;
     if (S && S.real) return 'connected';
     return this.state.sim ? 'simulation' : 'standby';
+  }
+
+  // ---- hosted → local hand-off -----------------------------------------------------------------------
+  // pcc.ptrl.ws is the app for everyone; a machine running pccd has a better copy of the SAME app at
+  // localhost:4192 — same-origin with the bridge (every browser, no local-network prompts), the flight
+  // recorder behind it, the clock's drive readable. The hosted page's job is to say so the moment it can
+  // tell, and to stop asking once answered. The remembered preference (pcc.openLocal): ASK (default)
+  // shows the band when a daemon answers the probe; ALWAYS goes straight there — in a browser that cannot
+  // probe loopback from https (Safari) it goes blind, so pccd being up is then on you; STAY HOSTED never
+  // mentions it. `?hosted` on the URL overrides ALWAYS for one visit (the local page links back that way).
+  hostedPage() { try { return location.protocol === 'https:' && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname); } catch (e) { return false; } }
+  // Served over https from a real host, in a browser with no loopback carve-out → the local bridge is
+  // unreachable from this page whatever the daemon is doing (the probe never leaves the browser).
+  bridgeProbeBlocked() { return this.hostedPage() && !(typeof window !== 'undefined' && window.chrome); }
+  localPref() { try { return localStorage.getItem('pcc.openLocal') || 'ask'; } catch (e) { return 'ask'; } }
+  setLocalPref(v) { try { localStorage.setItem('pcc.openLocal', v); } catch (e) {} this.setState(v === 'ask' ? {} : { localBand: null }); }
+  stayHosted() { try { return /(^|[?&#])hosted(=|&|$)/.test(location.search + location.hash); } catch (e) { return false; } }
+  openLocalApp() { try { location.href = LOCAL_APP_URL + '?from=hosted'; } catch (e) {} }
+  localHandoff(bridge) {
+    if (!this.hostedPage() || this.stayHosted()) return;
+    const pref = this.localPref();
+    if (bridge) {
+      if (pref === 'always') {
+        if (this._localWent) return;
+        this._localWent = true;
+        if (this.session && this.session.log) this.session.log('rx', 'pccd detected on this machine — opening the local app (ALWAYS OPEN LOCAL; add ?hosted to the URL to stay)');
+        this.openLocalApp(); return;
+      }
+      if (pref === 'ask' && !this._localDismissed && this.state.localBand !== 'detected') this.setState({ localBand: 'detected' });
+      return;
+    }
+    // No answer. ALWAYS in a browser that cannot probe goes anyway; everyone else hears about it when they
+    // try to connect (connectRealDevice), which is when it matters.
+    if (pref === 'always' && this.bridgeProbeBlocked() && !this._localWent) { this._localWent = true; this.openLocalApp(); }
   }
   // ---------- sky-history persistence ----------
   // The SKY accumulations (az/el trails, ground tracks, C/N0 + pos/DOP/fix histories) build up over
@@ -1664,6 +1708,7 @@ class Component extends DcLite {
   }
 
   onTickStats() {
+    this._hist = this.histSeries();   // once per tick: the SIGNAL/POSITION histories (recorded + live) for the window
     this._pos = this.posStats();
     this._timing = this.timingStats();
   }
@@ -1845,11 +1890,12 @@ class Component extends DcLite {
         const f = tr.filter((p) => nowS - p.t <= cut);
         if (f.length > 1) trails.set(k, f);
       }
-      // Long window in the polar view: the HEATMAP is the long-term record (heatLong), the trail-LINES
-      // stay a short recent ribbon (lineAge ≤45 min) so it never becomes spaghetti. Ground tracks (the
-      // long line trails) live on MAP + GLOBE, not here.
-      const heatLong = !!comp && cut > 5400;
-      const lineAge = heatLong ? Math.min(cut, 2700) : cut;
+      // SPAN means span: the trail lines reach the whole window (age-faded, so the old part thins out)
+      // and the heatmap, when ON, is sky occupancy over the same window. Neither layer drives the other —
+      // extending the span used to lengthen only the heatmap and switch it on for you, which read as the
+      // trails being broken. Long-span line work is batched per alpha step in drawSky, so 24 h is cheap.
+      const heatLong = cut > 5400;
+      const lineAge = cut;
       // Connected honesty: a real clock's trail reaches back only as far as its record, pccd's recorder
       // or else this tab's connect (nothing models a real sky). When that depth is younger than the
       // TRAIL window, say so on the plot instead of looking broken.
@@ -1876,11 +1922,12 @@ class Component extends DcLite {
       const top = S.sats.filter((x) => x.el > 0 && (fil === 'all' || x.constId === fil)).sort((a, b) => b.cn0 - a.cn0).slice(0, 8);
       // One live WINDOW across the strip charts (SIGNAL + POSITION) — a dropout here lines up
       // with the DOP spike and position jump at the same instant on the POSITION tab.
-      return CH.drawCn0Time(el, T, top.map((x) => ({ tok: x.tok, pts: S.cn0Hist.get(x.key) || [] })), st.posWindow, nowS);
+      const H = this._hist || this.histSeries();
+      return CH.drawCn0Time(el, T, top.map((x) => ({ tok: x.tok, pts: H.cn0Hist.get(x.key) || [] })), st.posWindow, nowS, H.note);
     }
-    if (name === 'posScatter') return CH.drawPosScatter(el, T, this._pos.pts, this._pos, nowS);
-    if (name === 'dop') return CH.drawDop(el, T, S.dopHist, st.posWindow, nowS);
-    if (name === 'cont') return CH.drawContinuity(el, T, S.fixHist, st.posWindow, nowS, S.ttff, S.t0);
+    if (name === 'posScatter') return CH.drawPosScatter(el, T, this._pos.pts, { ...this._pos, note: (this._hist || this.histSeries()).note }, nowS);
+    if (name === 'dop') { const H = this._hist || this.histSeries(); return CH.drawDop(el, T, H.dopHist, st.posWindow, nowS, H.note); }
+    if (name === 'cont') { const H = this._hist || this.histSeries(); return CH.drawContinuity(el, T, H.fixHist, st.posWindow, nowS, S.ttff, S.t0, H.note); }
     // Standby draws the ABSENT state, never a leftover buffer — same rule (and reason) as rvTiming's
     // `standby` gate. adevData() already gates itself on appMode; these three read S.pps directly.
     // REVIEW is the one legitimate "data with no live state": reconstructReview rebuilds S.pps from the
@@ -2144,11 +2191,95 @@ class Component extends DcLite {
     this.setState({ dataSources: this.state.dataSources.map((s) => s.id === id ? fn({ ...s }) : s) }, () => { this.saveDataSources(); this.startDataSources(); });
   }
 
+  setPosWindow(s) { this.setState({ posWindow: s }, () => { this.onTickStats(); this.drawCharts(); }); }
+
+  // ---- recorded SIGNAL / POSITION histories ----------------------------------------------------------
+  // pccd records every satellite's C/N0 once a minute (S rows) and the fix every 10 s (P rows, 0.8+), so
+  // the SIGNAL and POSITION windows reach back past this tab's connect — and past its closing. Same join
+  // as the trails: recorded points up to the live buffer's first, then the live buffer (denser, and up
+  // to the current second). Cached per window, refetched at most once a minute; null without a recorder,
+  // from a pccd older than the series, or until the first reply lands (the live buffers draw meanwhile).
+  archHist(winSec) {
+    const S = this.session && this.session.S, hi = this.state.bridgeInfo && this.state.bridgeInfo.history;
+    if (!S || !hi || !S.real || !this.realdev || this._archTrailNone) return null;
+    const c = this._archHist, now = Date.now();
+    if (!this._archHistBusy && now >= (this._archHistRetryAt || 0) && (!c || c.win !== winSec || now - c.at >= 60000)) this.fetchArchHist(winSec);
+    if (!c || c.win !== winSec) return null;
+    // ENU needs the observer, which the P rows don't carry (they carry the fix itself): redo on a move.
+    const obsKey = S.obs.lat.toFixed(5) + ',' + S.obs.lon.toFixed(5);
+    if (c.obsKey !== obsKey) { c.posHist = this.archEnu(c.pos, S.obs); c.obsKey = obsKey; c.merged = null; }
+    if (!c.merged || now - c.mergedAt >= 5000) { c.merged = this.joinLiveHist(c); c.mergedAt = now; }
+    return c.merged;
+  }
+  fetchArchHist(winSec) {
+    this._archHistBusy = true;
+    const to = Math.floor(Date.now() / 1000), from = to - winSec;
+    Promise.all([
+      this.realdev.fetchBridgeHistory({ series: 'sats', from, to, points: Math.min(1440, Math.max(60, Math.ceil(winSec / 60))) }),
+      this._archPosNone ? Promise.resolve([]) : this.realdev.fetchBridgeHistory({ series: 'pos', from, to, points: Math.min(4000, Math.max(120, Math.ceil(winSec / 10))) }),
+    ]).then(([sats, pos]) => {
+      this._archHistBusy = false;
+      if (sats.length && !('sats' in sats[0])) { this._archTrailNone = true; return; }   // pccd < 0.7 answers with the timing series
+      if (pos.length && !('lat' in pos[0])) { this._archPosNone = true; pos = []; }        // pccd < 0.8: no P rows yet
+      const cn0 = new Map();
+      for (const r of sats) {
+        if (typeof r.sats !== 'string') continue;
+        for (const e of r.sats.split(';')) {
+          const [id, , el, c] = e.split(':');
+          const constId = TALKER_CONST[id.slice(0, 2)], v = +c;
+          if (!constId || !(+el > 0) || !(v > 0)) continue;   // below the horizon, or no C/N0 (not tracked)
+          const key = constId + id.slice(2).padStart(2, '0');
+          let h = cn0.get(key); if (!h) { h = []; cn0.set(key, h); }
+          h.push({ t: r.t, v });
+        }
+      }
+      const dopHist = [], fixHist = [];
+      for (const r of pos) { dopHist.push({ t: r.t, h: r.hdop, p: r.pdop, v: r.vdop }); fixHist.push({ t: r.t, type: r.fix, sats: r.used }); }
+      this._archHist = { win: winSec, at: Date.now(), cn0, pos, dopHist, fixHist, posHist: null, obsKey: null, merged: null, mergedAt: 0 };
+      this.onTickStats();
+      this.drawChart('cn0time'); this.drawChart('posScatter'); this.drawChart('dop'); this.drawChart('cont');
+      this.setState({});
+    }).catch(() => { this._archHistBusy = false; this._archHistRetryAt = Date.now() + 60000; });
+  }
+  archEnu(pos, obs) {
+    const cosLat = Math.cos(obs.lat * Math.PI / 180);
+    return pos.map((r) => ({ t: r.t, e: (r.lon - obs.lon) * 111320 * cosLat, n: (r.lat - obs.lat) * 111320, lat: r.lat, lon: r.lon, alt: r.alt }));
+  }
+  joinLiveHist(c) {
+    const S = this.session.S;
+    const join = (rec, live) => (live.length ? rec.filter((p) => p.t < live[0].t).concat(live) : rec);
+    const cn0Hist = new Map(c.cn0);
+    for (const [k, h] of S.cn0Hist) { if (!h.length) continue; const r = cn0Hist.get(k); cn0Hist.set(k, r ? r.filter((p) => p.t < h[0].t).concat(h) : h); }
+    return { cn0Hist, posHist: join(c.posHist || [], S.posHist), dopHist: join(c.dopHist, S.dopHist), fixHist: join(c.fixHist, S.fixHist) };
+  }
+  // The SIGNAL / POSITION histories for the live WINDOW: recorded + live when a recorder stands behind
+  // this connection, else the live buffers. `note` states the depth when it falls short of the window,
+  // so a half-empty 24 h chart reads as honest, not broken.
+  histSeries() {
+    const S = this.session && this.session.S, win = this.state.posWindow, nowS = Math.floor(Date.now() / 1000);
+    if (!S) return { cn0Hist: new Map(), posHist: [], dopHist: [], fixHist: [], note: '' };
+    const rec = (S.real && this.state.bridgeInfo && this.state.bridgeInfo.history) ? this.archHist(win) : null;
+    const out = rec || { cn0Hist: S.cn0Hist, posHist: S.posHist, dopHist: S.dopHist, fixHist: S.fixHist };
+    let note = '';
+    if (S.connected) {
+      let oldest = nowS;
+      for (const arr of [out.posHist, out.dopHist, out.fixHist]) if (arr.length && arr[0].t < oldest) oldest = arr[0].t;
+      for (const h of out.cn0Hist.values()) if (h.length && h[0].t < oldest) oldest = h[0].t;
+      if (nowS - oldest < win * 0.95) {
+        const m = Math.max(0, Math.round((nowS - oldest) / 60));
+        const have = m < 60 ? m + ' MIN' : (m / 60).toFixed(m % 60 ? 1 : 0) + ' H';
+        const want = win >= 3600 ? (win / 3600) + ' H' : Math.round(win / 60) + ' MIN';
+        note = (rec ? 'RECORDED · ' : S.real ? 'LIVE BUFFER · ' : 'SIMULATION BUFFER · ') + have + ' OF ' + want;
+      }
+    }
+    return { ...out, note };
+  }
+
   // ---------- stats ----------
   posStats() {
     const S = this.session && this.session.S;
     const win = this.state.posWindow, nowS = Math.floor(Date.now() / 1000);
-    const pts = S ? S.posHist.filter((p) => nowS - p.t <= win) : [];
+    const pts = S ? (this._hist || this.histSeries()).posHist.filter((p) => nowS - p.t <= win) : [];
     if (!pts.length) return { pts, me: 0, mn: 0, cep: 0, drms: 0, sigE: 0, sigN: 0, n: 0 };
     let me = 0, mn = 0;
     for (const p of pts) { me += p.e; mn += p.n; }
@@ -2778,6 +2909,20 @@ class Component extends DcLite {
       ssThemeDark: this.seg(st.theme === 'dark', true), ssThemeLight: this.seg(st.theme === 'light', false),
       onThemeDark: () => this.setTheme('dark'), onThemeLight: () => this.setTheme('light'),
       appStaleOn: st.appStale, onAppReload: () => { try { location.reload(); } catch (e) {} },
+      // The hosted page's hand-off band (localHandoff). One sentence of why, three answers.
+      localBandOn: !!st.localBand,
+      localBandTitle: st.localBand === 'detected' ? 'PCC BRIDGE IS RUNNING ON THIS MACHINE'
+        : st.localBand === 'blocked' ? 'THIS BROWSER CANNOT REACH A LOCAL BRIDGE FROM AN https PAGE'
+        : 'NO WAY TO A CLOCK FROM THIS PAGE',
+      localBandMsg: st.localBand === 'detected'
+        ? 'THE LOCAL APP IS THIS SAME APP, SERVED BY YOUR pccd AT ' + LOCAL_APP_URL.replace(/\/$/, '') + ': SAME-ORIGIN BRIDGE (EVERY BROWSER, NO LOCAL-NETWORK PROMPTS), THE FLIGHT-RECORDER ARCHIVE, THE CLOCK\'S OWN DRIVE. ALWAYS = NEXT TIME GO STRAIGHT THERE (ADD ?hosted TO STAY ONCE).'
+        : st.localBand === 'blocked'
+        ? 'SO pccd MAY WELL BE RUNNING, UNSEEN. IF IT IS, THE LOCAL APP AT ' + LOCAL_APP_URL.replace(/\/$/, '') + ' CONNECTS IN THIS BROWSER. ALWAYS SENDS YOU THERE ON ARRIVAL — BLIND, SO KEEP pccd RUNNING. CHANGE YOUR MIND IN DEVICE › CONNECT.'
+        : 'NO WEB SERIAL HERE, AND NO pccd ANSWERED. INSTALL pccd (DEVICE › CONNECT, ONE LINE), THEN USE THE LOCAL APP AT ' + LOCAL_APP_URL.replace(/\/$/, '') + ' — IT WORKS IN THIS BROWSER.',
+      localUrl: LOCAL_APP_URL,
+      onOpenLocal: (e) => { if (e && e.preventDefault) e.preventDefault(); this.openLocalApp(); },
+      onLocalAlways: () => { this.setLocalPref('always'); this.openLocalApp(); },
+      onLocalNotNow: () => { this._localDismissed = true; try { sessionStorage.setItem('pcc.localDismissed', '1'); } catch (e) {} this.setState({ localBand: null }); },
       ssScenLock: this.seg(st.scenario === 'locked', true),
       ssScenAcq: this.seg(st.scenario === 'acquiring', false),
       ssScenNone: this.seg(st.scenario === 'nofix', false),
@@ -3312,12 +3457,23 @@ class Component extends DcLite {
   // and the clickable header status.
   async connectRealDevice() {
     if (!this.realdev || (this.session && this.session.S.connected)) return;
+    // A hosted page that has neither Web Serial nor a bridge in sight: the way through is the local app,
+    // and the band says so — a bare "no transport" error left people guessing which address to use.
+    if (this.hostedPage() && !(typeof navigator !== 'undefined' && navigator.serial) && !this.state.bridgeInfo) {
+      const blocked = this.bridgeProbeBlocked();
+      this.setState({ localBand: blocked ? 'blocked' : 'absent' });
+      if (this.session) this.session.log('rx', 'no transport on this page — ' + (blocked ? 'this browser cannot reach a local pccd from an https page' : 'no Web Serial, and no pccd answered') + '. See the band at the top.', true);
+      return;
+    }
     this._devCaps = null;   // unknown until this device's config.txt is read (assume full meanwhile)
     try {
       await this.realdev.connect();
       try { localStorage.setItem('pcc.realDeviceSeen', '1'); } catch (e) { /* private mode */ }
       this.restoreSkyHistory('real');   // reload/unplug continuity — a real sky only restores into a real session
       this.setState({});
+      // config.txt by itself: through pccd when it sees the drive, else a remembered handle whose permission
+      // still holds. Deferred a beat so the connect's own log lines land first.
+      setTimeout(() => this.readClockDrive('auto'), 400);
     } catch (e) {
       if (this.session) this.session.log('rx', 'ERR: ' + ((e && e.message) || 'connect cancelled'), true);
       this.setState({});
@@ -3344,9 +3500,10 @@ class Component extends DcLite {
     const chrom = typeof window !== 'undefined' && !!window.chrome;
     // Served over https from a real host, with a browser that has no loopback carve-out → the local
     // bridge is unreachable from this page no matter what the daemon is doing.
-    const bridgeBlocked = !bridgeOk && !chrom && typeof location !== 'undefined' &&
-      location.protocol === 'https:' && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+    const bridgeBlocked = !bridgeOk && this.bridgeProbeBlocked();
     const bridge = !!this.state.bridgeInfo;   // pccd answered its probe — the bridge transport is up
+    const hosted = this.hostedPage(), lpref = this.localPref();
+    const servedByPccd = bridge && typeof location !== 'undefined' && location.protocol === 'http:' && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
     return {
       cPort: this.portName(S),
       cDevice: conn ? (S.real ? 'Precision Clock Mk IV · STM32 CDC' : 'Emulated Mk IV · no hardware') : '—',
@@ -3386,6 +3543,15 @@ class Component extends DcLite {
             : 'AVAILABLE',
           trBrSt: bridge ? (conn && real ? 'live' : 'ready') : 'warn',
           trBrV: bridge ? ((conn && real) ? 'CONNECTED' : 'RUNNING — READY') : 'NOT RUNNING — INSTALL BELOW',
+          // The clock's USB drive as pccd sees it: mounted = config.txt reads itself over the bridge.
+          trDrSt: bridge ? (st.bridgeInfo.drive ? 'ready' : ('drive' in st.bridgeInfo ? 'warn' : 'absent')) : 'absent',
+          trDrV: bridge ? (st.bridgeInfo.drive ? 'MOUNTED · ' + st.bridgeInfo.drive : ('drive' in st.bridgeInfo ? 'NOT SEEN — MOUNT THE CLOCK VOLUME' : 'NEEDS pccd 0.8+')) : '—',   // the path as it is: case matters on Linux
+          // Which copy of the app this is, and — on the hosted one — what to do when pccd is around.
+          appOrgSt: hosted ? 'ready' : 'live',
+          appOrgV: hosted ? ('HOSTED · ' + (typeof location !== 'undefined' ? location.hostname.toUpperCase() : 'PCC.PTRL.WS')) : (servedByPccd ? 'LOCAL · SERVED BY pccd' : 'LOCAL · DEV SERVER'),
+          localPrefShow: hosted,
+          ssLocalAsk: this.seg(lpref === 'ask', true), ssLocalAlways: this.seg(lpref === 'always', false), ssLocalNever: this.seg(lpref === 'never', false),
+          oLocalAsk: () => this.setLocalPref('ask'), oLocalAlways: () => this.setLocalPref('always'), oLocalNever: () => this.setLocalPref('never'),
         };
       })(),
       // ---- SIMULATION DRILL -----------------------------------------------------------------
@@ -3427,63 +3593,32 @@ class Component extends DcLite {
         if (this.session) this.session.log('tx', 'CLOSE');
         this.setState({ scenario: 'locked' }); this.syncFaces();
       },
-      // Read config.txt off the mounted CLOCK drive → initialise the face to the
-      // device's REAL state (colon, enabled modes, brightness, zone). Serial can't
-      // read config back, so this is the only accurate-init path.
-      onReadConfig: async () => {
-        if (!this.realdev) return;
-        try {
-          const r = this.realdev.readClockVolume ? await this.realdev.readClockVolume() : await this.realdev.readConfigFile();
-          // ≥v0.0.5 clocks persist on-device MENU edits into SETTINGS.BIN, so the EFFECTIVE config is
-          // config.txt ⊕ those overrides (merged with the firmware's mtime-stamped precedence rule).
-          // Reconstruct that merge here so the app reflects what the clock is actually doing.
-          let ovr = null, parsedKeep = null;
-          if (r.settings && this.SB) {
-            const parsed = this.SB.parseSettingsBin(r.settings);
-            parsedKeep = parsed && parsed.found ? parsed : null;   // raw fields feed MERGE INTO config.txt
-            ovr = this.SB.winningOverrides(parsed, r.text, r.mtime, this.fwModeName());
-            if (ovr) {
-              const f = parsed.fields;
-              const wins = (id) => { const e = ovr.entries.find((x) => x.id === id); return !!(e && e.wins); };
-              if (wins('colon') && this.SB.COLON_NAMES[f.colon]) r.cfg.colon = this.SB.COLON_NAMES[f.colon];
-              if (wins('brightness') && f.brightness >= 0) r.cfg.brightness = 1 - f.brightness / 4095; // raw inverted-DAC → fraction; <0 = sensor AUTO (leave as-is)
-              if (wins('matrixFreq')) r.cfg.matrixHz = f.matrixFreq;
-              if (wins('pageMs')) r.cfg.astroPageMs = f.pageMs;
-              for (const m of ovr.modes) if (m.wins && m.name.startsWith('MODE_')) (r.cfg.modes = r.cfg.modes || {})[m.name] = m.on;
-            }
-          }
-          this.applyDeviceConfig(r.cfg);
-          this._menuOvr = ovr;                                // panel model (not serialisable state)
-          this._menuOvrParsed = parsedKeep;                   // raw SETTINGS.BIN fields for the transpose
-          this.cfgHandle = r.fh; this._cfgOriginal = r.text; // handle/original are not serialisable state
-          if (this.els.cfgEditor) this.els.cfgEditor.value = r.text;
-          const en = Object.values(r.cfg.modes || {}).filter(Boolean).length;
-          const ovrN = ovr ? ovr.entries.length + ovr.modes.filter((m) => m.known !== false).length : 0;
-          if (this.session.log) this.session.log('rx', `[config] ${r.name}: colon=${r.cfg.colon || '?'} · ${en} modes enabled${ovrN ? ` · ${ovrN} menu override${ovrN === 1 ? '' : 's'} merged (SETTINGS.BIN gen ${ovr.gen})` : (r.settings ? ' · SETTINGS.BIN: no menu edits stored' : '')} — applied to face`);
-          this.setState({ cfgName: r.name, cfgDirty: false });
-        } catch (e) {
-          if (e && e.name === 'AbortError') return; // user dismissed the picker
-          if (this.session) this.session.log('rx', 'config read failed: ' + ((e && e.message) || e), true);
-          this.setState({});
-        }
-      },
+      // Read config.txt off the mounted CLOCK drive → initialise the face to the device's REAL state
+      // (colon, enabled modes, brightness, zone). Serial can't read config back, so this is the only
+      // accurate-init path — and it mostly happens by itself now (readClockDrive): through pccd when it
+      // sees the drive, else a remembered handle; this button is the picker, or the one-click RE-OPEN.
+      onReadConfig: () => this.readClockDrive(st.cfgReopen && !this.bridgeDrive() ? 'reopen' : 'pick'),
       onCfgInput: () => { const t = this.els.cfgEditor ? this.els.cfgEditor.value : ''; const d = t !== (this._cfgOriginal || ''); if (d !== st.cfgDirty) this.setState({ cfgDirty: d }); },
       onCfgRevert: () => { if (this.els.cfgEditor) this.els.cfgEditor.value = this._cfgOriginal || ''; this.setState({ cfgDirty: false }); },
       onCfgWriteToggle: () => { const v = !st.cfgWrite; try { localStorage.setItem('pccweb.cfgWrite', v ? '1' : '0'); } catch (e) {} this.setState({ cfgWrite: v }); },
       onCfgSave: async () => {
         const t = this.els.cfgEditor && this.els.cfgEditor.value;
-        if (!this.cfgHandle || t == null || !st.cfgWrite || !st.cfgDirty) return;
+        const viaBridge = this._cfgVia === 'bridge' && this.bridgeDrive();
+        if (!(this.cfgHandle || viaBridge) || t == null || !st.cfgWrite || !st.cfgDirty) return;
         try {
-          await this.realdev.writeConfigFile(this.cfgHandle, t);
+          if (viaBridge) await this.realdev.writeConfigBridge(t);
+          else await this.realdev.writeConfigFile(this.cfgHandle, t);
           this._cfgOriginal = t;
-          if (this.session && this.session.log) this.session.log('tx', `[config] wrote ${st.cfgName} (${t.length} bytes) to the CLOCK drive`);
+          if (this.session && this.session.log) this.session.log('tx', `[config] wrote ${st.cfgName} (${t.length} bytes) to the CLOCK drive` + (viaBridge ? ' via pccd' : ''));
           this.setState({ cfgDirty: false });
         } catch (e) {
           if (this.session) this.session.log('tx', 'config write failed: ' + ((e && e.message) || e), true);
         }
       },
       cbCfgWrite: this.cb(st.cfgWrite),
-      cfgHasFile: !!this.cfgHandle,
+      cfgHasFile: !!(this.cfgHandle || this._cfgVia === 'bridge'),
+      cfgReadLabel: (st.cfgReopen && !this.bridgeDrive()) ? 'RE-OPEN CLOCK DRIVE' : 'READ CLOCK DRIVE',
+      cfgDriveNote: this.cfgDriveNote(),
       // MENU OVERRIDES — the on-device menu edits recovered from SETTINGS.BIN (≥v0.0.5), with the
       // firmware's own precedence verdict per key. Rendered only after a volume read that found them.
       menuOvrOn: !!(this._menuOvr && (this._menuOvr.entries.length || this._menuOvr.modes.length)),
@@ -3526,10 +3661,11 @@ class Component extends DcLite {
         if (this.session && this.session.log) this.session.log('tx', `[config] transposed ${kv.length} menu value${kv.length === 1 ? '' : 's'} into the editor — SAVE TO CLOCK to write them`);
         this.setState({ cfgDirty: this.els.cfgEditor.value !== (this._cfgOriginal || '') });
       },
-      cfgSaveDisabled: !(st.cfgDirty && st.cfgWrite && this.cfgHandle),
-      cfgSaveStyle: this.btn(false, !(st.cfgDirty && st.cfgWrite && this.cfgHandle)),
-      readCfgDisabled: this.appMode() === 'standby' || !(typeof window !== 'undefined' && ('showDirectoryPicker' in window || 'showOpenFilePicker' in window)),
-      readCfgStyle: this.btn(false, this.appMode() === 'standby' || !(typeof window !== 'undefined' && ('showDirectoryPicker' in window || 'showOpenFilePicker' in window))),
+      cfgSaveDisabled: !(st.cfgDirty && st.cfgWrite && (this.cfgHandle || (this._cfgVia === 'bridge' && this.bridgeDrive()))),
+      cfgSaveStyle: this.btn(false, !(st.cfgDirty && st.cfgWrite && (this.cfgHandle || (this._cfgVia === 'bridge' && this.bridgeDrive())))),
+      // Readable when something can read it: the picker (Chromium) or pccd's view of the drive (any browser).
+      readCfgDisabled: this.appMode() === 'standby' || !(this.bridgeDrive() || (typeof window !== 'undefined' && ('showDirectoryPicker' in window || 'showOpenFilePicker' in window))),
+      readCfgStyle: this.btn(false, this.appMode() === 'standby' || !(this.bridgeDrive() || (typeof window !== 'undefined' && ('showDirectoryPicker' in window || 'showOpenFilePicker' in window)))),
       // SIMULATE is a toggle, never greyed by history — only blocked while a real device is live.
       // CONNECT DEVICE needs A transport: Web Serial or a detected pccd bridge (any browser).
       realDisabled: conn || !(serialOk || bridgeOk), connectDisabled: !!(S && S.real), discDisabled: !conn,
@@ -3544,7 +3680,7 @@ class Component extends DcLite {
       supBridge: bridgeOk ? ('DETECTED v' + (st.bridgeInfo.version || '?') + ' — ' + (st.bridgeInfo.device || 'no device'))
                           : (bridgeBlocked ? 'UNREACHABLE FROM THIS PAGE' : 'NOT RUNNING'),
       supBridgeC: bridgeOk ? 'var(--lock)' : (bridgeBlocked ? 'var(--acq)' : 'var(--txt3)'),
-      bridgeBlocked, bridgeLocalUrl: 'http://localhost:4192',   // BridgeClock.PORT (serial.js) — not imported here
+      bridgeBlocked, bridgeLocalUrl: LOCAL_APP_URL,
       supCtx: ctxOk ? 'SECURE' : 'INSECURE', supCtxC: ctxOk ? 'var(--lock)' : 'var(--none)',
       supChrom: chrom ? 'CHROMIUM' : 'NON-CHROMIUM', supChromC: chrom ? 'var(--lock)' : 'var(--acq)',
       gateVisible: (!serialOk || !ctxOk) && !bridgeOk,
@@ -3683,9 +3819,11 @@ class Component extends DcLite {
       pMeanLon: S && P.n ? this.ll(mlon, false) : '—',
       pN: String(P.n),
       ssPwin15: this.seg(st.posWindow === 900, true), ssPwin30: this.seg(st.posWindow === 1800, false), ssPwin1h: this.seg(st.posWindow === 3600, false),
-      oPwin15: () => this.setState({ posWindow: 900 }, () => { this.onTickStats(); this.drawCharts(); }),
-      oPwin30: () => this.setState({ posWindow: 1800 }, () => { this.onTickStats(); this.drawCharts(); }),
-      oPwin1h: () => this.setState({ posWindow: 3600 }, () => { this.onTickStats(); this.drawCharts(); }),
+      ssPwin6h: this.seg(st.posWindow === 21600, false), ssPwin24h: this.seg(st.posWindow === 86400, false),
+      oPwin15: () => this.setPosWindow(900), oPwin30: () => this.setPosWindow(1800), oPwin1h: () => this.setPosWindow(3600),
+      // Past the hour the live buffers hold, the window reads pccd's recorder (histSeries) — a connected
+      // clock's C/N0 and position reach back through the night, whether or not a tab was open.
+      oPwin6h: () => this.setPosWindow(21600), oPwin24h: () => this.setPosWindow(86400),
       ttffLabel: S ? S.ttff.toFixed(1) + ' s' : '—',
     };
   }
@@ -3887,10 +4025,102 @@ class Component extends DcLite {
     };
   }
 
+  // ---- the CLOCK drive ---------------------------------------------------------------------------------
+  // config.txt is the only accurate init (serial config is write-only), and it should arrive by itself.
+  // Three ways in, tried in this order: the BRIDGE (pccd 0.8+ finds the mounted volume and serves it on
+  // /drive — no picker, no gesture, any browser), a REMEMBERED directory handle (Chromium keeps the
+  // permission across reloads for a while, and for good on a persistent grant), and the PICKER (one
+  // gesture, then remembered). `mode`: 'auto' = no gesture to hand (after connect; when the drive appears);
+  // 'reopen' = a click on RE-OPEN CLOCK DRIVE (asks for the remembered handle's permission, no picker);
+  // 'pick' = READ CLOCK DRIVE (the picker, or the bridge when it has the drive).
+  bridgeDrive() {
+    const bi = this.state.bridgeInfo;
+    return !!(bi && bi.drive && this.realdev && this.realdev.transport && this.realdev.transport() === 'bridge');
+  }
+  async readClockDrive(mode) {
+    if (!this.realdev || this._cfgReading) return;
+    if (mode === 'auto' && !(this.session && this.session.S.real)) return;
+    this._cfgReading = true;
+    try {
+      let r = null;
+      if (this.bridgeDrive()) {
+        r = await this.realdev.readClockVolumeBridge();
+      } else if (mode === 'auto' || mode === 'reopen') {
+        if (!this.realdev.reopenClockVolume) return;
+        let got = null;
+        try { got = await this.realdev.reopenClockVolume(mode === 'reopen'); }
+        catch (e) {
+          // The remembered folder is not (any more) a CLOCK drive: forget it, and in a click go to the picker.
+          if (mode !== 'reopen') throw e;
+          await this.realdev.forgetClockVolume(); got = 'gone';
+        }
+        if (got === 'gone') {
+          if (mode === 'reopen') { this.setState({ cfgReopen: false, cfgNote: '' }); r = await this.realdev.readClockVolume(); }
+          else { this.setState({ cfgReopen: false, cfgNote: 'REMEMBERED CLOCK DRIVE NOT FOUND — PLUG THE CLOCK IN, OR PICK IT AGAIN' }); return; }
+        } else if (!got) {
+          // Nothing readable without a click. Say whether a click would do (a handle is remembered).
+          const has = await this.realdev.hasRememberedVolume();
+          if (has !== this.state.cfgReopen) this.setState({ cfgReopen: has });
+          if (mode === 'reopen' && !has) r = await this.realdev.readClockVolume();   // gesture is live: the picker
+          else return;
+        } else r = got;
+      } else {
+        r = this.realdev.readClockVolume ? await this.realdev.readClockVolume() : await this.realdev.readConfigFile();
+      }
+      if (r) this.adoptClockVolume(r);
+    } catch (e) {
+      if (e && e.name === 'AbortError') return; // user dismissed the picker
+      if (this.session) this.session.log('rx', 'config read failed: ' + ((e && e.message) || e), true);
+      this.setState({});
+    } finally { this._cfgReading = false; }
+  }
+  // One line under the config buttons saying where config.txt comes from here, and whether it did.
+  cfgDriveNote() {
+    const st = this.state, bi = st.bridgeInfo, via = this._cfgVia, S = this.session && this.session.S;
+    if (st.cfgNote) return st.cfgNote;
+    if (this.bridgeDrive()) return 'CLOCK DRIVE ' + bi.drive + ' · VIA pccd · ' + (via === 'bridge' ? 'READ BY ITSELF' : 'READS WITHOUT A PICKER');
+    if (S && S.real && this.realdev && this.realdev.transport && this.realdev.transport() === 'bridge')
+      return (bi && 'drive' in bi) ? 'pccd SEES NO CLOCK DRIVE — IS THE CLOCK VOLUME MOUNTED ON THE BRIDGE HOST?' : 'THIS pccd PREDATES /drive (0.8) — UPDATE IT IN DEVICE › UPDATES, OR USE THE PICKER';
+    if (via === 'remembered') return 'CLOCK DRIVE · REMEMBERED · READ BY ITSELF';
+    if (st.cfgReopen) return 'CLOCK DRIVE REMEMBERED — RE-OPEN IS ONE CLICK, NO PICKER';
+    if (via === 'picker') return 'CLOCK DRIVE · PICKED · REMEMBERED FOR NEXT TIME';
+    return '';
+  }
+  // A read of the CLOCK volume (any route) becomes the app's picture of the clock: config.txt ⊕ the
+  // ≥v0.0.5 on-device MENU edits in SETTINGS.BIN (merged with the firmware's mtime-stamped precedence
+  // rule), so the app reflects what the clock is actually doing — not just the baseline file.
+  adoptClockVolume(r) {
+    let ovr = null, parsedKeep = null;
+    if (r.settings && this.SB) {
+      const parsed = this.SB.parseSettingsBin(r.settings);
+      parsedKeep = parsed && parsed.found ? parsed : null;   // raw fields feed MERGE INTO config.txt
+      ovr = this.SB.winningOverrides(parsed, r.text, r.mtime, this.fwModeName());
+      if (ovr) {
+        const f = parsed.fields;
+        const wins = (id) => { const e = ovr.entries.find((x) => x.id === id); return !!(e && e.wins); };
+        if (wins('colon') && this.SB.COLON_NAMES[f.colon]) r.cfg.colon = this.SB.COLON_NAMES[f.colon];
+        if (wins('brightness') && f.brightness >= 0) r.cfg.brightness = 1 - f.brightness / 4095; // raw inverted-DAC → fraction; <0 = sensor AUTO (leave as-is)
+        if (wins('matrixFreq')) r.cfg.matrixHz = f.matrixFreq;
+        if (wins('pageMs')) r.cfg.astroPageMs = f.pageMs;
+        for (const m of ovr.modes) if (m.wins && m.name.startsWith('MODE_')) (r.cfg.modes = r.cfg.modes || {})[m.name] = m.on;
+      }
+    }
+    this.applyDeviceConfig(r.cfg);
+    this._menuOvr = ovr;                                // panel model (not serialisable state)
+    this._menuOvrParsed = parsedKeep;                   // raw SETTINGS.BIN fields for the transpose
+    this.cfgHandle = r.fh || null; this._cfgVia = r.via || 'picker'; this._cfgOriginal = r.text; // handle/original are not serialisable state
+    if (this.els.cfgEditor) this.els.cfgEditor.value = r.text;
+    const en = Object.values(r.cfg.modes || {}).filter(Boolean).length;
+    const ovrN = ovr ? ovr.entries.length + ovr.modes.filter((m) => m.known !== false).length : 0;
+    const how = r.via === 'bridge' ? 'via pccd' : r.via === 'remembered' ? 'remembered drive' : 'picked';
+    if (this.session.log) this.session.log('rx', `[config] ${r.name} (${how}): colon=${r.cfg.colon || '?'} · ${en} modes enabled${ovrN ? ` · ${ovrN} menu override${ovrN === 1 ? '' : 's'} merged (SETTINGS.BIN gen ${ovr.gen})` : (r.settings ? ' · SETTINGS.BIN: no menu edits stored' : '')} — applied to face`);
+    this.setState({ cfgName: r.name, cfgDirty: false, cfgReopen: false, cfgNote: '' });
+  }
+
   // ---- flight-recorder archive (pccd /history) ----------------------------------------------------
   // The daemon records timing + sky rows continuously; these fetch a decimated slice for the ARCHIVE
   // panels. Real recorded data with its source named, so it may render in any app state (incl. Standby).
-  archSpans() { return { '6h': 21600, '24h': 86400, '7d': 604800, 'all': 0 }; }
+  archSpans() { return { '6h': 21600, '24h': 86400, '7d': 604800, '30d': 2592000, 'all': 0 }; }
   fetchArchive(force) {
     const hi = this.state.bridgeInfo && this.state.bridgeInfo.history;
     if (!hi || !this.realdev) { this._arch = null; return; }
@@ -3996,13 +4226,9 @@ class Component extends DcLite {
   }
   setTrailAge(s) {
     this._simTrail = null;
-    // A long window is the polar view's LONG-TERM record (computed in SIM, recorded when CONNECTED to a
-    // pccd with a recorder) → auto-show the heatmap (the coverage field), since the trail-lines there
-    // stay short. Ground-track trails are the MAP/GLOBE story.
-    const patch = { skyTrailAge: s };
-    const recorded = this.session && this.session.S.real && this.state.bridgeInfo && this.state.bridgeInfo.history && !this._archTrailNone;
-    if (s > 5400 && (this.appMode() === 'simulation' || recorded) && !this.state.skyHeatmap) patch.skyHeatmap = true;
-    this.setState(patch, () => { this.drawChart('sky'); this.drawChart('globe'); this.drawChart('map'); });
+    // The span moves every layer that reads it (trails, heatmap, ground tracks) and nothing else: the
+    // HEATMAP stays exactly as you left it. (It used to switch itself on past 90 min — confusing.)
+    this.setState({ skyTrailAge: s }, () => { this.drawChart('sky'); this.drawChart('globe'); this.drawChart('map'); });
   }
 
   // ---- SIGNAL PATH — the pccd prefilter explainer -------------------------------------------------
@@ -4193,14 +4419,18 @@ class Component extends DcLite {
     const chip = (r) => 'font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.04em;padding:3px 10px;cursor:pointer;background:transparent;border:1px solid ' +
       (r === range ? 'var(--txt3);color:var(--txt)' : 'var(--line);color:var(--txt3)');
     const days = hi ? hi.days : 0;
+    // What is on disk AND how long the daemon keeps it (its -R window, reported since 0.8), so the two
+    // never disagree on the panel; size says what that costs.
+    const mb = hi && hi.bytes ? (hi.bytes >= 1048576 ? (hi.bytes / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(hi.bytes / 1024)) + ' KB') : '';
     return {
       archShown: !!hi,
       archAbsent: !hi,   // ARCHIVE tab honest empty state: no recorder behind this connection
-      archCaption: hi ? ('ARCHIVE · RECORDED BY pccd · ' + days + (days === 1 ? ' DAY' : ' DAYS') + ' ON DISK' +
-        (this._arch && this._arch.t && this._arch.t.length ? '' : ' · FETCHING…')) : '',
-      archR6Style: chip('6h'), archR24Style: chip('24h'), archR7Style: chip('7d'), archRAllStyle: chip('all'),
+      archCaption: hi ? ('ARCHIVE · RECORDED BY pccd · ' + days + (days === 1 ? ' DAY' : ' DAYS') + ' ON DISK' + (mb ? ' · ' + mb : '') +
+        (hi.retain ? ' · KEEPS ' + hi.retain + ' DAYS' : '') + (hi.from ? ' · SINCE ' + hi.from : '') +
+        (this._arch ? '' : ' · FETCHING…')) : '',   // fetched-and-empty is the charts' honest state, not a wait
+      archR6Style: chip('6h'), archR24Style: chip('24h'), archR7Style: chip('7d'), archR30Style: chip('30d'), archRAllStyle: chip('all'),
       onArchR6: () => this.setArchRange('6h'), onArchR24: () => this.setArchRange('24h'),
-      onArchR7: () => this.setArchRange('7d'), onArchRAll: () => this.setArchRange('all'),
+      onArchR7: () => this.setArchRange('7d'), onArchR30: () => this.setArchRange('30d'), onArchRAll: () => this.setArchRange('all'),
     };
   }
 

@@ -1,0 +1,26 @@
+<!doctype html>
+<!-- pcc.ptrl.ws/local — the memorable way to the LOCAL app. pccd serves the same app at http://localhost:4192
+     (same-origin bridge: every browser, the flight-recorder archive, the clock's own drive). This page only
+     bounces there; if nothing answers, pccd is not running on this machine. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="0; url=http://localhost:4192/?from=hosted">
+<title>PCC — local app</title>
+<style>
+  html { background: #0b0c0f; color: #c9ccd2; font-family: "B612 Mono", ui-monospace, Menlo, monospace; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  main { max-width: 520px; padding: 24px; line-height: 1.7; font-size: 13px; letter-spacing: .04em; }
+  a { color: #46c36a; }
+  .k { color: #7c8089; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+</style>
+</head>
+<body>
+<main>
+  <div class="k">Precision Clock Companion</div>
+  <p>Opening the local app at <a href="http://localhost:4192/?from=hosted">http://localhost:4192</a> — the copy served by the PCC bridge (pccd) on this machine.</p>
+  <p>If that address does not answer, pccd is not running here. Start it (or install it from <a href="https://github.com/peterlewis/pcc/releases">the releases page</a>), or go back to <a href="https://pcc.ptrl.ws/?hosted">the hosted app</a>.</p>
+</main>
+</body>
+</html>

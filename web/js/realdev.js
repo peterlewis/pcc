@@ -38,6 +38,28 @@ const CONST_MAP = {
 // config.txt loader): `key = value`, `#`/`;` line comments, keys case-insensitive,
 // MODE_* take enabled/disabled. This is the ONLY way to learn the device's real
 // state — the serial channel is write-only (no read-back). Pure + testable.
+// A tiny IndexedDB cell for the picked CLOCK-drive handle (FileSystemHandle objects survive a reload only
+// in IndexedDB — localStorage can't hold them). One store, one key; resolves null where IndexedDB is absent.
+function handleCell(mode, fn) {
+    return new Promise((resolve, reject) => {
+        if (typeof indexedDB === 'undefined') { resolve(null); return; }
+        let req;
+        try { req = indexedDB.open('pcc_handles', 1); } catch (e) { resolve(null); return; }
+        req.onupgradeneeded = () => req.result.createObjectStore('h');
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+            const db = req.result;
+            let out = null;
+            try {
+                const tx = db.transaction('h', mode);
+                const r = fn(tx.objectStore('h'));
+                tx.oncomplete = () => { db.close(); resolve(r && 'result' in r ? r.result : out); };
+                tx.onerror = () => { db.close(); reject(tx.error); };
+            } catch (e) { db.close(); reject(e); }
+        };
+    });
+}
+
 export function parseDeviceConfig(text) {
     const cfg = { modes: {} };
     for (const raw of String(text).split(/\r?\n/)) {
@@ -486,6 +508,8 @@ export function createRealDevice(session) {
     return {
         // Web Serial (Chromium) OR any browser when the pccd bridge can carry the connection.
         isSupported() { return Clock.isSupported() || BridgeClock.isSupported(); },
+        // Which transport carries the clock right now: 'bridge' (pccd), 'serial' (Web Serial), or null.
+        transport() { return clock ? (clock instanceof BridgeClock ? 'bridge' : 'serial') : null; },
 
         // Is the pccd daemon running? Resolves its /health JSON ({pccd, version, device, chrony})
         // or null. The app polls this for the Connection room's live BRIDGE row.
@@ -661,32 +685,79 @@ export function createRealDevice(session) {
         /// Read the WHOLE CLOCK volume in one gesture: pick the drive root, get config.txt (text +
         /// mtime + writable handle) AND SETTINGS.BIN (the ≥v0.0.5 on-device menu-override store, if
         /// present) so the caller can reconstruct the clock's EFFECTIVE config, not just the
-        /// baseline. Falls back to the single-file picker where showDirectoryPicker is missing —
-        /// the result then simply carries no settings bytes.
+        /// baseline. The picked directory is remembered (IndexedDB) so the next connect can re-read it
+        /// without the picker. Falls back to the single-file picker where showDirectoryPicker is
+        /// missing — the result then simply carries no settings bytes.
         async readClockVolume() {
             if (typeof window !== 'undefined' && window.showDirectoryPicker) {
                 const dir = await window.showDirectoryPicker({ id: 'pcc-clock' });
-                let fh = null, file = null;
-                for await (const [name, h] of dir.entries()) {
-                    if (h.kind === 'file' && /^config\.txt$/i.test(name)) { fh = h; break; }
-                }
-                if (!fh) throw new Error('No config.txt in that folder. Pick the CLOCK drive root.');
-                file = await fh.getFile();
-                const text = await file.text();
-                let settings = null;
-                try {
-                    for await (const [name, h] of dir.entries()) {
-                        if (h.kind === 'file' && /^settings\.bin$/i.test(name)) {
-                            settings = new Uint8Array(await (await h.getFile()).arrayBuffer());
-                            break;
-                        }
-                    }
-                } catch (e) { /* stock firmware / older image: no SETTINGS.BIN — baseline only */ }
-                return { name: file.name, cfg: parseDeviceConfig(text), text, fh, mtime: file.lastModified, settings };
+                const r = await this.readVolumeDir(dir);
+                this.rememberClockVolume(dir).catch(() => {});   // best effort: a private window may refuse
+                return r;
             }
             const r = await this.readConfigFile();
-            return { ...r, mtime: null, settings: null };
+            return { ...r, mtime: null, settings: null, via: 'picker' };
         },
+        /// The read itself, for a directory handle however it was obtained (picker or remembered).
+        async readVolumeDir(dir) {
+            let fh = null, file = null;
+            for await (const [name, h] of dir.entries()) {
+                if (h.kind === 'file' && /^config\.txt$/i.test(name)) { fh = h; break; }
+            }
+            if (!fh) throw new Error('No config.txt in that folder. Pick the CLOCK drive root.');
+            file = await fh.getFile();
+            const text = await file.text();
+            let settings = null;
+            try {
+                for await (const [name, h] of dir.entries()) {
+                    if (h.kind === 'file' && /^settings\.bin$/i.test(name)) {
+                        settings = new Uint8Array(await (await h.getFile()).arrayBuffer());
+                        break;
+                    }
+                }
+            } catch (e) { /* stock firmware / older image: no SETTINGS.BIN — baseline only */ }
+            return { name: file.name, cfg: parseDeviceConfig(text), text, fh, mtime: file.lastModified, settings, via: 'picker' };
+        },
+        /// Remember / recall the picked CLOCK-drive handle across reloads.
+        rememberClockVolume(dir) { return handleCell('readwrite', (st) => st.put(dir, 'clock')); },
+        recallClockVolume() { return handleCell('readonly', (st) => st.get('clock')).catch(() => null); },
+        forgetClockVolume() { return handleCell('readwrite', (st) => st.delete('clock')).catch(() => null); },
+        /// Re-read the remembered CLOCK drive. Without `ask` only a permission the browser still holds is
+        /// used (Chromium keeps one across reloads for a while, and for good on a persistent grant), so the
+        /// read needs no click; with `ask` (from a click) the permission is requested — one prompt, no
+        /// picker. Resolves the readClockVolume shape; null when nothing is remembered or permission is
+        /// not held; 'gone' when the remembered drive is no longer there. Throws on a real read failure.
+        async reopenClockVolume(ask) {
+            const dir = await this.recallClockVolume();
+            if (!dir || typeof dir.queryPermission !== 'function') return null;
+            const opt = { mode: 'read' };
+            let perm = await dir.queryPermission(opt);
+            if (perm !== 'granted' && ask) perm = await dir.requestPermission(opt);
+            if (perm !== 'granted') return null;
+            try {
+                const r = await this.readVolumeDir(dir);
+                r.via = 'remembered';
+                return r;
+            } catch (e) {
+                if (e && (e.name === 'NotFoundError' || e.name === 'NotAllowedError')) return 'gone';   // unplugged, or revoked
+                throw e;
+            }
+        },
+        hasRememberedVolume() { return this.recallClockVolume().then((d) => !!d); },
+
+        /// Read the CLOCK volume through pccd (GET /drive): the daemon has found the mounted volume, so
+        /// there is no picker, no gesture, and it works in every browser. Same shape as readClockVolume
+        /// with fh null — writes go back through the bridge (writeConfigBridge).
+        async readClockVolumeBridge() {
+            const cfg = await BridgeClock.driveRead('config.txt');
+            if (!cfg) throw new Error('pccd sees the clock drive, but there is no config.txt on it');
+            const text = new TextDecoder().decode(cfg.bytes);
+            let settings = null;
+            try { const sb = await BridgeClock.driveRead('SETTINGS.BIN'); if (sb) settings = sb.bytes; } catch (e) { /* stock firmware: none */ }
+            return { name: 'config.txt', cfg: parseDeviceConfig(text), text, fh: null, mtime: cfg.mtime, settings, via: 'bridge' };
+        },
+        /// Rewrite config.txt on the clock's drive through pccd (origin-gated there; temp file + rename on disk).
+        async writeConfigBridge(text) { return BridgeClock.driveWrite('config.txt', text); },
 
         /// Write edited text back to a config.txt file handle (from readConfigFile). Re-checks
         /// readwrite permission (may re-prompt), then truncates + writes. User-gesture + gated.

@@ -29,9 +29,9 @@ It's verified rather than assumed: 4,511 display checks against independently co
 ## What's in it
 
 - **FACE** — every display mode (including live sidereal and apparent-solar time), text with marquee scrolling, countdowns, brightness / gamma / DAC curve editing, colon animations, the significance-fade precision display, observer location, and a timezone engine using the clock's own IANA rules database. Edit and apply `config.txt` through the firmware's real parser.
-- **SKY** — polar az/el plot with signal heatmap, horizon mask and age-faded trails; a flat world map and an orthographic globe with satellites at their true sub-points and a day/night terminator; C/N₀ and position/DOP analysis; a GPS fix panel. Sky history persists across reloads and exports as CSV / JSON / GPX / NMEA, including a per-satellite history CSV.
+- **SKY** — polar az/el plot with signal heatmap, horizon mask and age-faded trails; a flat world map and an orthographic globe with satellites at their true sub-points and a day/night terminator; C/N₀ and position/DOP analysis; a GPS fix panel. Sky history persists across reloads and exports as CSV / JSON / GPX / NMEA, including a per-satellite history CSV. Behind `pccd`, the trails, C/N₀ over time and the position scatter read the daemon's flight recorder, so a 24 h window reaches back through the night whether or not a tab was open.
 - **TIMING** — with the draft firmware streaming `$PMTXTS`: PPS phase with robust (median/MAD) jitter stats, the oscillator drift staircase, and a temperature-compensation fit that emits the firmware's own `tc_*` warm-start config block.
-- **DEVICE** — Web Serial connect, config editing, REST data sources that poll and push values onto the date row, recorded-data downloads, firmware provenance and update check, and a raw NMEA serial monitor.
+- **DEVICE** — Web Serial connect, config editing (config.txt arrives by itself off the clock's CLOCK drive through `pccd`, or from a drive the browser remembers), REST data sources that poll and push values onto the date row, recorded-data downloads, firmware provenance and update check, and a raw NMEA serial monitor.
 
 ## Run it
 
@@ -57,6 +57,8 @@ Two ways — pick one:
    # Linux: swap in pccd-linux-$(uname -m).tar.gz
    ```
    Then open <http://localhost:4192> and click **CONNECT DEVICE**. `pccd` serves its own copy of the app, so the bridge WebSocket is same-origin and works in every browser. Full guide: [`host/pccd/README.md`](host/pccd/README.md).
+
+**Which address?** If you run `pccd`, use **<http://localhost:4192>** — the same app, served by your daemon, with the archive and the clock's drive behind it. The hosted page tells you so when it can see a daemon on your machine (and **ALWAYS OPEN LOCAL** makes it go straight there next time); <https://pcc.ptrl.ws/local> bounces there directly. Everyone else: <https://pcc.ptrl.ws>.
 
 ## Repository layout
 

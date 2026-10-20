@@ -11,6 +11,13 @@ that wants it, simultaneously:
   Firefox).
 - **/health** endpoint lets the app auto-detect the daemon: when pccd is running,
   PCC's CONNECT button transparently uses the bridge instead of Web Serial.
+- **The flight recorder** keeps the record while no tab is open: offset to GPS time,
+  the sky (every satellite's az/el/C/N₀ once a minute) and the fix (every 10 s), in
+  plain daily files, served back decimated over **/history** for the app's SKY,
+  SIGNAL, POSITION and ARCHIVE rooms.
+- **/drive** serves the clock's own USB volume (`config.txt`, `SETTINGS.BIN`): the
+  daemon finds the mounted CLOCK drive, so the app reads the clock's real config
+  with no file picker — in any browser — and writes it back, origin-gated.
 
 Why a daemon and not a Service Worker: the port is exclusive-open (one owner),
 and browsers cannot emit UDP/NTP or feed chrony. A native process can do both
@@ -39,6 +46,27 @@ bridge/chrony feed and will open the hosted app in a Chromium browser.
 
 `SHA256SUMS` is attached to each release. Every binary answers `./pccd -t`
 (SHA-1 / RFC 6455 handshake self-test) with `self-test OK`.
+
+## Which address? (hosted vs local)
+
+Two copies of one app, and the choice is simple:
+
+- **<https://pcc.ptrl.ws>** — the hosted app, for everyone. Simulation, the emulator,
+  and a real clock over Web Serial (Chromium). In Chromium it will also use a local
+  pccd it can see.
+- **<http://localhost:4192>** — the same app, served by *your* pccd. Same-origin with the
+  bridge, so it connects in **every** browser (Safari and Firefox included) with no
+  local-network permission prompts; the flight-recorder archive, raw-sample feed and
+  the clock's drive are all behind it.
+
+**If you run pccd, use the local address.** The hosted page says so itself the moment
+it can see a daemon on your machine — a band at the top with OPEN LOCAL APP, and
+**ALWAYS OPEN LOCAL** to skip the question next time (it then goes straight there;
+DEVICE › CONNECT holds the setting: ASK / ALWAYS OPEN LOCAL / STAY HOSTED). Safari
+cannot probe `http://localhost` from an `https` page, so there the band appears when
+you try to connect, and ALWAYS goes blind — keep pccd running. Two shortcuts:
+**<https://pcc.ptrl.ws/local>** bounces straight to the local app, and `?hosted` on
+the hosted URL keeps you there for one visit.
 
 ## Updating (v0.4.1+)
 
@@ -131,9 +159,12 @@ Auto-pick looks for `/dev/cu.usbmodem*` on macOS, and
 
 Flags: `-d <device>` serial device, `-s <path>` chrony SOCK socket path,
 `-p <port>` HTTP/WS port (default 4192), `-w <dir>` serve the PCC app from dir
-(same-origin, fixes Safari — see below), `-o <secs>` fixed offset trim,
-`-n` dry-run, `-v` verbose, `-r` raw (bypass the sample prefilter),
-`-t` self-test, `-T` frame-clock probe (macOS), `-h` help.
+(same-origin, fixes Safari — see below), `-H <dir>` flight-recorder directory
+(default `history/` next to the binary; `off` disables), `-R <days>` recorder
+retention (default 365), `-o <secs>` fixed offset trim, `-n` dry-run, `-v` verbose,
+`-r` raw (bypass the sample prefilter), `-t` self-test, `-T` frame-clock probe
+(macOS), `-h` help. `PCCD_DRIVE=<dir>` in the environment points the drive endpoint
+at any directory holding a `config.txt` (development without a clock).
 
 The daemon listens on 127.0.0.1 only. It reconnects automatically when the
 clock re-enumerates (unplug, reboot, firmware flash).
@@ -290,6 +321,46 @@ WebSocket and `/health` are same-origin — no mixed content, works in Safari,
 Firefox, everything. Web Serial is unaffected: in a Chromium browser the app
 still offers it as the fallback when no daemon is running. The LaunchDaemon plist
 ships with a `-w` line (adjust the path to your checkout).
+
+## The flight recorder
+
+The daemon is the always-on component, so it keeps the record — whether or not a PCC
+tab is open. One plain file per UTC day (`<histdir>/YYYY-MM-DD.log`), three row types:
+
+    T,<epoch>,<offset_us>,<jitter_us>,<ppm>,<temp_c>                    one per prefilter group (~8 s)
+    S,<epoch>,<fix>,<used>,<hdop>,<TKprn:az:el:cn0;...>                 one sky snapshot per 60 s
+    P,<epoch>,<lat>,<lon>,<alt_m>,<hdop>,<pdop>,<vdop>,<fixtype>,<used>   one position sample per 10 s, while fixed
+
+Real-only by construction (pccd never sees a simulation); a missing span *is* the
+record of the clock being unplugged. Files rotate at UTC midnight and files older than
+`-R` days (default 365) are pruned then. Budget: roughly 1.5 MB a day with a clock
+streaming, so a year is about half a gigabyte. `/health` reports what is on disk and
+the retention window (`"history":{"from","days","bytes","retain"}`) and the app's
+ARCHIVE caption states both, so they never disagree.
+
+The app reads it back decimated: **ARCHIVE** (6 h … 30 d, all) from the `timing` and
+`sky` series; the SKY plot's trails from `sats`; and, from v0.8, SIGNAL's C/N₀ over
+time and the POSITION scatter/DOP/continuity from `sats` and `pos` — so a 6 H or 24 H
+window reaches back through the night, tab or no tab. Where the record is younger than
+the window the chart says so (`RECORDED · 3.2 H OF 6 H`).
+
+## HTTP endpoints (127.0.0.1:<port>, CORS-open unless noted)
+
+- `GET /health` — liveness + capabilities JSON: `version`, `device`, `serial_open`,
+  sample counters, `updatable`, `webrefresh`, `history` (above), `raw` (pre-gate
+  samples held), `drive` (the mounted CLOCK volume's path, or null).
+- `GET /history?series=timing|sky|sats|pos&from=E&to=E&points=N` — decimated CSV.
+  `timing` and `sky` aggregate per bucket (min/max/mean); `sats` and `pos` pass the
+  first row of each bucket through unchanged. `points` ≤ 4000; the window is clamped
+  to the retention span.
+- `GET /raw[?n=N]` — the in-memory pre-gate offset samples (SIGNAL PATH's real source).
+- `GET /drive` — the clock drive: `{"mounted":<path>|null,"files":[{name,size,mtime}]}`.
+  `GET /drive?file=config.txt` streams a root-level file (case-insensitive;
+  `X-Mtime` header carries its epoch mtime). `POST /drive?file=config.txt` with the
+  new text as the body rewrites it (temp file + rename, fsync) — **only** `config.txt`,
+  and only from an allowed `Origin` (the same list as the WebSocket). `OPTIONS`
+  answers CORS preflights. The volume is rescanned every 5 s: `/Volumes/CLOCK` on
+  macOS, any mount whose basename is `CLOCK` in `/proc/mounts` on Linux.
 
 ## Protocol (WebSocket, text frames)
 

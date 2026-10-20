@@ -365,5 +365,19 @@
 /* The one place the hosted app must hand the user a different address: a non-Chromium browser on
    https cannot reach the loopback bridge at all (no localhost carve-out), so the app points at the
    copy pccd serves itself. Two rules, not four inline styles — the gate's whole point. */
+/* ---- band: a full-width notice under the header (the review banner's shape, as a component) -------
+   .band--local is the hosted page's hand-off to the local app served by pccd: the one notice whose job
+   is to send you somewhere else, so it is green (ready), not amber (warning). */
+.band { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 7px 16px;
+  background: var(--strip); border-bottom: 1px solid var(--line2); }
+.band--local { border-color: var(--lock); }
+.band__dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--lock); box-shadow: 0 0 8px var(--lock); }
+.band__title { font-family: var(--mono); font-size: var(--fs-label); font-weight: 700; letter-spacing: .1em; color: var(--txt); white-space: nowrap; }
+.band__msg { font-family: var(--mono); font-size: var(--fs-meta); letter-spacing: .06em; color: var(--txt2); line-height: 1.5; max-width: 760px; }
+.band__acts { display: flex; flex: none; gap: 8px; margin-left: auto; }   /* the answers stay on one line */
+.band .btn { text-decoration: none; }
+.btn--go { color: var(--lock); border-color: var(--lock); }
+.btn--go:hover { color: var(--lock); border-color: var(--lock); background: var(--led-fill); }
+
 .brg-blocked { margin: 2px var(--sp-3) 8px; }
 .brg-blocked__a { display: inline-block; margin-top: 8px; font-family: var(--mono); font-size: var(--fs-data-sm); color: var(--led); }

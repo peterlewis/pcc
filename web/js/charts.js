@@ -80,9 +80,9 @@ export function drawSky(canvas, tok, data, opts) {
     // trail history — newest-first, ≥10 px apart, ≤32 samples per sat: a soft base field of
     // travelled sky. Points without cn0 (older persisted history) still contribute at neutral
     // quality — dropping them left the heatmap with no history at all, i.e. a dead control.
-    // Long-window (heatLong): the heatmap is the polar view's LONG-TERM record, so sample far more of
-    // each track (≥10 px apart still dedupes), painting the whole travelled sky. Short window: 32.
-    const hmCap = opts.heatLong ? 240 : 32;
+    // The sample budget per sat scales with the SPAN (one per ~2 min of it, 32..720; ≥10 px apart still
+    // dedupes), so a 24 h span paints the whole travelled sky and 45 min stays a soft halo.
+    const hmCap = Math.max(32, Math.min(720, Math.round((opts.trailAge || 2700) / 120)));
     for (const tr of data.trails.values()) {
       let lx = -1e9, ly = -1e9, n = 0;
       for (let i = tr.length - 1; i >= 0 && n < hmCap; i--) {
@@ -132,28 +132,34 @@ export function drawSky(canvas, tok, data, opts) {
   ctx.fillText('30°', cx + 3, cy - (60 / 90) * R - 5);
   ctx.fillText('60°', cx + 3, cy - (30 / 90) * R - 5);
 
-  // trails (age-faded). The fade normalises over the TRAIL length control (default = the full
-  // 90 min buffer), so a shorter trail fades to nothing over its own span — same visual
-  // language as the long one, just a shorter ribbon.
+  // trails (age-faded). The fade normalises over the SPAN control, so a shorter span fades to nothing
+  // over its own length — same visual language as the long one, just a shorter ribbon. The span is the
+  // whole ribbon: a 24 h span draws 24 h of each track (thin and faint at the old end), never a capped
+  // 45 min with the rest handed to the heatmap. Segments are batched per alpha step (20 steps), so a
+  // long recorded span costs a few dozen strokes per sat rather than one per minute of track.
   if (opts.trails) {
     const now = data.now;
-    // Polar trail-LINES are the short recent motion; the long-term record is the heatmap (map/globe
-    // own the long ground tracks). lineAge caps the drawn ribbon so a 24 h window is not spaghetti.
     const span = opts.lineAge || opts.trailAge || 5400;
+    // A recorded track has one point per minute or two (pccd decimates to the window); the live buffer
+    // one per 30 s. A gap past that is a disconnect — don't bridge it.
+    const gapMax = Math.max(150, Math.min(900, span / 240));
+    ctx.lineWidth = 1;
     for (const [key, tr] of data.trails) {
       const sat = data.sats.find((s) => s.key === key);
-      const col = (sat && tok[sat.tok]) || tok[{ G: 'gps', R: 'glo', E: 'gal', C: 'bds' }[key[0]]] || tok.txt3;
+      ctx.strokeStyle = (sat && tok[sat.tok]) || tok[{ G: 'gps', R: 'glo', E: 'gal', C: 'bds' }[key[0]]] || tok.txt3;
+      let curA = -1;
       for (let i = 1; i < tr.length; i++) {
         if (tr[i].el < -2 || tr[i - 1].el < -2) continue;
-        if (tr[i].t - tr[i - 1].t > 150) continue;   // disconnect gap — don't bridge it
+        if (tr[i].t - tr[i - 1].t > gapMax) continue;
         const age = (now - tr[i].t) / span;
         if (age > 1) continue;
-        ctx.strokeStyle = col; ctx.globalAlpha = 0.55 * (1 - age) + 0.04;
-        ctx.beginPath();
+        const a = Math.round((0.55 * (1 - age) + 0.04) * 20) / 20;
+        if (a !== curA) { if (curA >= 0) ctx.stroke(); ctx.globalAlpha = a; ctx.beginPath(); curA = a; }
         const [x0, y0] = pt(tr[i - 1].az, tr[i - 1].el);
         const [x1, y1] = pt(tr[i].az, tr[i].el);
-        if (Math.hypot(x1 - x0, y1 - y0) < R) { ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); }
+        if (Math.hypot(x1 - x0, y1 - y0) < R) { ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); }
       }
+      if (curA >= 0) ctx.stroke();
     }
     ctx.globalAlpha = 1;
   }
@@ -222,7 +228,8 @@ function xTimeTicks(ctx, tok, fr, h, spanSec) {
   for (let i = 0; i <= n; i++) {
     const f = i / n, x = fr.X(f);
     const ago = spanSec * (1 - f);
-    const lab = ago === 0 ? 'now' : (ago >= 3600 ? '−' + (ago / 3600).toFixed(0) + 'h' : '−' + Math.round(ago / 60) + '′');
+    const hrs = ago / 3600;
+    const lab = ago === 0 ? 'now' : (ago >= 3600 ? '−' + (hrs % 1 ? hrs.toFixed(1) : hrs.toFixed(0)) + 'h' : '−' + Math.round(ago / 60) + '′');
     ctx.fillText(lab, x, fr.m.t + fr.ih + 4);
   }
   nowEdge(ctx, tok, fr);
@@ -279,7 +286,16 @@ export function drawCn0Elev(canvas, tok, sats, showMedian) {
 }
 
 // ---------------------------------------------------------------- C/N0 over time (multi-trace)
-export function drawCn0Time(canvas, tok, series, spanSec, now) {
+// Recorded / buffered depth (note): the history is younger than the WINDOW — say how much is really
+// there, so a part-filled chart reads as honest rather than broken. Inside the frame's bottom-right
+// corner on a time-axis chart (the tick labels own the strip below it); bottom-left on a frameless one.
+function depthNote(ctx, tok, fr, h, note) {
+  if (!note) return;
+  ctx.font = F9; ctx.fillStyle = tok.txt3; ctx.textBaseline = 'alphabetic';
+  if (fr) { ctx.textAlign = 'right'; ctx.fillText(note, fr.m.l + fr.iw - 6, fr.m.t + fr.ih - 5); }
+  else { ctx.textAlign = 'left'; ctx.fillText(note, 8, h - 8); }
+}
+export function drawCn0Time(canvas, tok, series, spanSec, now, note) {
   const { ctx, w, h } = c2d(canvas);
   clear(ctx, w, h, tok);
   const fr = frame(ctx, w, h, tok, { ml: 34 });
@@ -299,6 +315,7 @@ export function drawCn0Time(canvas, tok, series, spanSec, now) {
     ctx.stroke();
   }
   ctx.restore();
+  depthNote(ctx, tok, fr, h, note);
 }
 
 // ---------------------------------------------------------------- position scatter + CEP/2DRMS
@@ -344,10 +361,11 @@ export function drawPosScatter(canvas, tok, pts, stats, now) {
   ctx.strokeStyle = tok.led; ctx.lineWidth = 1; ctx.beginPath();
   ctx.moveTo(cx - 5, cy); ctx.lineTo(cx + 5, cy); ctx.moveTo(cx, cy - 5); ctx.lineTo(cx, cy + 5); ctx.stroke();
   ctx.fillStyle = tok.led; ctx.beginPath(); ctx.arc(cx, cy, 2.1, 0, TAU); ctx.fill();
+  depthNote(ctx, tok, null, h, stats.note);
 }
 
 // ---------------------------------------------------------------- DOP history
-export function drawDop(canvas, tok, hist, spanSec, now) {
+export function drawDop(canvas, tok, hist, spanSec, now, note) {
   const { ctx, w, h } = c2d(canvas);
   clear(ctx, w, h, tok);
   const fr = frame(ctx, w, h, tok, { ml: 30 });
@@ -371,10 +389,11 @@ export function drawDop(canvas, tok, hist, spanSec, now) {
     ctx.stroke();
   }
   ctx.setLineDash([]); ctx.restore();
+  depthNote(ctx, tok, fr, h, note);
 }
 
 // ---------------------------------------------------------------- fix continuity strip
-export function drawContinuity(canvas, tok, hist, spanSec, now, ttffSec, t0) {
+export function drawContinuity(canvas, tok, hist, spanSec, now, ttffSec, t0, note) {
   const { ctx, w, h } = c2d(canvas);
   clear(ctx, w, h, tok);
   const fr = frame(ctx, w, h, tok, { ml: 30, mb: 18 });
@@ -418,6 +437,7 @@ export function drawContinuity(canvas, tok, hist, spanSec, now, ttffSec, t0) {
     ctx.fillText('TTFF ' + ttffSec.toFixed(1) + 's', x + 4, fr.m.t + fr.ih - 8);
   }
   xTimeTicks(ctx, tok, fr, h, spanSec);
+  depthNote(ctx, tok, fr, h, note);
 }
 
 // ---------------------------------------------------------------- PPS phase strip

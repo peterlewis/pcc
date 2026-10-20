@@ -185,7 +185,7 @@ rmSync(docs, { recursive: true, force: true });
 mkdirSync(docs, { recursive: true });
 writeFileSync(resolve(docs, 'index.html'), html);
 writeFileSync(resolve(docs, '.nojekyll'), ''); // Pages: don't run Jekyll over our files
-for (const dir of ['fonts', 'globe', 'data']) {
+for (const dir of ['fonts', 'globe', 'data', 'local']) {   // local/: the pcc.ptrl.ws/local → localhost:4192 bounce
   const src = resolve(web, dir);
   if (existsSync(src)) cpSync(src, resolve(docs, dir), { recursive: true });
 }
@@ -249,6 +249,6 @@ console.log(`app-manifest: ${appFiles.length} files, id ${createHash('sha256').u
 const scanned = html.replace(/<a\s[^>]*>/gi, '<a>');
 const external = [...scanned.matchAll(/\b(?:src|href)\s*=\s*["'](https?:)?\/\/[^"']+/gi)].map((m) => m[0]);
 console.log(`built docs/index.html (${kb(html.length)} KB, bundle ${kb(bundle.length)} KB)`);
-console.log(`assets: ${['fonts', 'globe', 'data'].filter((d) => existsSync(resolve(docs, d))).join(', ')}`);
+console.log(`assets: ${['fonts', 'globe', 'data', 'local'].filter((d) => existsSync(resolve(docs, d))).join(', ')}`);
 if (external.length) { console.error('WARNING external refs in index.html:', external); process.exit(1); }
 console.log('OK — no external references in index.html');

@@ -46,7 +46,7 @@
 #endif
 
 #ifndef PCCD_VERSION
-#define PCCD_VERSION "0.7.0"               /* overridable (-DPCCD_VERSION=...) so a test build can look older */
+#define PCCD_VERSION "0.8.0"               /* overridable (-DPCCD_VERSION=...) so a test build can look older */
 #endif
 #ifdef PCCD_GIT
 #define PCCD_VERSTR PCCD_VERSION "+" PCCD_GIT      /* Makefile stamps the short git hash for traceable /health */
@@ -72,6 +72,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <signal.h>
 #include <stdint.h>
 #include <math.h>
@@ -492,6 +493,7 @@ static void pf_test_sink(double wall, double off){ if (pt_n<16){ pt_wall[pt_n]=w
 // (<histdir>/YYYY-MM-DD.log, UTC):
 //   T,<epoch>,<offset_us>,<jitter_us>,<ppm>,<temp_c>       one per prefilter group (~8 s)
 //   S,<epoch>,<fix>,<used>,<hdop>,<PRN:az:el:cn0;...>      one sky snapshot per 60 s
+//   P,<epoch>,<lat>,<lon>,<alt_m>,<hdop>,<pdop>,<vdop>,<fixtype>,<used>   one position sample per 10 s, while fixed
 // Real-only by construction: pccd never sees a simulation. A missing span IS the record of the clock
 // being unplugged. Files rotate at UTC midnight; files older than opt_retain days are pruned then.
 // The app reads it back through GET /history with server-side decimation (hist_query below).
@@ -506,7 +508,7 @@ static double g_last_ppm = 0, g_last_temp = 0; static int g_have_tstats = 0;
 #define HS_MAX 96
 static struct { char tk[3]; int prn, az, el, cn0; double seen; } hs_sat[HS_MAX];
 static int hs_n = 0;
-static struct { int fix, used; double hdop; double seen; } hs_fix = {0,0,0,0};
+static struct { int fix, used, type; double hdop, pdop, vdop, lat, lon, alt; double seen; } hs_fix = {0,0,0,0,0,0,0,0,0,0};
 
 static void hist_day_of(time_t t, char *out, size_t cap){
   struct tm tm; gmtime_r(&t,&tm);
@@ -551,15 +553,30 @@ static int hist_tok(const char *s, int idx, char *out, size_t cap){   // 0-based
   size_t n=0; while (p[n] && p[n]!=',' && p[n]!='*' && n<cap-1){ out[n]=p[n]; n++; }
   out[n]=0; return 0;
 }
+// ddmm.mmmm / dddmm.mmmm -> signed decimal degrees (S/W negative).
+static double nmea_deg(const char *s, int neg){
+  double v=atof(s); int d=(int)(v/100.0); double deg=d+(v-d*100.0)/60.0; return neg?-deg:deg;
+}
 static void hist_feed_nmea(const char *line, double now){
   if (line[0]!='$' || strlen(line)<10) return;
   const char *typ = line+3;                                  // after "$GP"/"$GN"/...
   char f[24];
   if (!strncmp(typ,"GGA,",4)){
+    char la[24]="", ns[4]="", lo[24]="", ew[4]="";
     if (hist_tok(line,5,f,sizeof f)==0) hs_fix.fix  = atoi(f);        // quality
     if (hist_tok(line,6,f,sizeof f)==0) hs_fix.used = atoi(f);        // sats in use
     if (hist_tok(line,7,f,sizeof f)==0) hs_fix.hdop = atof(f);
+    if (hist_tok(line,1,la,sizeof la)==0 && hist_tok(line,2,ns,sizeof ns)==0 &&
+        hist_tok(line,3,lo,sizeof lo)==0 && hist_tok(line,4,ew,sizeof ew)==0 && la[0] && lo[0]){
+      hs_fix.lat = nmea_deg(la, ns[0]=='S'); hs_fix.lon = nmea_deg(lo, ew[0]=='W');   // the P row's position
+    }
+    if (hist_tok(line,8,f,sizeof f)==0 && f[0]) hs_fix.alt = atof(f);  // antenna altitude, m
     hs_fix.seen = now;
+  } else if (!strncmp(typ,"GSA,",4)){
+    // Fix TYPE (1 none / 2 2D / 3 3D) and the PDOP/VDOP the P row carries — GGA only has HDOP.
+    if (hist_tok(line,1,f,sizeof f)==0 && f[0])  hs_fix.type = atoi(f);
+    if (hist_tok(line,14,f,sizeof f)==0 && f[0]) hs_fix.pdop = atof(f);
+    if (hist_tok(line,16,f,sizeof f)==0 && f[0]) hs_fix.vdop = atof(f);
   } else if (!strncmp(typ,"GSV,",4)){
     char tk[3] = { line[1], line[2], 0 };
     // sats start at field 3, four fields each: prn, el, az, cn0
@@ -574,7 +591,14 @@ static void hist_feed_nmea(const char *line, double now){
       hs_sat[i].el=atoi(el); hs_sat[i].az=atoi(az); hs_sat[i].cn0=cn[0]?atoi(cn):-1; hs_sat[i].seen=now;
     }
   }
-  // GSA adds nothing the S row needs beyond GGA (fix type ~ quality; DOP ~ hdop) — skipped by design.
+}
+// P row: the fix once every 10 s while the clock has one — the POSITION scatter, DOP and continuity
+// history that used to live only in an open tab. Self-gates on GGA freshness, like the S row.
+static void hist_P(double now){
+  FILE *f = hist_file((time_t)now); if (!f) return;
+  if (now - hs_fix.seen > 15 || hs_fix.fix <= 0) return;      // no fresh fix -> nothing real to record
+  fprintf(f,"P,%.0f,%.6f,%.6f,%.1f,%.2f,%.2f,%.2f,%d,%d\n", now, hs_fix.lat, hs_fix.lon, hs_fix.alt,
+          hs_fix.hdop, hs_fix.pdop, hs_fix.vdop, hs_fix.type, hs_fix.used);
 }
 static void hist_S(double now){
   FILE *f = hist_file((time_t)now); if (!f) return;
@@ -588,9 +612,10 @@ static void hist_S(double now){
   }
   fputc('\n',f);
 }
-// GET /history?series=timing|sky|sats&from=E&to=E&points=N  →  decimated CSV (server-side min/max/mean
+// GET /history?series=timing|sky|sats|pos&from=E&to=E&points=N  →  decimated CSV (server-side min/max/mean
 // buckets, so a 90-day chart is one small response). series=sats is the per-satellite record for the
 // app's trails: each bucket's first S row, its satellite list passed through as `t,<TKprn:az:el:cn0;…>`.
+// series=pos is the P rows the same way: `t,lat,lon,alt,hdop,pdop,vdop,fix,used`, one per bucket.
 // Returns a malloc'd body; caller frees.
 // Exact-key query-param lookup (…&key=VALUE…). strstr-on-the-whole-string matches substrings — `?min=5`
 // would hijack an `n=` probe — so compare each token's key up to '=' against the exact key.
@@ -602,6 +627,33 @@ static const char *qval(const char *qs, const char *key){
     const char *amp=strchr(p,'&'); if(!amp) break; p=amp+1;
   }
   return NULL;
+}
+// Pass-through readout: the first row of type `typ` in each bucket, its payload (the text after `skip`
+// commas) re-emitted behind the row's epoch. sats (S rows -> `t,<sat list>`) and pos (P rows ->
+// `t,lat,lon,...`) both decimate this way, since neither aggregates into a mean sensibly.
+static char *hist_pass(char typ, int skip, const char *hdr, double from, double to, long points, size_t *blen){
+  size_t cap=65536, o=0; char *out=malloc(cap); if(!out) return NULL;
+  o += (size_t)snprintf(out,cap,"%s\n",hdr);
+  long last=-1;                                               // bucket of the last row sent (rows are time-ordered)
+  for (time_t d = (time_t)from - ((time_t)from % 86400); d <= (time_t)to; d += 86400){
+    char day[16], path[4400]; hist_day_of(d,day,sizeof day);
+    snprintf(path,sizeof path,"%s/%s.log",opt_hist,day);
+    FILE *fp=fopen(path,"r"); if(!fp) continue;
+    char ln[2048];
+    while (fgets(ln,sizeof ln,fp)){
+      if (ln[0]!=typ || ln[1]!=',') continue;
+      double t=atof(ln+2); if (t<from||t>to) continue;
+      long i=(long)((t-from)*points/(to-from)); if (i<=last) continue;
+      const char *s=ln; for (int k=0;k<skip && s;k++){ s=strchr(s,','); if(s) s++; }
+      if (!s) continue;
+      size_t sl=strcspn(s,"\r\n");
+      if (o+sl+32 > cap){ size_t nc=2*cap+sl; char *nb=realloc(out,nc); if(!nb){ free(out); fclose(fp); return NULL; } out=nb; cap=nc; }
+      o += (size_t)snprintf(out+o,cap-o,"%.0f,%.*s\n",t,(int)sl,s);
+      last=i;
+    }
+    fclose(fp);
+  }
+  *blen=o; return out;
 }
 static char *hist_query(const char *qs, size_t *blen){
   char series[8]="timing"; double from=0, to=(double)time(NULL); long points=800;
@@ -622,30 +674,8 @@ static char *hist_query(const char *qs, size_t *blen){
   if (to - from > span_max) from = to - span_max;
   if (to<=from || points<2) return NULL;
   if (points>4000) points=4000;
-  if (!strcmp(series,"sats")){
-    size_t cap=65536, o=0; char *out=malloc(cap); if(!out) return NULL;
-    o += (size_t)snprintf(out,cap,"t,sats\n");
-    long last=-1;                                               // bucket of the last row sent (rows are time-ordered)
-    for (time_t d = (time_t)from - ((time_t)from % 86400); d <= (time_t)to; d += 86400){
-      char day[16], path[4400]; hist_day_of(d,day,sizeof day);
-      snprintf(path,sizeof path,"%s/%s.log",opt_hist,day);
-      FILE *fp=fopen(path,"r"); if(!fp) continue;
-      char ln[2048];
-      while (fgets(ln,sizeof ln,fp)){
-        if (ln[0]!='S' || ln[1]!=',') continue;
-        double t=atof(ln+2); if (t<from||t>to) continue;
-        long i=(long)((t-from)*points/(to-from)); if (i<=last) continue;
-        const char *s=ln; for (int k=0;k<5 && s;k++){ s=strchr(s,','); if(s) s++; }   // past S,t,fix,used,hdop
-        if (!s) continue;
-        size_t sl=strcspn(s,"\r\n");
-        if (o+sl+32 > cap){ size_t nc=2*cap+sl; char *nb=realloc(out,nc); if(!nb){ free(out); fclose(fp); return NULL; } out=nb; cap=nc; }
-        o += (size_t)snprintf(out+o,cap-o,"%.0f,%.*s\n",t,(int)sl,s);
-        last=i;
-      }
-      fclose(fp);
-    }
-    *blen=o; return out;
-  }
+  if (!strcmp(series,"sats")) return hist_pass('S',5,"t,sats",from,to,points,blen);                       // past S,t,fix,used,hdop
+  if (!strcmp(series,"pos"))  return hist_pass('P',2,"t,lat,lon,alt,hdop,pdop,vdop,fix,used",from,to,points,blen);   // past P,t
   int sky = !strcmp(series,"sky");
   typedef struct { double mn,mx,sum,jit,ppm,tmp,hdop,cn0s; int n,fix,used,sats,cn0mx; } B;
   B *b = calloc(points,sizeof(B)); if(!b) return NULL;
@@ -704,7 +734,8 @@ static char *hist_query(const char *qs, size_t *blen){
   }
   free(b); *blen=o; return out;
 }
-// history summary for /health: {"from":"YYYY-MM-DD","days":N,"bytes":B} into out (or "null").
+// history summary for /health: {"from":"YYYY-MM-DD","days":N,"bytes":B,"retain":R} into out (or "null").
+// retain = the -R window in days: the app states it beside what is on disk, so the two never disagree.
 static void hist_summary(char *out, size_t cap){
   if (!opt_hist){ snprintf(out,cap,"null"); return; }
   DIR *d=opendir(opt_hist);
@@ -721,7 +752,95 @@ static void hist_summary(char *out, size_t cap){
   }
   closedir(d);
   if (!days) snprintf(out,cap,"null");
-  else snprintf(out,cap,"{\"from\":\"%s\",\"days\":%d,\"bytes\":%lld}",first,days,bytes);
+  else snprintf(out,cap,"{\"from\":\"%s\",\"days\":%d,\"bytes\":%lld,\"retain\":%d}",first,days,bytes,opt_retain);
+}
+
+// ---- the clock's drive ----------------------------------------------------------------------------
+// The Mk IV also enumerates as a USB drive (volume CLOCK) holding config.txt and, from firmware 0.0.5,
+// SETTINGS.BIN. The host mounts it; the daemon finds the mount and serves the files on GET /drive, so
+// the app reads the clock's real config with no file picker, in any browser — and writes config.txt
+// back on POST /drive, origin-gated like the WebSocket. Rescanned every 5 s: the volume comes and goes
+// with the clock. macOS mounts it at /Volumes/CLOCK; Linux wherever udisks puts it (/media/<you>/CLOCK,
+// /run/media/<you>/CLOCK) — found by its basename in /proc/mounts.
+static char g_drive[1024] = "";              // mount point; "" = not mounted
+static int drive_has_config(const char *dir){
+  DIR *d=opendir(dir); if(!d) return 0;
+  struct dirent *e; int ok=0;
+  while ((e=readdir(d))) if (!strcasecmp(e->d_name,"config.txt")){ ok=1; break; }
+  closedir(d); return ok;
+}
+static void drive_scan(void){
+  char found[1024]="";
+  const char *ov=getenv("PCCD_DRIVE");         // dev/test: point at any directory holding a config.txt
+  if (ov && *ov){ if (drive_has_config(ov)) snprintf(found,sizeof found,"%s",ov); }
+  else {
+#ifdef __APPLE__
+  if (drive_has_config("/Volumes/CLOCK")) snprintf(found,sizeof found,"/Volumes/CLOCK");
+#else
+  FILE *m=fopen("/proc/mounts","r");
+  if (m){
+    char ln[2048];
+    while (fgets(ln,sizeof ln,m)){
+      char dev[512], mp[1024];
+      if (sscanf(ln,"%511s %1023s",dev,mp)!=2) continue;
+      // /proc/mounts escapes space, tab, newline and backslash as \040 \011 \012 \134 — unescape
+      char *w=mp; for (const char *r=mp; *r; ){
+        if (r[0]=='\\' && r[1]>='0'&&r[1]<='7' && r[2]>='0'&&r[2]<='7' && r[3]>='0'&&r[3]<='7'){ *w++=(char)(((r[1]-'0')<<6)|((r[2]-'0')<<3)|(r[3]-'0')); r+=4; }
+        else *w++=*r++; }
+      *w=0;
+      const char *b=strrchr(mp,'/'); b=b?b+1:mp;
+      if (!strcasecmp(b,"CLOCK") && drive_has_config(mp)){ snprintf(found,sizeof found,"%s",mp); break; }
+    }
+    fclose(m);
+  }
+#endif
+  }
+  if (strcmp(found,g_drive)){
+    snprintf(g_drive,sizeof g_drive,"%s",found);
+    if (found[0]) fprintf(stderr,"[pccd] clock drive mounted at %s — config.txt served on /drive\n",found);
+    else fprintf(stderr,"[pccd] clock drive unmounted\n");
+  }
+}
+// Resolve a requested root-level file name to its on-disk path, case-insensitively (FAT volumes answer
+// CONFIG.TXT or config.txt). Root only: no '/', no '..', no hidden files, 64 chars at most.
+static int drive_resolve(const char *want, char *out, size_t cap){
+  if (!g_drive[0] || !want[0] || want[0]=='.' || strlen(want)>64 || strchr(want,'/') || strchr(want,'\\')) return -1;
+  DIR *d=opendir(g_drive); if(!d) return -1;
+  struct dirent *e; int ok=-1;
+  while ((e=readdir(d))) if (!strcasecmp(e->d_name,want)){ snprintf(out,cap,"%s/%s",g_drive,e->d_name); ok=0; break; }
+  closedir(d); return ok;
+}
+// Minimal JSON string escape (quotes, backslashes, control bytes) for paths and file names.
+static void json_esc(char *out, size_t cap, const char *in){
+  size_t o=0;
+  for (; *in && o+6<cap; in++){
+    unsigned char ch=(unsigned char)*in;
+    if (ch=='"' || ch=='\\'){ out[o++]='\\'; out[o++]=(char)ch; }
+    else if (ch<0x20){ o+=(size_t)snprintf(out+o,cap-o,"\\u%04x",ch); }
+    else out[o++]=(char)ch;
+  }
+  out[o]=0;
+}
+// GET /drive (no file): {"mounted":"<path>"|null,"files":[{name,size,mtime},...]} — the root listing.
+static void drive_list_json(char *out, size_t cap){
+  if (!g_drive[0]){ snprintf(out,cap,"{\"mounted\":null,\"files\":[]}"); return; }
+  char esc[2100]; json_esc(esc,sizeof esc,g_drive);
+  size_t o=(size_t)snprintf(out,cap,"{\"mounted\":\"%s\",\"files\":[",esc);
+  DIR *d=opendir(g_drive); int n=0;
+  if (d){
+    struct dirent *e;
+    while ((e=readdir(d)) && n<64 && o+300<cap){
+      if (e->d_name[0]=='.') continue;
+      char p[1400]; struct stat st;
+      snprintf(p,sizeof p,"%s/%s",g_drive,e->d_name);
+      if (stat(p,&st)!=0 || !S_ISREG(st.st_mode)) continue;
+      char en[300]; json_esc(en,sizeof en,e->d_name);
+      o+=(size_t)snprintf(out+o,cap-o,"%s{\"name\":\"%s\",\"size\":%lld,\"mtime\":%lld}",n?",":"",en,(long long)st.st_size,(long long)st.st_mtime);
+      n++;
+    }
+    closedir(d);
+  }
+  snprintf(out+o,cap-o,"]}");
 }
 
 static void pf_emit_chrony(double wall, double off){
@@ -765,7 +884,8 @@ static void sha1(const unsigned char *msg, size_t len, unsigned char out[20]){
 
 // ---- WebSocket / HTTP server (RFC 6455, text frames, localhost only) ------------------------------
 #define MAXCLI 8
-typedef struct { int fd; int ws; char buf[2048]; int len; char lb[256]; int li; double t0; } Client;
+// buf holds one HTTP request INCLUDING a POST /drive body (config.txt is a few KB; 64 KB is the cap).
+typedef struct { int fd; int ws; char buf[65536]; int len; char lb[256]; int li; double t0; } Client;
 static Client g_cli[MAXCLI];
 static int g_listen = -1;
 
@@ -837,11 +957,28 @@ static int self_test(void){
       b=hist_query("series=sky&from=90000&to=90600&points=5",&n);
       if (!b || strncmp(b,"t,fix,used,hdop,nsats,cn0_mean,cn0_max\n",39)){ fprintf(stderr,"history sky FAIL\n"); fail=1; }
       free(b);
+      // P rows: the recorder's GGA/GSA parse writes a position sample; series=pos passes it through.
+      hist_feed_nmea("$GNGGA,120000.00,5212.31800,N,00007.30800,E,1,09,0.98,21.0,M,45.3,M,,*7A",90300.0);
+      hist_feed_nmea("$GNGSA,A,3,02,05,12,,,,,,,,,,2.10,0.98,1.85*00",90300.0);
+      if (fabs(hs_fix.lat-52.2053)>1e-5 || fabs(hs_fix.lon-0.1218)>1e-5 || hs_fix.type!=3 || fabs(hs_fix.pdop-2.10)>1e-6 || fabs(hs_fix.vdop-1.85)>1e-6 || fabs(hs_fix.alt-21.0)>1e-6){
+        fprintf(stderr,"history P parse FAIL: lat=%.6f lon=%.6f type=%d pdop=%.2f vdop=%.2f alt=%.1f\n",hs_fix.lat,hs_fix.lon,hs_fix.type,hs_fix.pdop,hs_fix.vdop,hs_fix.alt); fail=1; }
+      int keepR=opt_retain; opt_retain=30000;                       // hist_file prunes on open: keep the 1970 test day
+      hist_P(90300.0); hist_P(90310.0);
+      opt_retain=keepR;
+      if (g_histf){ fclose(g_histf); g_histf=NULL; g_hist_day[0]=0; }   // the self-test's temp day, not a real one
+      b=hist_query("series=pos&from=90000&to=90600&points=600",&n);
+      if (!b || strncmp(b,"t,lat,lon,alt,hdop,pdop,vdop,fix,used\n",38) || !strstr(b,"\n90300,52.205300,0.121800,21.0,0.98,2.10,1.85,3,9\n") || !strstr(b,"\n90310,52.205300,")){
+        fprintf(stderr,"history pos FAIL: %.*s\n",(int)n,b?b:""); fail=1; }
+      free(b);
+      hs_fix.seen=0; hs_fix.fix=0;
       unlink(hp);
     }
     rmdir(hdir);
     opt_hist = keep;
   }
+  // Drive-name hygiene: nothing outside the volume root is ever resolved, mounted or not.
+  { char out[64]; const char *bad[]={ "../etc/passwd", "a/b", ".hidden", "", "x\\y" };
+    for (unsigned i=0;i<sizeof bad/sizeof *bad;i++) if (drive_resolve(bad[i],out,sizeof out)==0){ fprintf(stderr,"drive_resolve FAIL: accepted '%s'\n",bad[i]); fail=1; } }
   fprintf(stderr,"[pccd] self-test %s\n",fail?"FAILED":"OK");
   return fail;
 }
@@ -950,8 +1087,58 @@ static void shq(char *out, size_t cap, const char *in){
   out[o<cap?o:cap-1]=0;
 }
 
+// CORS-open response with a body of known length (the /drive answers; the hosted app reads them cross-origin).
+static void http_cors(Client *c, const char *status, const char *type, const char *extra, const char *body, size_t blen){
+  char h[640]; int n=snprintf(h,sizeof h,
+    "HTTP/1.1 %s\r\nContent-Type: %s\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: X-Mtime\r\n"
+    "Cache-Control: no-store\r\n%sContent-Length: %zu\r\nConnection: close\r\n\r\n",status,type,extra?extra:"",blen);
+  if (write(c->fd,h,n)>0) for (size_t off=0; off<blen; ){ ssize_t w=write(c->fd,body+off,blen-off); if (w<=0) break; off+=(size_t)w; }
+  close(c->fd); c->fd=-1;
+}
+// /drive?file=<name>: GET streams the file (X-Mtime = its epoch mtime); POST rewrites config.txt from the
+// request body. The write is origin-gated (a foreign page must never rewrite the clock's config) and lands
+// via temp file + rename so the clock never sees a half-written config.txt. Returns 1 once the request is
+// answered, 0 while a POST body is still arriving (the 8 s slow-loris reaper bounds the wait).
+static int drive_request(Client *c, const char *method, const char *want){
+  char full[1400];
+  if (drive_resolve(want,full,sizeof full)!=0){ http_cors(c,"404 Not Found","text/plain",NULL,"no such file on the clock drive\n",31); return 1; }
+  if (!strcmp(method,"POST")){
+    char o[200]=""; char *org = strcasestr(c->buf,"Origin:");
+    if (org){ org += 7; while (*org==' ') org++; int oi=0; while (*org && *org!='\r' && *org!='\n' && oi<(int)sizeof o-1) o[oi++]=*org++; o[oi]=0; }
+    if (!origin_ok(o)){ fprintf(stderr,"[pccd] rejected drive write from origin %s\n",o); http_cors(c,"403 Forbidden","text/plain",NULL,"cross-origin write rejected\n",28); return 1; }
+    if (strcasecmp(want,"config.txt")){ http_cors(c,"403 Forbidden","text/plain",NULL,"only config.txt is writable\n",28); return 1; }
+    char *he=strstr(c->buf,"\r\n\r\n"); size_t hl=(size_t)(he-c->buf)+4;
+    char *clh=strcasestr(c->buf,"Content-Length:"); long cl = clh ? atol(clh+15) : -1;
+    if (cl<0 || cl > (long)(sizeof c->buf - hl - 1)){ http_cors(c,"413 Payload Too Large","text/plain",NULL,"config.txt body too large\n",26); return 1; }
+    if ((long)(c->len - hl) < cl) return 0;                   // body still arriving
+    char tmp[1400]; snprintf(tmp,sizeof tmp,"%s/config.txt.pccd-new",g_drive);
+    int ok=0;
+    FILE *f=fopen(tmp,"wb");
+    if (f){ ok = fwrite(c->buf+hl,1,(size_t)cl,f)==(size_t)cl && fflush(f)==0 && fsync(fileno(f))==0; fclose(f); }
+    if (ok && rename(tmp,full)!=0) ok=0;
+    if (!ok){                                                   // the FAT driver refused the swap: write in place
+      unlink(tmp);
+      f=fopen(full,"wb");
+      if (f){ ok = fwrite(c->buf+hl,1,(size_t)cl,f)==(size_t)cl && fflush(f)==0 && fsync(fileno(f))==0; fclose(f); }
+    }
+    if (!ok){ http_cors(c,"500 Internal Server Error","text/plain",NULL,"write failed\n",13); return 1; }
+    fprintf(stderr,"[pccd] wrote %ld bytes to %s\n",cl,full);
+    char body[96]; int bn=snprintf(body,sizeof body,"{\"ok\":true,\"bytes\":%ld}",cl);
+    http_cors(c,"200 OK","application/json",NULL,body,(size_t)bn); return 1;
+  }
+  int fd=open(full,O_RDONLY); struct stat st;
+  if (fd<0 || fstat(fd,&st)!=0 || !S_ISREG(st.st_mode) || st.st_size>4*1024*1024){ if (fd>=0) close(fd); http_cors(c,"404 Not Found","text/plain",NULL,"unreadable\n",11); return 1; }
+  char *body=malloc((size_t)st.st_size+1); size_t got=0;
+  if (body){ while (got<(size_t)st.st_size){ ssize_t r=read(fd,body+got,(size_t)st.st_size-got); if (r<=0) break; got+=(size_t)r; } }
+  close(fd);
+  if (!body){ http_cors(c,"500 Internal Server Error","text/plain",NULL,"oom\n",4); return 1; }
+  char extra[64]; snprintf(extra,sizeof extra,"X-Mtime: %lld\r\n",(long long)st.st_mtime);
+  const char *dot=strrchr(full,'.');
+  http_cors(c,"200 OK",(dot && !strcasecmp(dot,".txt"))?"text/plain; charset=utf-8":"application/octet-stream",extra,body,got);
+  free(body); return 1;
+}
 // One HTTP request per plain connection: /health JSON (CORS-open so the deployed app can probe us),
-// a WebSocket upgrade, an optional served file (-w), or a short status page.
+// a WebSocket upgrade, the archive/raw/drive readouts, an optional served file (-w), or a short status page.
 static void http_or_upgrade(Client *c){
   c->buf[c->len]=0;
   if (!strstr(c->buf,"\r\n\r\n")) return;               // wait for full headers
@@ -986,14 +1173,29 @@ static void http_or_upgrade(Client *c){
     fprintf(stderr,"[pccd] websocket client connected\n");
     return;
   }
-  // Parse the request path: "GET <path> HTTP/1.1".
-  char path[1024]; path[0]=0;
-  if (!strncmp(c->buf,"GET ",4)){
-    const char *p=c->buf+4, *sp=strchr(p,' ');
-    int len = sp ? (int)(sp-p) : 0;
-    if (len>0 && len<(int)sizeof path){ memcpy(path,p,len); path[len]=0; }
-  }
+  // Parse the request line: "<METHOD> <path> HTTP/1.1".
+  char method[8]="", path[1024]; path[0]=0;
+  { const char *p=c->buf, *sp=strchr(p,' ');
+    if (sp && sp-p>0 && sp-p<(long)sizeof method){
+      memcpy(method,p,(size_t)(sp-p)); method[sp-p]=0;
+      const char *p2=sp+1, *sp2=strchr(p2,' ');
+      int len = sp2 ? (int)(sp2-p2) : 0;
+      if (len>0 && len<(int)sizeof path){ memcpy(path,p2,(size_t)len); path[len]=0; }
+    } }
   char *q=strchr(path,'?'); if (q) *q++=0;                  // split off the query string (q = params or NULL)
+  if (!strcmp(method,"OPTIONS")){                           // CORS preflight (a browser may send one before POST /drive)
+    const char *r="HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+      "Access-Control-Allow-Headers: Content-Type\r\nAccess-Control-Allow-Private-Network: true\r\nAccess-Control-Max-Age: 600\r\n"
+      "Content-Length: 0\r\nConnection: close\r\n\r\n";
+    write(c->fd,r,strlen(r)); close(c->fd); c->fd=-1; return;
+  }
+  if (!strcmp(path,"/drive")){
+    const char *fn=qval(q,"file"); char want[80]="";
+    if (fn){ size_t n=0; while (fn[n] && fn[n]!='&' && n<sizeof want-1){ want[n]=fn[n]; n++; } want[n]=0; }
+    if (!want[0]){ char body[12288]; drive_list_json(body,sizeof body); http_cors(c,"200 OK","application/json",NULL,body,strlen(body)); return; }
+    drive_request(c,method,want);                            // 0 = POST body still arriving: keep the slot, read more
+    return;
+  }
 
   if (!strncmp(path,"/history",8)){
     // decimated archive readout — CORS-open like /health so the hosted app can chart it too
@@ -1034,22 +1236,24 @@ static void http_or_upgrade(Client *c){
     // liveness, not just presence: is the tty open, when did the last accepted PPS land, what was
     // it, and how many samples have flowed vs been rejected — so the app can tell a streaming clock
     // from one that unplugged (serial_open:false) or went quiet (last_sample_age_s grows unbounded).
-    char json[1100], agebuf[32], offbuf[32], histbuf[96];
+    char json[2800], agebuf[32], offbuf[32], histbuf[112], drivebuf[2100];
     if (g_last_sample_mono>0){
       snprintf(agebuf,sizeof agebuf,"%.3f",(now_mono_ns()-g_last_sample_mono)*1e-9);
       snprintf(offbuf,sizeof offbuf,"%.9f",g_last_offset);
     } else { snprintf(agebuf,sizeof agebuf,"null"); snprintf(offbuf,sizeof offbuf,"null"); }
     hist_summary(histbuf,sizeof histbuf);
+    if (g_drive[0]){ char e[2060]; json_esc(e,sizeof e,g_drive); snprintf(drivebuf,sizeof drivebuf,"\"%s\"",e); }
+    else snprintf(drivebuf,sizeof drivebuf,"null");
     snprintf(json,sizeof json,
       "{\"pccd\":1,\"version\":\"" PCCD_VERSTR "\",\"device\":\"%s\",\"chrony\":%s,"
       "\"serial_open\":%s,\"last_sample_age_s\":%s,\"last_offset_s\":%s,\"sent\":%ld,\"rejected\":%ld,"
-      "\"updatable\":%s,\"platform\":\"%s\",\"webrefresh\":%s,\"history\":%s,\"raw\":%d}",
+      "\"updatable\":%s,\"platform\":\"%s\",\"webrefresh\":%s,\"history\":%s,\"raw\":%d,\"drive\":%s}",
       g_devpath, (g_chrony>=0)?"true":"false",
       g_serial_open?"true":"false", agebuf, offbuf, g_nsent, g_nseen-g_nsent,
       g_updatable?"true":"false", g_platform?g_platform:"",
       (opt_webroot && !opt_webroot_flag)?"true":"false",   // this build understands pccd:web-refresh (gates the app's button)
-      histbuf, raw_cnt);
-    char resp[1400];
+      histbuf, raw_cnt, drivebuf);                           // drive: the mounted CLOCK volume (/drive serves it), or null
+    char resp[3200];
     int n=snprintf(resp,sizeof resp,
       "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\n"
       "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",strlen(json),json);
@@ -1561,9 +1765,12 @@ int main(int argc, char **argv){
         if (g_web_manual){ g_web_manual=0; web_bcast(code==0?"done":code==2?"already-current":"error refresh-failed (see pccd log)"); }
       }
     }
-    // Sky snapshot: one S row per 60 s while NMEA is flowing (hist_S self-gates on freshness).
-    { static double next_snap=0;
-      if (opt_hist && t_iter > next_snap){ hist_S((double)time(NULL)); next_snap = t_iter + 60e9; } }
+    // Sky snapshot: one S row per 60 s and one P (position) row per 10 s while NMEA is flowing (both
+    // self-gate on freshness). The clock's drive is looked for every 5 s — it mounts and unmounts with the clock.
+    { static double next_snap=0, next_pos=0, next_drive=0;
+      if (opt_hist && t_iter > next_snap){ hist_S((double)time(NULL)); next_snap = t_iter + 60e9; }
+      if (opt_hist && t_iter > next_pos){ hist_P((double)time(NULL)); next_pos = t_iter + 10e9; }
+      if (t_iter > next_drive){ drive_scan(); next_drive = t_iter + 5e9; } }
     // Self-heal the $PMTXTS stream: port open but nothing landing for 60 s → re-assert `pps = on`.
     // Covers a clock reboot (back to the pps=off config default), a reflash, and any app that switched
     // it off behind our back. Costs one 10-byte write a minute in the worst case (no GPS lock).

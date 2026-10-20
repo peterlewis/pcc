@@ -141,6 +141,24 @@
       </div>
     </header>
 
+    <!-- HOSTED → LOCAL hand-off. pcc.ptrl.ws is the app for everyone; a machine running pccd has the same
+         app served same-origin at localhost:4192 — every browser, the recorder's archive, the clock's drive.
+         The hosted page says so the moment it can tell (or when a connect attempt has nowhere to go) and
+         remembers the answer: ALWAYS goes straight there next time; NOT NOW is this session; STAY HOSTED
+         lives in DEVICE › CONNECT. -->
+    <sc-if value="{{localBandOn}}" hint-placeholder-val="{{false}}">
+      <div class="band band--local">
+        <span class="band__dot"></span>
+        <span class="band__title">{{localBandTitle}}</span>
+        <span class="band__msg">{{localBandMsg}}</span>
+        <span class="band__acts">
+          <a class="btn btn--go" href="{{localUrl}}" onClick="{{onOpenLocal}}">OPEN LOCAL APP</a>
+          <button class="btn" onClick="{{onLocalAlways}}">ALWAYS OPEN LOCAL</button>
+          <button class="btn" onClick="{{onLocalNotNow}}">NOT NOW</button>
+        </span>
+      </div>
+    </sc-if>
+
     <sc-if value="{{reviewBannerOn}}" hint-placeholder-val="{{false}}">
       <div style="flex:none;display:flex;align-items:center;gap:12px;padding:7px 16px;background:var(--beta-fill);border-bottom:1px solid var(--beta)">
         <span style="width:8px;height:8px;flex:none;border-radius:50%;background:var(--beta);box-shadow:0 0 8px var(--beta)"></span>
@@ -450,8 +468,9 @@
               </div>
               <div style="padding:14px var(--pad-panel-x) var(--pad-panel-x);display:flex;flex-direction:column;gap:10px">
                 <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-                  <button onClick="{{onReadConfig}}" disabled="{{readCfgDisabled}}" style="{{readCfgStyle}}">READ CLOCK DRIVE</button>
+                  <button onClick="{{onReadConfig}}" disabled="{{readCfgDisabled}}" style="{{readCfgStyle}}">{{cfgReadLabel}}</button>
                   <button onClick="{{onCfgWriteToggle}}" class="cbtn"><span style="{{cbCfgWrite}}"></span>ALLOW WRITE-BACK</button>
+                  <span class="meta meta--wide">{{cfgDriveNote}}</span>
                   <span class="spacer"></span>
                   <sc-if value="{{cfgDirty}}" hint-placeholder-val="{{false}}"><span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.1em;color:var(--beta);background:var(--beta-fill);border:1px solid var(--beta);border-radius:var(--r-1);padding:2px 7px">UNSAVED CHANGES</span></sc-if>
                 </div>
@@ -476,11 +495,11 @@
                     </div>
                   </div>
                 </sc-if>
-                <textarea ref="{{refCfgEditor}}" onInput="{{onCfgInput}}" spellCheck="false" placeholder="Click READ CLOCK DRIVE and pick config.txt on the mounted CLOCK drive to edit it here…" style="width:100%;height:320px;resize:vertical;font-family:var(--mono);font-size:var(--fs-data-sm);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:10px;line-height:1.55;white-space:pre;overflow:auto"></textarea>
+                <textarea ref="{{refCfgEditor}}" onInput="{{onCfgInput}}" spellCheck="false" placeholder="config.txt arrives here by itself when pccd sees the CLOCK drive, or from a drive this browser remembers; otherwise click READ CLOCK DRIVE and pick the CLOCK drive…" style="width:100%;height:320px;resize:vertical;font-family:var(--mono);font-size:var(--fs-data-sm);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:10px;line-height:1.55;white-space:pre;overflow:auto"></textarea>
                 <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                   <button onClick="{{onCfgSave}}" disabled="{{cfgSaveDisabled}}" style="{{cfgSaveStyle}}">SAVE TO CLOCK</button>
                   <button onClick="{{onCfgRevert}}" style="font-family:var(--sans);font-size:var(--fs-data-sm);padding:5px 14px;background:transparent;border:1px solid var(--line2);color:var(--txt2);cursor:pointer" style-hover="border-color:var(--txt3);color:var(--txt)">REVERT</button>
-                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body)">Serial config is write-only. Read config.txt <b style="font-weight:600">and SETTINGS.BIN</b> (the on-device menu-edit store) via the CLOCK drive (Chromium only). Write-back is off by default; re-plug or reboot the clock to reload it.</span>
+                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);line-height:var(--lh-body)">Serial config is write-only. config.txt <b style="font-weight:600">and SETTINGS.BIN</b> (the on-device menu-edit store) come off the CLOCK drive: through pccd in any browser, or Chromium's picker (remembered for next time). Write-back is off by default; re-plug or reboot the clock to reload it.</span>
                 </div>
               </div>
             </section>
@@ -970,9 +989,10 @@
                 <button onClick="{{onDisconnect}}" disabled="{{discDisabled}}" style="{{btnDiscStyle}}">DISCONNECT</button>
               </div>
               <div style="display:flex;gap:8px;padding:0 12px 12px">
-                <button onClick="{{onReadConfig}}" disabled="{{readCfgDisabled}}" style="{{readCfgStyle}}">READ CLOCK DRIVE</button>
+                <button onClick="{{onReadConfig}}" disabled="{{readCfgDisabled}}" style="{{readCfgStyle}}">{{cfgReadLabel}}</button>
+                <span class="meta meta--wide">{{cfgDriveNote}}</span>
               </div>
-              <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3)">CONNECT DEVICE OPENS A REAL MK IV: PCC BRIDGE IF pccd IS RUNNING, ELSE WEB SERIAL (CHROMIUM). SEE "CONNECTING A REAL CLOCK" BELOW. SIMULATE RUNS A LABELLED DEMO; IT PAUSES WHILE A REAL CLOCK IS CONNECTED. READ CLOCK DRIVE READS config.txt FROM THE DEVICE'S USB DRIVE (SERIAL CONFIG IS WRITE-ONLY).</div>
+              <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.08em;color:var(--txt3)">CONNECT DEVICE OPENS A REAL MK IV: PCC BRIDGE IF pccd IS RUNNING, ELSE WEB SERIAL (CHROMIUM). SEE "CONNECTING A REAL CLOCK" BELOW. SIMULATE RUNS A LABELLED DEMO; IT PAUSES WHILE A REAL CLOCK IS CONNECTED. config.txt COMES OFF THE DEVICE'S USB DRIVE BY ITSELF — THROUGH pccd, OR A REMEMBERED DRIVE — ELSE READ CLOCK DRIVE PICKS IT (SERIAL CONFIG IS WRITE-ONLY).</div>
             </section>
             <div style="display:flex;flex-direction:column;gap:14px">
               <section class="mod">
@@ -1021,6 +1041,24 @@
                     <div class="kv"><span class="kv__k">Requires</span><span class="kv__v">ANY BROWSER</span></div>
                     <div class="kv"><span class="kv__k">Serves</span><span class="kv__v">THIS APP AT :4192</span></div>
                     <div class="kv"><span class="kv__k">Also feeds</span><span class="kv__v">CHRONY &#183; STRATUM-1 NTP</span></div>
+                    <div class="kv"><span class="kv__k">Clock drive</span><span class="kv__v" data-state="{{trDrSt}}">{{trDrV}}</span></div>
+                  </div>
+                  <!-- WHICH ADDRESS. Two copies of one app: the hosted one, and the one pccd serves. The
+                       hosted page offers the local one when it can see a daemon (the band); this is where
+                       that answer is kept. -->
+                  <div class="well" style="margin-top:var(--sp-3)">
+                    <div class="kv"><span class="kv__k">This app</span><span class="kv__v" data-state="{{appOrgSt}}">{{appOrgV}}</span></div>
+                    <div class="kv"><span class="kv__k">Local copy</span><span class="kv__v"><a class="brg-blocked__a" href="{{localUrl}}">{{localUrl}}</a> &#183; pcc.ptrl.ws/local</span></div>
+                    <sc-if value="{{localPrefShow}}" hint-placeholder-val="{{false}}">
+                      <div class="ctl" style="margin-top:var(--sp-2)">
+                        <span class="ctl__k">When pccd runs here</span>
+                        <div class="seg">
+                          <button onClick="{{oLocalAsk}}" style="{{ssLocalAsk}}">ASK</button>
+                          <button onClick="{{oLocalAlways}}" style="{{ssLocalAlways}}">ALWAYS OPEN LOCAL</button>
+                          <button onClick="{{oLocalNever}}" style="{{ssLocalNever}}">STAY HOSTED</button>
+                        </div>
+                      </div>
+                    </sc-if>
                   </div>
                   <div class="ctl" style="margin-top:var(--sp-3)">
                     <span class="ctl__k">Install pccd</span>
@@ -1112,7 +1150,7 @@
                 </div>
                 <span class="spacer"></span>
                 <div style="display:flex;align-items:center;gap:10px;transition:opacity .15s;{{spanDim}}">
-                  <span class="lbl" title="How far back each satellite's trail reaches. One control, shared with GROUND TRACK. Connected clocks accumulate trail live from the moment this tab connects.">TRAIL</span>
+                  <span class="lbl" title="How far back the TRAILS and HEATMAP layers reach: each trail is the whole span, age-faded; the heatmap is sky occupancy over the same span. Neither switches the other on. One control, shared with GROUND TRACK. A connected clock reaches back through pccd's recorder (24 h), else from this tab's connect.">SPAN</span>
                   <div class="seg">
                     <button onClick="{{oTrail45}}" style="{{ssTrail45}}">45M</button>
                     <button onClick="{{oTrail1h}}" style="{{ssTrail1h}}">1H</button>
@@ -1249,6 +1287,8 @@
                   <button onClick="{{oPwin15}}" style="{{ssPwin15}}">15M</button>
                   <button onClick="{{oPwin30}}" style="{{ssPwin30}}">30M</button>
                   <button onClick="{{oPwin1h}}" style="{{ssPwin1h}}">1H</button>
+                  <button onClick="{{oPwin6h}}" style="{{ssPwin6h}}">6H</button>
+                  <button onClick="{{oPwin24h}}" style="{{ssPwin24h}}">24H</button>
                 </div>
               </div>
             </section>
@@ -1271,8 +1311,10 @@
                   <button onClick="{{oPwin15}}" style="{{ssPwin15}}">15M</button>
                   <button onClick="{{oPwin30}}" style="{{ssPwin30}}">30M</button>
                   <button onClick="{{oPwin1h}}" style="{{ssPwin1h}}">1H</button>
+                  <button onClick="{{oPwin6h}}" style="{{ssPwin6h}}">6H</button>
+                  <button onClick="{{oPwin24h}}" style="{{ssPwin24h}}">24H</button>
                 </div>
-                <span class="meta">EACH FIX = ONE SAMPLE · AGE-FADED · SHARED WITH SIGNAL</span>
+                <span class="meta">EACH FIX = ONE SAMPLE · AGE-FADED · SHARED WITH SIGNAL · 6H / 24H READ pccd'S RECORDER</span>
               </div>
             </section>
             <div style="display:flex;flex-direction:column;gap:14px">
@@ -1519,7 +1561,7 @@
 
               <sc-if value="{{archShown}}">
               <section style="background:var(--panel);border:1px solid var(--line);grid-column:1/-1">
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:27px;padding:4px 11px;background:var(--strip);border-bottom:1px solid var(--line);flex-wrap:wrap"><span class="lbl">ARCHIVE — OFFSET TO GPS TIME</span><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button onClick="{{onArchR6}}" style="{{archR6Style}}">6H</button><button onClick="{{onArchR24}}" style="{{archR24Style}}">24H</button><button onClick="{{onArchR7}}" style="{{archR7Style}}">7D</button><button onClick="{{onArchRAll}}" style="{{archRAllStyle}}">ALL</button></div></div><div style="padding:6px 12px 0;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3)">{{archCaption}}</div>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:27px;padding:4px 11px;background:var(--strip);border-bottom:1px solid var(--line);flex-wrap:wrap"><span class="lbl">ARCHIVE — OFFSET TO GPS TIME</span><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button onClick="{{onArchR6}}" style="{{archR6Style}}">6H</button><button onClick="{{onArchR24}}" style="{{archR24Style}}">24H</button><button onClick="{{onArchR7}}" style="{{archR7Style}}">7D</button><button onClick="{{onArchR30}}" style="{{archR30Style}}">30D</button><button onClick="{{onArchRAll}}" style="{{archRAllStyle}}">ALL</button></div></div><div style="padding:6px 12px 0;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3)">{{archCaption}}</div>
                 <div style="padding:8px 12px 4px"><canvas ref="{{refArchOffset}}" style="width:100%;height:200px;display:block"></canvas></div>
                 <div style="padding:0 12px 8px"><canvas ref="{{refArchAux}}" style="width:100%;height:130px;display:block"></canvas></div>
                 <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">RECORDED BY pccd ON THE BRIDGE HOST (ONE POINT PER PREFILTER GROUP, ~8 s). TOP: OFFSET SENT TO chrony; BAND = MIN/MAX PER BUCKET. BOTTOM: OSC DRIFT (RED, ppm) + DIE TEMP (AMBER).</div>
@@ -1568,7 +1610,7 @@
                   <button onClick="{{oGClock}}" class="cbtn cbtn--tight"><span style="{{cbGClock}}"></span>CLOCK OVERLAY</button>
                 </sc-if>
                 <span class="spacer"></span>
-                <span class="lbl" title="How far back the ground-track trails reach. One control, shared with the SKY PLOT.">TRAIL</span>
+                <span class="lbl" title="How far back the ground-track trails reach. One control, shared with the SKY PLOT (its trails and heatmap).">SPAN</span>
                 <div class="seg">
                   <button onClick="{{oTrail45}}" style="{{ssTrail45}}">45M</button>
                   <button onClick="{{oTrail1h}}" style="{{ssTrail1h}}">1H</button>
@@ -1607,9 +1649,9 @@
                   <span class="lbl">08 · SKY ARCHIVE</span>
                   <span class="lbl lbl--nano">DAEMON · AGGREGATE</span>
                 </div>
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:27px;padding:4px 11px;background:var(--strip);border-bottom:1px solid var(--line);flex-wrap:wrap"><span class="lbl">RANGE</span><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button onClick="{{onArchR6}}" style="{{archR6Style}}">6H</button><button onClick="{{onArchR24}}" style="{{archR24Style}}">24H</button><button onClick="{{onArchR7}}" style="{{archR7Style}}">7D</button><button onClick="{{onArchRAll}}" style="{{archRAllStyle}}">ALL</button></div></div><div style="padding:6px 12px 0;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3)">{{archCaption}}</div>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:27px;padding:4px 11px;background:var(--strip);border-bottom:1px solid var(--line);flex-wrap:wrap"><span class="lbl">RANGE</span><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button onClick="{{onArchR6}}" style="{{archR6Style}}">6H</button><button onClick="{{onArchR24}}" style="{{archR24Style}}">24H</button><button onClick="{{onArchR7}}" style="{{archR7Style}}">7D</button><button onClick="{{onArchR30}}" style="{{archR30Style}}">30D</button><button onClick="{{onArchRAll}}" style="{{archRAllStyle}}">ALL</button></div></div><div style="padding:6px 12px 0;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3)">{{archCaption}}</div>
                 <div style="padding:8px 12px 8px"><canvas ref="{{refArchSky}}" style="width:100%;height:280px;display:block"></canvas></div>
-                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">RECORDED BY pccd (ONE SNAPSHOT PER 60 s). C/N0 MEAN (RED), MAX (DASHED), SATS USED (AMBER, RIGHT SCALE). AGGREGATE ONLY — THE RECORDER KEEPS NO PER-SATELLITE TRACK YET.</div>
+                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">RECORDED BY pccd (ONE SNAPSHOT PER 60 s). C/N0 MEAN (RED), MAX (DASHED), SATS USED (AMBER, RIGHT SCALE). THE SAME ROWS FEED THE SKY PLOT'S TRAILS AND SIGNAL'S C/N0 OVER TIME; POSITION ROWS (EVERY 10 s) FEED POSITION.</div>
               </section>
             </sc-if>
             <sc-if value="{{archAbsent}}" hint-placeholder-val="{{false}}">
