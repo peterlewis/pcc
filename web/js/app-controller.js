@@ -1886,7 +1886,9 @@ class Component extends DcLite {
       const sim = this.simTrails(cut);
       const comp = sim || this.archTrails(cut);
       const source = comp ? comp.trails : S.trails;
-      if (st.skyTrails) for (const [k, tr] of source) {
+      // Both layers read this span (drawSky gates the lines on opts.trails), so fill it for either one:
+      // with TRAILS off, the heatmap still needs the whole span's tracks.
+      if (st.skyTrails || st.skyHeatmap) for (const [k, tr] of source) {
         const f = tr.filter((p) => nowS - p.t <= cut);
         if (f.length > 1) trails.set(k, f);
       }
@@ -1900,14 +1902,14 @@ class Component extends DcLite {
       // or else this tab's connect (nothing models a real sky). When that depth is younger than the
       // TRAIL window, say so on the plot instead of looking broken.
       let accNote = '';
-      if (!sim && S.real && st.skyTrails) {
+      if (!sim && S.real && (st.skyTrails || st.skyHeatmap)) {
         let oldest = nowS;
         for (const tr of source.values()) if (tr.length && tr[0].t < oldest) oldest = tr[0].t;
         if (nowS - oldest < cut * 0.95) {
           const m = Math.max(0, Math.round((nowS - oldest) / 60));
           const rec = m < 60 ? m + ' MIN' : (m / 60).toFixed(m % 60 ? 1 : 0) + ' H';
           const win = cut >= 3600 ? (cut / 3600) + ' H' : Math.round(cut / 60) + ' MIN';
-          accNote = comp ? 'RECORDED · ' + rec + ' OF ' + win : 'TRAIL RECORDS LIVE · ' + rec + ' OF ' + win + ' SO FAR';
+          accNote = (comp ? 'RECORDED · ' : 'LIVE BUFFER · ') + rec + ' OF ' + win;
         }
       }
       return CH.drawSky(el, T, {
@@ -2910,16 +2912,30 @@ class Component extends DcLite {
       ssThemeDark: this.seg(st.theme === 'dark', true), ssThemeLight: this.seg(st.theme === 'light', false),
       onThemeDark: () => this.setTheme('dark'), onThemeLight: () => this.setTheme('light'),
       appStaleOn: st.appStale, onAppReload: () => { try { location.reload(); } catch (e) {} },
-      // The hosted page's hand-off band (localHandoff). One sentence of why, three answers.
+      // The hosted page's hand-off band (localHandoff). A title, one line, three answers.
       localBandOn: !!st.localBand,
-      localBandTitle: st.localBand === 'detected' ? 'PCC BRIDGE IS RUNNING ON THIS MACHINE'
-        : st.localBand === 'blocked' ? 'THIS BROWSER CANNOT REACH A LOCAL BRIDGE FROM AN https PAGE'
-        : 'NO WAY TO A CLOCK FROM THIS PAGE',
-      localBandMsg: st.localBand === 'detected'
-        ? 'THE LOCAL APP IS THIS SAME APP, SERVED BY YOUR pccd AT ' + LOCAL_APP_URL.replace(/\/$/, '') + ': SAME-ORIGIN BRIDGE (EVERY BROWSER, NO LOCAL-NETWORK PROMPTS), THE FLIGHT-RECORDER ARCHIVE, THE CLOCK\'S OWN DRIVE. ALWAYS = NEXT TIME GO STRAIGHT THERE (ADD ?hosted TO STAY ONCE).'
-        : st.localBand === 'blocked'
-        ? 'SO pccd MAY WELL BE RUNNING, UNSEEN. IF IT IS, THE LOCAL APP AT ' + LOCAL_APP_URL.replace(/\/$/, '') + ' CONNECTS IN THIS BROWSER. ALWAYS SENDS YOU THERE ON ARRIVAL — BLIND, SO KEEP pccd RUNNING. CHANGE YOUR MIND IN DEVICE › CONNECT.'
-        : 'NO WEB SERIAL HERE, AND NO pccd ANSWERED. INSTALL pccd (DEVICE › CONNECT, ONE LINE), THEN USE THE LOCAL APP AT ' + LOCAL_APP_URL.replace(/\/$/, '') + ' — IT WORKS IN THIS BROWSER.',
+      localBandTitle: st.localBand === 'detected' ? 'pccd RUNNING ON THIS MACHINE'
+        : st.localBand === 'blocked' ? 'BROWSER BLOCKS LOCAL BRIDGE FROM https'
+        : 'NO CLOCK CONNECTION FROM THIS PAGE',
+      localBandMsg: st.localBand === 'detected' ? 'LOCAL APP ADDS THE ARCHIVE AND CLOCK DRIVE.'
+        : st.localBand === 'blocked' ? 'IF pccd RUNS HERE, USE THE LOCAL APP.'
+        : 'NO WEB SERIAL. NO pccd. INSTALL pccd: DEVICE › CONNECT.',
+      // config.txt nag: a real clock is connected and its config.txt is not read, so the face runs on app
+      // defaults. Waits 5 s after connect so a pccd 0.8 auto-read lands first. Offers the fix that applies.
+      ...(() => {
+        const bi = st.bridgeInfo, S2 = S;
+        const viaBr = !!(S2 && S2.real && this.realdev && this.realdev.transport && this.realdev.transport() === 'bridge');
+        const old = viaBr && !!bi && !('drive' in bi);                  // pccd < 0.8: no /drive
+        const unmounted = viaBr && !!bi && ('drive' in bi) && !bi.drive;
+        return {
+          cfgNagOn: !!(S2 && S2.connected && S2.real && !st.cfgName && !this._cfgNagOff && !this._cfgReading && Date.now() / 1000 - S2.t0 > 5),
+          cfgNagMsg: 'FACE USES APP DEFAULTS.' + (old ? ' pccd ' + String(bi.version || '').split('+')[0] + ' CANNOT READ THE DRIVE. UPDATE TO 0.8.'
+            : unmounted ? ' CLOCK DRIVE NOT MOUNTED.' : ''),
+          cfgNagUpd: old && !!(bi.updatable && this._pccdNewerTag && !this._pccdUpdating),
+          cfgNagRead: typeof window !== 'undefined' && !!window.showDirectoryPicker,
+          onCfgNagOff: () => { this._cfgNagOff = true; this.setState({}); },
+        };
+      })(),
       localUrl: LOCAL_APP_URL,
       onOpenLocal: (e) => { if (e && e.preventDefault) e.preventDefault(); this.openLocalApp(); },
       onLocalAlways: () => { this.setLocalPref('always'); this.openLocalApp(); },

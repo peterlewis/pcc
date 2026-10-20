@@ -153,8 +153,23 @@
         <span class="band__msg">{{localBandMsg}}</span>
         <span class="band__acts">
           <a class="btn btn--go" href="{{localUrl}}" onClick="{{onOpenLocal}}">OPEN LOCAL APP</a>
-          <button class="btn" onClick="{{onLocalAlways}}">ALWAYS OPEN LOCAL</button>
+          <button class="btn" onClick="{{onLocalAlways}}" title="Undo: open pcc.ptrl.ws/?hosted, then DEVICE › CONNECT">ALWAYS</button>
           <button class="btn" onClick="{{onLocalNotNow}}">NOT NOW</button>
+        </span>
+      </div>
+    </sc-if>
+
+    <!-- config.txt nag: a real clock is connected and its config.txt is not read (old pccd, drive not
+         mounted, or Web Serial with no remembered drive). Offers the fix that applies here. -->
+    <sc-if value="{{cfgNagOn}}" hint-placeholder-val="{{false}}">
+      <div class="band band--warn">
+        <span class="band__dot"></span>
+        <span class="band__title">CONFIG.TXT NOT READ</span>
+        <span class="band__msg">{{cfgNagMsg}}</span>
+        <span class="band__acts">
+          <sc-if value="{{cfgNagUpd}}" hint-placeholder-val="{{false}}"><button class="btn btn--go" onClick="{{onPccdUpdate}}">UPDATE pccd</button></sc-if>
+          <sc-if value="{{cfgNagRead}}" hint-placeholder-val="{{true}}"><button class="btn" onClick="{{onReadConfig}}">{{cfgReadLabel}}</button></sc-if>
+          <button class="btn" onClick="{{onCfgNagOff}}">NOT NOW</button>
         </span>
       </div>
     </sc-if>

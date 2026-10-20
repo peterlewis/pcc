@@ -371,6 +371,8 @@
 .band { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 7px 16px;
   background: var(--strip); border-bottom: 1px solid var(--line2); }
 .band--local { border-color: var(--lock); }
+.band--warn { border-color: var(--acq); }   /* something the clock needs from you: amber */
+.band--warn .band__dot { background: var(--acq); box-shadow: 0 0 8px var(--acq); }
 .band__dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--lock); box-shadow: 0 0 8px var(--lock); }
 .band__title { font-family: var(--mono); font-size: var(--fs-label); font-weight: 700; letter-spacing: .1em; color: var(--txt); white-space: nowrap; }
 .band__msg { font-family: var(--mono); font-size: var(--fs-meta); letter-spacing: .06em; color: var(--txt2); line-height: 1.5; max-width: 760px; }
