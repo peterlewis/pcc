@@ -24,9 +24,12 @@ const STORE_SAMPLES = 'samples';    // raw 1 Hz — keyPath [sessionId, t]
 const STORE_MINUTE = 'minute';      // 1-min rollup — keyPath [sessionId, m]
 const STORE_SESSIONS = 'sessions';  // per-connection metadata — keyPath sessionId
 
-const LS_LOGGING = 'pcc_telemetry.logging';       // opt-IN, default off (honesty: no silent persistence)
-const LS_RETENTION = 'pcc_telemetry.retention';   // seconds; default 7 days
-const DEFAULT_RETENTION = 7 * 86400;
+const LS_LOGGING = 'pcc_telemetry.logging';       // on unless turned off ('false'): it's local, like pccd's recorder
+const LS_RETENTION = 'pcc_telemetry.retention';   // seconds; the minute tier + sessions. Default = pccd's -R (365 d)
+const DEFAULT_RETENTION = 365 * 86400;
+// Tiered like pccd: the 1 Hz rows (every sat, every second — ~250 MB/day) are kept for a day; the
+// 1-minute rollups and session rows for the full retention.
+const RAW_RETENTION = 86400;
 
 export class TelemetryLog extends EventTarget {
   constructor() {
@@ -38,7 +41,7 @@ export class TelemetryLog extends EventTarget {
     this._count = 0;                  // rows written this session (for the sessions row)
     this._writeFailed = false;        // a put errored (quota etc.) — stop pretending to record
 
-    this._enabled = localStorage.getItem(LS_LOGGING) === 'true';
+    this._enabled = localStorage.getItem(LS_LOGGING) !== 'false';
     const r = parseInt(localStorage.getItem(LS_RETENTION), 10);
     this._retention = Number.isFinite(r) && r > 0 ? r : DEFAULT_RETENTION;
 
@@ -102,6 +105,7 @@ export class TelemetryLog extends EventTarget {
     this._put(STORE_SAMPLES, row);                 // fire-and-forget
     this._count++;
     this._accumulateMinute(row);
+    if (t - (this._prunedAt || 0) >= 3600) { this._prunedAt = t; this._prune(); }   // hourly while connected: the 1 Hz tier stays at a day
     this.dispatchEvent(new CustomEvent('sample', { detail: { t, count: this._count } }));
   }
 
@@ -276,11 +280,13 @@ export class TelemetryLog extends EventTarget {
   // delete on the 't' index — identical shape to skytrailstore._pruneOldPasses.
   async _prune() {
     if (!this._db) return;
-    const cutoff = Math.floor(Date.now() / 1000) - this._retention;
+    const nowS = Math.floor(Date.now() / 1000);
+    const cutoff = nowS - this._retention;                              // minute tier + sessions
+    const rawCut = nowS - Math.min(RAW_RETENTION, this._retention);     // 1 Hz tier
     await new Promise((resolve) => {
       const tx = this._db.transaction(STORE_SAMPLES, 'readwrite');
       const idx = tx.objectStore(STORE_SAMPLES).index('t');
-      const req = idx.openCursor(IDBKeyRange.upperBound(cutoff, true));
+      const req = idx.openCursor(IDBKeyRange.upperBound(rawCut, true));
       req.onsuccess = (e) => { const c = e.target.result; if (c) { c.delete(); c.continue(); } };
       tx.oncomplete = resolve; tx.onerror = resolve;
     });

@@ -1750,15 +1750,15 @@ class Component extends DcLite {
     // open, so without this the app stays CONNECTED on a frozen stream. Drops to Standby after 8 s
     // of silence (self-guarded; a no-op in Standby/Simulation and on a healthy stream).
     if (this.realdev && this.realdev.checkRxStale && !this._pccdUpdating) this.realdev.checkRxStale();   // a self-update drops the bridge briefly — not a "clock lost"
-    // Telemetry logging — CONNECTED real data only, and ONLY when the user has opted in. The
-    // opt-in gate must sit on beginSession/record too, not just the UI: the logger's contract is
-    // "no silent persistence", so nothing (not even the sessions row with the observer's home
-    // coordinates) may be written while logging is off. Edge-detect here (rather than importing
-    // the logger into realdev.js) so simulation can never reach the log. Disabling mid-session
-    // ends the open session cleanly.
+    // Telemetry logging — CONNECTED real data only. On by default (it stays on this machine, like
+    // pccd's recorder); turning it off must stop beginSession/record too, not just the UI, so nothing
+    // (not even the sessions row with the observer's home coordinates) is written while it is off.
+    // Paused while pccd's recorder covers this clock: one record, the daemon's. Edge-detect here
+    // (rather than importing the logger into realdev.js) so simulation can never reach the log.
+    // Disabling (or pccd taking over) mid-session ends the open session cleanly.
     if (this.telemetryLog) {
       const S = this.session.S;
-      const on = this.telemetryLog.enabled;
+      const on = this.telemetryLog.enabled && !this.pccdRecords();
       const real = !!(S && S.real && S.connected && on);
       if (real && !this._wasReal) {
         this.telemetryLog.beginSession({ observerLat: S.obs && S.obs.lat, observerLon: S.obs && S.obs.lon, portLabel: S.portLabel || '' });
@@ -4058,6 +4058,12 @@ class Component extends DcLite {
     const bi = this.state.bridgeInfo;
     return !!(bi && bi.drive && this.realdev && this.realdev.transport && this.realdev.transport() === 'bridge');
   }
+  // pccd's flight recorder is behind this connection (bridge transport, recorder on): the browser log
+  // pauses so the daemon's archive is the one record.
+  pccdRecords() {
+    const S = this.session && this.session.S, bi = this.state.bridgeInfo;
+    return !!(S && S.real && S.connected && bi && bi.history && this.realdev && this.realdev.transport && this.realdev.transport() === 'bridge');
+  }
   // `key = value` lines a config.txt actually sets (comments and blanks skipped) — the CONFIG tile's count.
   cfgKeyCount(text) {
     let n = 0;
@@ -4703,8 +4709,8 @@ class Component extends DcLite {
       // Persistent telemetry log (IndexedDB) — the data-safety controls. Opt-in; never simulation.
       cbTelLog: this.cb(!!(this.telemetryLog && this.telemetryLog.enabled)),
       onTelLog: () => { if (!this.telemetryLog) return; this.telemetryLog.setEnabled(!this.telemetryLog.enabled); this.setState({}); },
-      telStat: (() => { const s = this._telStats; return s ? (s.rows.toLocaleString() + ' SAMPLES · ' + s.sessions + ' SESSION' + (s.sessions === 1 ? '' : 'S') + (s.kb ? ' · ' + (s.kb > 1024 ? (s.kb / 1024).toFixed(1) + ' MB' : s.kb + ' KB') : '')) : '—'; })(),
-      telRetVal: String(this.telemetryLog ? this.telemetryLog.retention : 604800),
+      telStat: (() => { const s = this._telStats; return (this.pccdRecords() ? 'PAUSED · pccd RECORDS THIS CLOCK · ' : '') + (s ? (s.rows.toLocaleString() + ' SAMPLES · ' + s.sessions + ' SESSION' + (s.sessions === 1 ? '' : 'S') + (s.kb ? ' · ' + (s.kb > 1024 ? (s.kb / 1024).toFixed(1) + ' MB' : s.kb + ' KB') : '')) : '—'); })(),
+      telRetVal: String(this.telemetryLog ? this.telemetryLog.retention : 31536000),
       onTelRet: (e) => { if (this.telemetryLog) this.telemetryLog.setRetention(+e.target.value).then(() => this.refreshTelStats()); },
       onTelClear: () => {
         if (!this.telemetryLog) return;

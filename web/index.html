@@ -1788,7 +1788,7 @@
               </div>
               <div style="padding:14px var(--pad-panel-x) var(--pad-panel-x);display:flex;flex-direction:column;gap:12px">
                 <button onClick="{{onTelLog}}" style="display:flex;align-items:center;gap:10px;background:transparent;border:0;padding:0;cursor:pointer;align-self:flex-start;font-family:var(--sans);font-size:var(--fs-data);color:var(--txt)"><span style="{{cbTelLog}}"></span>LOG MY CLOCK'S DATA WHILE CONNECTED</button>
-                <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.04em;color:var(--txt3);line-height:1.6;max-width:640px">Logs position, satellites, temperature and clock skew to this browser for rewind and scrub. Off by default. A simulation is NEVER logged.</span>
+                <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.04em;color:var(--txt3);line-height:1.6;max-width:640px">1 Hz FOR 24 H, 1-MIN SUMMARY FOR THE KEEP PERIOD. PAUSED WHILE pccd RECORDS. SIMULATION IS NOT LOGGED.</span>
                 <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding-top:2px;border-top:1px solid var(--line)">
                   <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.04em;color:var(--txt2)">{{telStat}}</span>
                   <span style="flex:1;min-width:20px"></span>
@@ -1797,6 +1797,7 @@
                     <option value="86400">1 DAY</option>
                     <option value="604800">7 DAYS</option>
                     <option value="2592000">30 DAYS</option>
+                    <option value="31536000">365 DAYS</option>
                     <option value="315360000">FOREVER</option>
                   </select>
                   <button onClick="{{onTelExport}}" style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.06em;color:var(--txt);background:var(--well);border:1px solid var(--line2);padding:6px 12px;cursor:pointer" style-hover="border-color:var(--txt3)">EXPORT CSV</button>
@@ -1827,7 +1828,7 @@
                   <div style="background:var(--panel);padding:8px 11px"><div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.12em;color:var(--txt3)">CLOCK SKEW</div><div style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt);margin-top:3px">{{rvSkew}}</div></div>
                 </div>
                 <sc-if value="{{rvNoData}}" hint-placeholder-val="{{false}}">
-                  <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.04em;color:var(--txt3);line-height:1.6">No recorded telemetry yet. Turn on <strong>LOG MY CLOCK'S DATA</strong> above and connect the clock. Its stream is recorded here.</span>
+                  <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.04em;color:var(--txt3);line-height:1.6">No browser log yet. Connect the clock. With pccd, use SKY › ARCHIVE.</span>
                 </sc-if>
               </div>
             </section>
