@@ -46,7 +46,7 @@
 #endif
 
 #ifndef PCCD_VERSION
-#define PCCD_VERSION "0.8.0"               /* overridable (-DPCCD_VERSION=...) so a test build can look older */
+#define PCCD_VERSION "0.9.0"               /* overridable (-DPCCD_VERSION=...) so a test build can look older */
 #endif
 #ifdef PCCD_GIT
 #define PCCD_VERSTR PCCD_VERSION "+" PCCD_GIT      /* Makefile stamps the short git hash for traceable /health */
@@ -58,6 +58,7 @@
 #include <sys/un.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <sys/resource.h>                  /* setpriority: the gzip child runs niced */
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
@@ -494,9 +495,18 @@ static void pf_test_sink(double wall, double off){ if (pt_n<16){ pt_wall[pt_n]=w
 //   T,<epoch>,<offset_us>,<jitter_us>,<ppm>,<temp_c>       one per prefilter group (~8 s)
 //   S,<epoch>,<fix>,<used>,<hdop>,<PRN:az:el:cn0;...>      one sky snapshot per 60 s
 //   P,<epoch>,<lat>,<lon>,<alt_m>,<hdop>,<pdop>,<vdop>,<fixtype>,<used>   one position sample per 10 s, while fixed
+//   C,<epoch>,<dwt_ticks>,<residual_ns>                    the clock's own 1 Hz phase, from $PMTXTS:
+//       dwt_ticks   = DWT cycles this second - 80,000,000 (12.5 ns each): the FREE-RUNNING crystal's
+//                     frequency error, the quantity the firmware's ADEV integrates (empty across a gap
+//                     or on firmware without the DWT fields)
+//       residual_ns = the disciplined clock's sub-ms position at the PPS edge, centred and 1 ms-folded
+//                     like the app's ppsts.js. SysTick is re-pinned every second, so this is the loop's
+//                     per-second residual, not accumulated phase.
 // Real-only by construction: pccd never sees a simulation. A missing span IS the record of the clock
-// being unplugged. Files rotate at UTC midnight; files older than opt_retain days are pruned then.
-// The app reads it back through GET /history with server-side decimation (hist_query below).
+// being unplugged. Files rotate at UTC midnight; files older than opt_retain days are pruned then, and
+// files older than HIST_GZ_AFTER days are gzipped (YYYY-MM-DD.log.gz), read back through the system gzip.
+// The app reads it back through GET /history with server-side decimation (hist_query below); the
+// standard-format exports stream from hist_export.
 static const char *opt_hist = NULL;      // -H dir ("off" disables); main() defaults it next to the exe
 static int  opt_hist_off = 0;            // -H off given: the default derivation must not re-enable it
 static int  opt_retain = 365;            // -R days: prune files older than this at rotation
@@ -514,19 +524,79 @@ static void hist_day_of(time_t t, char *out, size_t cap){
   struct tm tm; gmtime_r(&t,&tm);
   snprintf(out,cap,"%04d-%02d-%02d",tm.tm_year+1900,tm.tm_mon+1,tm.tm_mday);
 }
+// A recorder day file: strictly YYYY-MM-DD.log, or YYYY-MM-DD.log.gz once compressed. 1 = plain, 2 = gz.
+static int hist_dayname(const char *n){
+  size_t l=strlen(n);
+  if (l<14 || n[4]!='-' || n[7]!='-') return 0;
+  for (int i=0;i<10;i++) if (i!=4 && i!=7 && (n[i]<'0'||n[i]>'9')) return 0;
+  if (l==14 && !strcmp(n+10,".log")) return 1;
+  if (l==17 && !strcmp(n+10,".log.gz")) return 2;
+  return 0;
+}
 static void hist_prune(void){
   time_t cutoff = time(NULL) - (time_t)opt_retain*86400;
   char keep[16]; hist_day_of(cutoff,keep,sizeof keep);
   DIR *d = opendir(opt_hist); if (!d) return;
   struct dirent *e;
   while ((e=readdir(d))){
-    size_t n=strlen(e->d_name);
-    if (n!=14 || strcmp(e->d_name+10,".log")) continue;         // strictly YYYY-MM-DD.log
+    if (!hist_dayname(e->d_name)) continue;
     if (strncmp(e->d_name,keep,10) < 0){
       char p[4400]; snprintf(p,sizeof p,"%s/%s",opt_hist,e->d_name); unlink(p);
     }
   }
   closedir(d);
+}
+// gzip, by absolute path: the main loop never runs with a pinned PATH, and a root daemon must not
+// resolve a helper through whatever PATH it inherited.
+static const char *gzip_path(void){
+  static const char *c[] = { "/usr/bin/gzip", "/bin/gzip" };
+  for (unsigned i=0;i<sizeof c/sizeof *c;i++) if (access(c[i],X_OK)==0) return c[i];
+  return NULL;
+}
+static void shq(char *out, size_t cap, const char *in);       // defined with the HTTP helpers
+// Open one day's file for reading: the plain .log, else the .log.gz through `gzip -dc`. A day that is
+// mid-compression still has its .log (gzip removes it only after the .gz is complete).
+static FILE *hist_open_day(const char *day, int *piped){
+  char p[4400]; *piped=0;
+  snprintf(p,sizeof p,"%s/%s.log",opt_hist,day);
+  FILE *fp=fopen(p,"r"); if (fp) return fp;
+  snprintf(p,sizeof p,"%s/%s.log.gz",opt_hist,day);
+  const char *gz=gzip_path(); struct stat st;
+  if (!gz || stat(p,&st)!=0) return NULL;
+  char q[4500], cmd[4700]; shq(q,sizeof q,p); snprintf(cmd,sizeof cmd,"%s -dc %s 2>/dev/null",gz,q);
+  fp=popen(cmd,"r"); if (fp) *piped=1;
+  return fp;
+}
+static void hist_close_day(FILE *fp, int piped){ if (piped) pclose(fp); else fclose(fp); }
+// Compress day files older than HIST_GZ_AFTER days, in one detached, niced gzip: the double fork means
+// no zombie and no wait, so the timing loop never pauses for it. The last week stays plain so the
+// app's 6H / 24H / 7D windows read without decompressing. `sync_wait` (self-test) waits for gzip.
+#define HIST_GZ_AFTER 7
+static int g_gz_auto = 1;                                       // rotation compresses; the self-test turns it off
+static int hist_compress_old(int sync_wait){
+  const char *gz=gzip_path(); if (!gz || !opt_hist) return 0;
+  char keep[16]; hist_day_of(time(NULL)-(time_t)HIST_GZ_AFTER*86400,keep,sizeof keep);
+  DIR *d=opendir(opt_hist); if (!d) return 0;
+  char *argv[516]; int n=0; argv[n++]=(char*)gz; argv[n++]="-f";
+  struct dirent *e;
+  while ((e=readdir(d)) && n<514){
+    if (hist_dayname(e->d_name)!=1 || strncmp(e->d_name,keep,10)>=0) continue;
+    char *p=malloc(4400); if (!p) break;
+    snprintf(p,4400,"%s/%s",opt_hist,e->d_name); argv[n++]=p;
+  }
+  closedir(d);
+  int files=n-2; argv[n]=NULL;
+  if (files>0){
+    pid_t k=fork();
+    if (k==0){
+      pid_t g = sync_wait ? 0 : fork();
+      if (g==0){ setpriority(PRIO_PROCESS,0,10); execv(gz,argv); _exit(127); }
+      _exit(0);
+    }
+    if (k>0) waitpid(k,NULL,0);
+  }
+  for (int i=2;i<n;i++) free(argv[i]);
+  return files;
 }
 // Open (or rotate to) the file for `now`. Returns g_histf or NULL when disabled/unwritable.
 static FILE *hist_file(time_t now){
@@ -537,7 +607,7 @@ static FILE *hist_file(time_t now){
   mkdir(opt_hist,0755);
   char p[4400]; snprintf(p,sizeof p,"%s/%s.log",opt_hist,day);
   g_histf = fopen(p,"a");
-  if (g_histf){ fcntl(fileno(g_histf),F_SETFD,FD_CLOEXEC); setvbuf(g_histf,NULL,_IOLBF,0); snprintf(g_hist_day,sizeof g_hist_day,"%s",day); hist_prune(); }   // CLOEXEC: don't leak the log fd across self-update exec / curl subprocs
+  if (g_histf){ fcntl(fileno(g_histf),F_SETFD,FD_CLOEXEC); setvbuf(g_histf,NULL,_IOLBF,0); snprintf(g_hist_day,sizeof g_hist_day,"%s",day); hist_prune(); if (g_gz_auto) hist_compress_old(0); }   // CLOEXEC: don't leak the log fd across self-update exec / curl subprocs
   return g_histf;
 }
 static void hist_T(double wall, double off){
@@ -600,6 +670,33 @@ static void hist_P(double now){
   fprintf(f,"P,%.0f,%.6f,%.6f,%.1f,%.2f,%.2f,%.2f,%d,%d\n", now, hs_fix.lat, hs_fix.lon, hs_fix.alt,
           hs_fix.hdop, hs_fix.pdop, hs_fix.vdop, hs_fix.type, hs_fix.used);
 }
+// C row: one per $PMTXTS second with valid+pps. Keeps its own previous-second state for the DWT delta
+// and the 1 ms fold; that state advances even with the recorder off, so a later file starts consistent.
+static double hc_prev_ns = NAN; static unsigned long hc_prev_epoch = 0; static uint32_t hc_prev_dwt = 0; static int hc_have_dwt = 0;
+static void hist_C(unsigned long epoch, unsigned long subms, unsigned long systick, unsigned long load, int ext, uint32_t dwt){
+  double ns = NAN;
+  if (load > 0){
+    double ms = (double)subms + ((double)load - (double)systick) / ((double)load + 1.0);
+    if (ms > 500) ms -= 1000;                                  // centre: (-500, +500] ms
+    ns = ms * 1e6;
+    if (!isnan(hc_prev_ns)){                                   // 1 ms attribution fold (ppsts.js foldPhase1ms)
+      double best = ns;
+      if (fabs(ns - 1e6 - hc_prev_ns) < fabs(best - hc_prev_ns)) best = ns - 1e6;
+      if (fabs(ns + 1e6 - hc_prev_ns) < fabs(best - hc_prev_ns)) best = ns + 1e6;
+      ns = best;
+    }
+    hc_prev_ns = ns;
+  }
+  char dt[24] = "";
+  if (ext && hc_have_dwt && epoch - hc_prev_epoch == 1){
+    int32_t d = (int32_t)((uint32_t)(dwt - hc_prev_dwt) - 80000000u);
+    if (d > -80000 && d < 80000) snprintf(dt,sizeof dt,"%d",(int)d);   // |err| < 1000 ppm, else a glitch
+  }
+  if (ext){ hc_prev_dwt = dwt; hc_have_dwt = 1; } else hc_have_dwt = 0;
+  hc_prev_epoch = epoch;
+  FILE *f = hist_file((time_t)epoch); if (!f || isnan(ns)) return;
+  fprintf(f,"C,%lu,%s,%.1f\n", epoch, dt, ns);
+}
 static void hist_S(double now){
   FILE *f = hist_file((time_t)now); if (!f) return;
   if (now - hs_fix.seen > 90 ) return;                        // no live NMEA → nothing real to record
@@ -636,9 +733,8 @@ static char *hist_pass(char typ, int skip, const char *hdr, double from, double 
   o += (size_t)snprintf(out,cap,"%s\n",hdr);
   long last=-1;                                               // bucket of the last row sent (rows are time-ordered)
   for (time_t d = (time_t)from - ((time_t)from % 86400); d <= (time_t)to; d += 86400){
-    char day[16], path[4400]; hist_day_of(d,day,sizeof day);
-    snprintf(path,sizeof path,"%s/%s.log",opt_hist,day);
-    FILE *fp=fopen(path,"r"); if(!fp) continue;
+    char day[16]; hist_day_of(d,day,sizeof day);
+    int piped; FILE *fp=hist_open_day(day,&piped); if(!fp) continue;
     char ln[2048];
     while (fgets(ln,sizeof ln,fp)){
       if (ln[0]!=typ || ln[1]!=',') continue;
@@ -647,11 +743,11 @@ static char *hist_pass(char typ, int skip, const char *hdr, double from, double 
       const char *s=ln; for (int k=0;k<skip && s;k++){ s=strchr(s,','); if(s) s++; }
       if (!s) continue;
       size_t sl=strcspn(s,"\r\n");
-      if (o+sl+32 > cap){ size_t nc=2*cap+sl; char *nb=realloc(out,nc); if(!nb){ free(out); fclose(fp); return NULL; } out=nb; cap=nc; }
+      if (o+sl+32 > cap){ size_t nc=2*cap+sl; char *nb=realloc(out,nc); if(!nb){ free(out); hist_close_day(fp,piped); return NULL; } out=nb; cap=nc; }
       o += (size_t)snprintf(out+o,cap-o,"%.0f,%.*s\n",t,(int)sl,s);
       last=i;
     }
-    fclose(fp);
+    hist_close_day(fp,piped);
   }
   *blen=o; return out;
 }
@@ -676,14 +772,14 @@ static char *hist_query(const char *qs, size_t *blen){
   if (points>4000) points=4000;
   if (!strcmp(series,"sats")) return hist_pass('S',5,"t,sats",from,to,points,blen);                       // past S,t,fix,used,hdop
   if (!strcmp(series,"pos"))  return hist_pass('P',2,"t,lat,lon,alt,hdop,pdop,vdop,fix,used",from,to,points,blen);   // past P,t
+  if (!strcmp(series,"phase")) return hist_pass('C',2,"t,dwt_ticks,residual_ns",from,to,points,blen);              // past C,t
   int sky = !strcmp(series,"sky");
   typedef struct { double mn,mx,sum,jit,ppm,tmp,hdop,cn0s; int n,fix,used,sats,cn0mx; } B;
   B *b = calloc(points,sizeof(B)); if(!b) return NULL;
   for (long i=0;i<points;i++){ b[i].mn=1e99; b[i].mx=-1e99; }
   for (time_t d = (time_t)from - ((time_t)from % 86400); d <= (time_t)to; d += 86400){
-    char day[16], path[4400]; hist_day_of(d,day,sizeof day);
-    snprintf(path,sizeof path,"%s/%s.log",opt_hist,day);
-    FILE *fp=fopen(path,"r"); if(!fp) continue;
+    char day[16]; hist_day_of(d,day,sizeof day);
+    int piped; FILE *fp=hist_open_day(day,&piped); if(!fp) continue;
     char ln[2048];
     while (fgets(ln,sizeof ln,fp)){
       double t; char typ=ln[0];
@@ -713,7 +809,7 @@ static char *hist_query(const char *qs, size_t *blen){
         if (ncn) b[i].cn0s/=ncn;
       }
     }
-    fclose(fp);
+    hist_close_day(fp,piped);
   }
   size_t cap = points*100 + 128;
   char *out = malloc(cap); if(!out){ free(b); return NULL; }
@@ -742,17 +838,63 @@ static void hist_summary(char *out, size_t cap){
   if (!d){ snprintf(out,cap,"null"); return; }
   struct dirent *e; char first[16]=""; int days=0; long long bytes=0;
   while ((e=readdir(d))){
-    size_t n=strlen(e->d_name);
-    if (n!=14 || strcmp(e->d_name+10,".log")) continue;
+    int k=hist_dayname(e->d_name); if (!k) continue;
+    char p[4400]; struct stat st;
+    if (k==2){ snprintf(p,sizeof p,"%s/%.10s.log",opt_hist,e->d_name); if (stat(p,&st)==0) continue; }   // mid-compression: the .log counts
     days++;
     if (!first[0] || strncmp(e->d_name,first,10)<0) snprintf(first,sizeof first,"%.10s",e->d_name);
-    char p[4400]; struct stat st;
     snprintf(p,sizeof p,"%s/%s",opt_hist,e->d_name);
-    if (stat(p,&st)==0) bytes += st.st_size;
+    if (stat(p,&st)==0) bytes += st.st_size;                    // on disk, so compressed days count compressed
   }
   closedir(d);
   if (!days) snprintf(out,cap,"null");
   else snprintf(out,cap,"{\"from\":\"%s\",\"days\":%d,\"bytes\":%lld,\"retain\":%d}",first,days,bytes,opt_retain);
+}
+
+// Where the recorder lives when -H isn't given: the OS's place for a daemon's state, not next to the
+// binary (an install dir is replaced on upgrade and removed on uninstall; data outlives both).
+//   macOS  root /Library/Application Support/Precision Clock Companion/history      user ~/Library/Application Support/Precision Clock Companion/history
+//   Linux  $STATE_DIRECTORY/history (systemd StateDirectory=pcc), else root /var/lib/pcc/history,
+//          else ${XDG_STATE_HOME:-~/.local/state}/pcc/history
+static int hist_dir_for(int mac, int root, const char *state, const char *xdg, const char *home, char *out, size_t cap){
+  if (mac){
+    if (root){ snprintf(out,cap,"/Library/Application Support/Precision Clock Companion/history"); return 0; }
+    if (home && *home){ snprintf(out,cap,"%s/Library/Application Support/Precision Clock Companion/history",home); return 0; }
+    return -1;
+  }
+  if (state && *state){ size_t n=strcspn(state,":"); snprintf(out,cap,"%.*s/history",(int)n,state); return 0; }  // first of a list
+  if (root){ snprintf(out,cap,"/var/lib/pcc/history"); return 0; }
+  if (xdg && *xdg){ snprintf(out,cap,"%s/pcc/history",xdg); return 0; }
+  if (home && *home){ snprintf(out,cap,"%s/.local/state/pcc/history",home); return 0; }
+  return -1;
+}
+static int mkdir_p(const char *path){
+  char p[4400]; snprintf(p,sizeof p,"%s",path);
+  for (char *c=p+1; *c; c++) if (*c=='/'){ *c=0; if (mkdir(p,0755)!=0 && errno!=EEXIST) return -1; *c='/'; }
+  return (mkdir(p,0755)==0 || errno==EEXIST) ? 0 : -1;
+}
+// One-time move of the day files from the pre-0.9 place (history/ next to the binary). A name already
+// at the destination stays where it is. Same volume: rename. Across volumes: copy, then unlink.
+static int hist_migrate(const char *from, const char *to){
+  DIR *d=opendir(from); if (!d) return 0;
+  int moved=0; struct dirent *e;
+  while ((e=readdir(d))){
+    if (!hist_dayname(e->d_name)) continue;
+    char a[4400], b[4400]; struct stat st;
+    snprintf(a,sizeof a,"%s/%s",from,e->d_name); snprintf(b,sizeof b,"%s/%s",to,e->d_name);
+    if (stat(b,&st)==0) continue;
+    if (rename(a,b)==0){ moved++; continue; }
+    if (errno!=EXDEV) continue;
+    FILE *in=fopen(a,"rb"), *out=in?fopen(b,"wb"):NULL; int ok=in&&out;
+    char buf[65536]; size_t r;
+    while (ok && (r=fread(buf,1,sizeof buf,in))>0) if (fwrite(buf,1,r,out)!=r) ok=0;
+    if (in) fclose(in);
+    if (out && fclose(out)!=0) ok=0;
+    if (ok){ unlink(a); moved++; } else unlink(b);
+  }
+  closedir(d);
+  rmdir(from);                                                  // only if now empty
+  return moved;
 }
 
 // ---- the clock's drive ----------------------------------------------------------------------------
@@ -888,6 +1030,7 @@ static void sha1(const unsigned char *msg, size_t len, unsigned char out[20]){
 typedef struct { int fd; int ws; char buf[65536]; int len; char lb[256]; int li; double t0; } Client;
 static Client g_cli[MAXCLI];
 static void cors_allow(const Client *c, char *out, size_t cap);   // defined with the HTTP helpers; self-tested
+static int hist_export(Client *c, const char *series, const char *format, double from, double to);   // ditto
 static int g_listen = -1;
 
 static void b64(const unsigned char *in, int n, char *out){
@@ -938,6 +1081,7 @@ static int self_test(void){
   // Flight-recorder readout over a temp day of ten minutes (T + S rows every 60 s): series=sats sends
   // the first S row of each 120 s bucket with its satellite list intact; series=sky still aggregates.
   char hdir[] = "/tmp/pccd-selftest-XXXXXX";
+  g_gz_auto = 0;                                                // no background gzip racing the test's own day file
   if (mkdtemp(hdir)){
     const char *keep = opt_hist; opt_hist = hdir;
     char hp[4400]; snprintf(hp,sizeof hp,"%s/1970-01-02.log",hdir);   // the UTC day holding t=90000
@@ -972,11 +1116,81 @@ static int self_test(void){
         fprintf(stderr,"history pos FAIL: %.*s\n",(int)n,b?b:""); fail=1; }
       free(b);
       hs_fix.seen=0; hs_fix.fix=0;
+      // C rows: the DWT delta needs consecutive seconds; a +1 ms attribution slip folds back; a gap
+      // leaves the DWT field empty.
+      opt_retain=30000;
+      hist_C(90301, 999, 70, 79999, 1, 1000000000u);                  // first: residual only
+      hist_C(90302,   1, 79990, 79999, 1, 1080000123u);               // +123 ticks; 1.0001 ms folds to 112.5 ns
+      hist_C(90304,   0, 79990, 79999, 1, 1240000000u);               // gap: no DWT delta
+      opt_retain=keepR;
+      if (g_histf){ fclose(g_histf); g_histf=NULL; g_hist_day[0]=0; }
+      b=hist_query("series=phase&from=90000&to=90600&points=600",&n);
+      if (!b || !strstr(b,"t,dwt_ticks,residual_ns\n90301,,-887.5\n90302,123,112.5\n90304,,112.5\n")){
+        fprintf(stderr,"history phase FAIL: %.*s\n",(int)n,b?b:""); fail=1; }
+      free(b);
+      // Exports, through a socketpair standing in for the client.
+      { static Client tc; int sv[2];
+        static const struct { const char *series, *format, *want; } X[] = {
+          { "phase",  "stable32", "\r\n\r\n40588.045162 1.537500e-06\n" },
+          { "timing", "chrony",   "\n1970-01-02 01:00:00.000 PCC     0 N 1  1.000000e-06  1.000000e-06  5.000e-07\n" },
+          { "phase",  "csv",      "\r\n\r\nt,dwt_ticks,residual_ns\n90301,,-887.5\n90302,123,112.5\n" },
+        };
+        for (unsigned i=0;i<sizeof X/sizeof *X;i++){
+          if (socketpair(AF_UNIX,SOCK_STREAM,0,sv)!=0){ fail=1; break; }
+          tc.fd=sv[0]; tc.buf[0]=0;
+          int rc=hist_export(&tc,X[i].series,X[i].format,90000,90600);
+          char got[4096]; size_t gl=0; ssize_t r;
+          while (gl<sizeof got-1 && (r=read(sv[1],got+gl,sizeof got-1-gl))>0) gl+=(size_t)r;
+          got[gl]=0; close(sv[1]);
+          if (rc!=0 || !strstr(got,X[i].want)){ fprintf(stderr,"export %s/%s FAIL:\n%s\n",X[i].series,X[i].format,got); fail=1; }
+        }
+        if (hist_export(&tc,"pos","stable32",90000,90600)!=-1){ fprintf(stderr,"export accepted pos/stable32\n"); fail=1; }
+      }
+      // gzip: an old day compresses, reads back the same through `gzip -dc`, and counts once.
+      if (gzip_path()){
+        size_t n0=0; char *b0=hist_query("series=pos&from=90000&to=90600&points=600",&n0);
+        if (hist_compress_old(1)!=1){ fprintf(stderr,"gzip FAIL: day not compressed\n"); fail=1; }
+        struct stat gst; char gp[4400]; snprintf(gp,sizeof gp,"%s.gz",hp);
+        if (stat(hp,&gst)==0 || stat(gp,&gst)!=0){ fprintf(stderr,"gzip FAIL: .log/.log.gz state\n"); fail=1; }
+        size_t n1=0; char *b1=hist_query("series=pos&from=90000&to=90600&points=600",&n1);
+        if (!b0 || !b1 || n0!=n1 || memcmp(b0,b1,n0)){ fprintf(stderr,"gzip read-back FAIL\n"); fail=1; }
+        free(b0); free(b1);
+        char hs[256]; int kr=opt_retain; opt_retain=30000; hist_summary(hs,sizeof hs); opt_retain=kr;
+        if (!strstr(hs,"\"days\":1,")){ fprintf(stderr,"gzip summary FAIL: %s\n",hs); fail=1; }
+        unlink(gp);
+      }
       unlink(hp);
     }
     rmdir(hdir);
     opt_hist = keep;
   }
+  g_gz_auto = 1;
+  // Data dir: the OS's place for daemon state, per platform and privilege.
+  { char o[256]; struct { int mac, root; const char *st, *xdg, *home, *want; } D[] = {
+      { 1, 1, NULL, NULL, NULL,        "/Library/Application Support/Precision Clock Companion/history" },
+      { 1, 0, NULL, NULL, "/Users/x",  "/Users/x/Library/Application Support/Precision Clock Companion/history" },
+      { 0, 1, "/var/lib/pcc:/x", NULL, NULL, "/var/lib/pcc/history" },
+      { 0, 1, NULL, NULL, NULL,        "/var/lib/pcc/history" },
+      { 0, 0, NULL, "/home/x/.st", "/home/x", "/home/x/.st/pcc/history" },
+      { 0, 0, NULL, NULL, "/home/x",   "/home/x/.local/state/pcc/history" },
+    };
+    for (unsigned i=0;i<sizeof D/sizeof *D;i++)
+      if (hist_dir_for(D[i].mac,D[i].root,D[i].st,D[i].xdg,D[i].home,o,sizeof o)!=0 || strcmp(o,D[i].want)){ fprintf(stderr,"hist_dir_for FAIL %u: %s\n",i,o); fail=1; } }
+  // Migration: day files move (plain and gz), anything else stays, a name already there isn't clobbered.
+  { char a[]="/tmp/pccd-mig-a-XXXXXX", z[]="/tmp/pccd-mig-z-XXXXXX";
+    if (mkdtemp(a) && mkdtemp(z)){
+      const char *names[]={ "2026-01-01.log", "2026-01-02.log.gz", "notes.txt", "2026-01-03.log" };
+      for (unsigned i=0;i<4;i++){ char p[512]; snprintf(p,sizeof p,"%s/%s",a,names[i]); FILE *f=fopen(p,"w"); if (f){ fputs("a\n",f); fclose(f); } }
+      { char p[512]; snprintf(p,sizeof p,"%s/2026-01-03.log",z); FILE *f=fopen(p,"w"); if (f){ fputs("z\n",f); fclose(f); } }
+      int m=hist_migrate(a,z); struct stat st; char p[512], q[64]="";
+      snprintf(p,sizeof p,"%s/2026-01-03.log",z); FILE *f=fopen(p,"r"); if (f){ if (!fgets(q,sizeof q,f)) q[0]=0; fclose(f); }
+      char p1[512], p2[512], p3[512]; snprintf(p1,sizeof p1,"%s/2026-01-02.log.gz",z); snprintf(p2,sizeof p2,"%s/notes.txt",a); snprintf(p3,sizeof p3,"%s/2026-01-03.log",a);
+      if (m!=2 || stat(p1,&st)!=0 || stat(p2,&st)!=0 || stat(p3,&st)!=0 || strcmp(q,"z\n")){ fprintf(stderr,"hist_migrate FAIL (moved %d)\n",m); fail=1; }
+      const char *rm[]={ "2026-01-01.log", "2026-01-02.log.gz", "2026-01-03.log" };
+      for (unsigned i=0;i<3;i++){ snprintf(p,sizeof p,"%s/%s",z,rm[i]); unlink(p); }
+      snprintf(p,sizeof p,"%s/notes.txt",a); unlink(p); snprintf(p,sizeof p,"%s/2026-01-03.log",a); unlink(p);
+      rmdir(a); rmdir(z);
+    } }
   // Drive-name hygiene: nothing outside the volume root is ever resolved, mounted or not.
   { char out[64]; const char *bad[]={ "../etc/passwd", "a/b", ".hidden", "", "x\\y" };
     for (unsigned i=0;i<sizeof bad/sizeof *bad;i++) if (drive_resolve(bad[i],out,sizeof out)==0){ fprintf(stderr,"drive_resolve FAIL: accepted '%s'\n",bad[i]); fail=1; } }
@@ -1127,6 +1341,74 @@ static void http_cors(Client *c, const char *status, const char *type, const cha
   if (write(c->fd,h,n)>0) for (size_t off=0; off<blen; ){ ssize_t w=write(c->fd,body+off,blen-off); if (w<=0) break; off+=(size_t)w; }
   close(c->fd); c->fd=-1;
 }
+static int write_all(int fd, const char *b, size_t n){
+  while (n){ ssize_t w=write(fd,b,n); if (w<=0) return -1; b+=w; n-=(size_t)w; }
+  return 0;
+}
+// GET /history?series=S&format=F[&from=E&to=E] — the record in formats other tools read, streamed (a
+// year of 1 Hz rows is far too big to build in memory), every row, no decimation:
+//   series=phase  format=stable32  `MJD y` — the free-running crystal's fractional frequency per second
+//                                  (C-row DWT ticks x 12.5 ns), Stable32 frequency data with time tags
+//   series=timing format=chrony    chrony refclocks.log layout: date, time, refid PCC, offset as sent to
+//                                  chrony's SOCK refclock (true - system, s), jitter as dispersion
+//   any series    format=csv       the raw rows of that series (timing T, sky/sats S, pos P, phase C)
+// Default window: the last 24 h. Returns 0 if it answered, -1 for a series/format it doesn't know.
+static int hist_export(Client *c, const char *series, const char *format, double from, double to){
+  char typ = !strcmp(series,"phase") ? 'C' : !strcmp(series,"timing") ? 'T' : !strcmp(series,"pos") ? 'P'
+           : (!strcmp(series,"sats") || !strcmp(series,"sky")) ? 'S' : 0;
+  int fmt = !strcmp(format,"stable32") ? 1 : !strcmp(format,"chrony") ? 2 : !strcmp(format,"csv") ? 3 : 0;
+  if (!typ || !fmt || (fmt==1 && typ!='C') || (fmt==2 && typ!='T')) return -1;
+  double nowt=(double)time(NULL);
+  if (!isfinite(from) || !isfinite(to)) return -1;
+  if (to<=0 || to>nowt+86400) to=nowt;
+  if (from<=0) from=to-86400;
+  double span_max=(double)(opt_retain>0?opt_retain:400)*86400.0;
+  if (to-from>span_max) from=to-span_max;
+  if (to<=from) return -1;
+  char d0[16], d1[16], fname[96], acao[300], h[900];
+  hist_day_of((time_t)from,d0,sizeof d0); hist_day_of((time_t)to,d1,sizeof d1);
+  snprintf(fname,sizeof fname,"pccd-%s-%s%s%s.%s",series,d0,strcmp(d0,d1)?"_":"",strcmp(d0,d1)?d1:"",fmt==3?"csv":fmt==2?"log":"txt");
+  cors_allow(c,acao,sizeof acao);
+  int hn=snprintf(h,sizeof h,"HTTP/1.1 200 OK\r\nContent-Type: %s\r\n%sContent-Disposition: attachment; filename=\"%s\"\r\n"
+    "Cache-Control: no-store\r\nConnection: close\r\n\r\n", fmt==3?"text/csv":"text/plain; charset=utf-8", acao, fname);
+  if (write_all(c->fd,h,(size_t)hn)!=0){ close(c->fd); c->fd=-1; return 0; }
+  size_t cap=65536, o=0; char *buf=malloc(cap); if (!buf){ close(c->fd); c->fd=-1; return 0; }
+  static const char *chead =
+    "=======================================================================\n"
+    "   Date (UTC) Time         Refid  DP L P  Raw offset   Cooked offset      Disp.\n"
+    "=======================================================================\n";
+  static const char *csvhead[] = { "t,off_us,jit_us,ppm,temp_c", "t,fix,used,hdop,sats", "t,lat,lon,alt,hdop,pdop,vdop,fix,used", "t,dwt_ticks,residual_ns" };
+  if (fmt==2) o+=(size_t)snprintf(buf+o,cap-o,"%s",chead);
+  if (fmt==3) o+=(size_t)snprintf(buf+o,cap-o,"%s\n",csvhead[typ=='T'?0:typ=='S'?1:typ=='P'?2:3]);
+  int dead=0;
+  for (time_t d=(time_t)from-((time_t)from%86400); d<=(time_t)to && !dead; d+=86400){
+    char day[16]; hist_day_of(d,day,sizeof day);
+    int piped; FILE *fp=hist_open_day(day,&piped); if (!fp) continue;
+    char ln[2048];
+    while (fgets(ln,sizeof ln,fp)){
+      if (ln[0]!=typ || ln[1]!=',') continue;
+      double t=atof(ln+2); if (t<from || t>to) continue;
+      if (o+512 > cap){ if (write_all(c->fd,buf,o)!=0){ dead=1; break; } o=0; }
+      if (fmt==1){
+        long ticks; if (sscanf(ln,"C,%*f,%ld,",&ticks)!=1) continue;      // empty DWT field = a gap: no row
+        o+=(size_t)snprintf(buf+o,cap-o,"%.6f %.6e\n",40587.0+t/86400.0,(double)ticks*12.5e-9);
+      } else if (fmt==2){
+        double off,jit; if (sscanf(ln,"T,%*f,%lf,%lf",&off,&jit)!=2) continue;
+        time_t ts=(time_t)t; struct tm tm; gmtime_r(&ts,&tm);
+        o+=(size_t)snprintf(buf+o,cap-o,"%04d-%02d-%02d %02d:%02d:%02d.000 %-5s %3d %c %d %13.6e %13.6e %10.3e\n",
+          tm.tm_year+1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec,"PCC",0,'N',1,off*1e-6,off*1e-6,jit*1e-6);
+      } else {
+        size_t sl=strcspn(ln+2,"\r\n"); if (o+sl+4 > cap){ if (write_all(c->fd,buf,o)!=0){ dead=1; break; } o=0; }
+        if (sl+4 > cap) continue;
+        memcpy(buf+o,ln+2,sl); o+=sl; buf[o++]='\n';
+      }
+    }
+    hist_close_day(fp,piped);
+  }
+  if (!dead && o) write_all(c->fd,buf,o);
+  free(buf); close(c->fd); c->fd=-1;
+  return 0;
+}
 // /drive?file=<name>: GET streams the file (X-Mtime = its epoch mtime); POST rewrites config.txt from the
 // request body. The write is origin-gated (a foreign page must never rewrite the clock's config) and lands
 // via temp file + rename so the clock never sees a half-written config.txt. Returns 1 once the request is
@@ -1230,6 +1512,18 @@ static void http_or_upgrade(Client *c){
     return;
   }
 
+  if (!strncmp(path,"/history",8) && qval(q,"format")){
+    char series[12]="timing", format[12]="", f[40]; const char *p; double from=0, to=0;
+    if ((p=qval(q,"series"))){ size_t n=0; while(p[n]&&p[n]!='&'&&n<sizeof series-1){series[n]=p[n];n++;} series[n]=0; }
+    if ((p=qval(q,"format"))){ size_t n=0; while(p[n]&&p[n]!='&'&&n<sizeof format-1){format[n]=p[n];n++;} format[n]=0; }
+    if ((p=qval(q,"from"))){ snprintf(f,sizeof f,"%.30s",p); from=atof(f); }
+    if ((p=qval(q,"to")))  { snprintf(f,sizeof f,"%.30s",p); to=atof(f); }
+    if (!opt_hist || hist_export(c,series,format,from,to)!=0){
+      static const char *m="export: series=phase&format=stable32, series=timing&format=chrony, or format=csv\n";
+      http_cors(c,"400 Bad Request","text/plain",NULL,m,strlen(m));
+    }
+    return;
+  }
   if (!strncmp(path,"/history",8)){
     // decimated archive readout — the hosted app charts it too, but only the app's origins may read it:
     // the sats and pos series say where this machine is
@@ -1356,14 +1650,16 @@ static void ws_read(Client *c, int serial_fd){
 
 // ---- $PMTXTS ------------------------------------------------------------------------------------
 // $PMTXTS,seq,epoch,subms,systick,load,calerr,sincecal,temp,flags[,dwt_pps,sof_frame,dwt_sof]*CC
-typedef struct { unsigned long seq, epoch; long flags; long calerr; double temp; uint32_t dwt_pps,dwt_sof; unsigned sof_frame; int ext; } Pmtxts;
+typedef struct { unsigned long seq, epoch, subms, systick, load; long flags; long calerr; double temp; uint32_t dwt_pps,dwt_sof; unsigned sof_frame; int ext; } Pmtxts;
 static int parse_pmtxts(const char *line, Pmtxts *o){
+  memset(o,0,sizeof *o);                                  // short (non-DWT) sentences leave the ext fields zero
   char body[512]; snprintf(body,sizeof body,"%s",line+1);
   char *star=strchr(body,'*'); if (star) *star=0;
   char *tok[16]; int nt=0; char *s=body+7;              // after "PMTXTS,"
   for (char *p=s; ; p++){ if (*p==','||*p=='\0'){ tok[nt++]=s; int end=(*p=='\0'); *p='\0'; s=p+1; if (end||nt>=16) break; } }
   if (nt < 9) return -1;
   o->seq=strtoul(tok[0],NULL,10); o->epoch=strtoul(tok[1],NULL,10); o->flags=strtol(tok[8],NULL,16);
+  o->subms=strtoul(tok[2],NULL,10); o->systick=strtoul(tok[3],NULL,10); o->load=strtoul(tok[4],NULL,10);   // the C row's disciplined residual
   o->calerr=strtol(tok[5],NULL,10); o->temp=strtod(tok[7],NULL);   // RTC cal error + die temp — the history log's ppm/temp columns
   if (nt >= 12){ o->dwt_pps=(uint32_t)strtoul(tok[9],NULL,10); o->sof_frame=(unsigned)strtoul(tok[10],NULL,10);
                  o->dwt_sof=(uint32_t)strtoul(tok[11],NULL,10); o->ext=1; }
@@ -1737,14 +2033,25 @@ int main(int argc, char **argv){
   // releases. OFF by default — a time server shouldn't reach out to the internet unless asked to.
   { const char *wt=getenv("PCCD_WEB_TRACK"); g_web_track = wt && (*wt=='1'||*wt=='o'||*wt=='O'||*wt=='y'||*wt=='Y'||*wt=='t'||*wt=='T'); }
   web_adopt_overlay(1);  // a prior verified refresh persists on disk across restarts (re-verify before trusting)
-  // Flight recorder default: history/ next to the binary (service installs -> /usr/local/pcc/history).
+  // Flight recorder default: the OS data dir (hist_dir_for). Files recorded by an older pccd next to the
+  // binary (service installs: /usr/local/pcc/history) move there on first start. If the data dir can't
+  // be made, fall back to the old place so recording never stops.
   static char histdef[4200];
   if (!opt_hist && !opt_hist_off){
-    char self[4096];
-    if (exe_realpath(self,sizeof self)==0){
-      char *sl=strrchr(self,'/');
-      if (sl){ *sl=0; snprintf(histdef,sizeof histdef,"%s/history",self); opt_hist=histdef; }
-    }
+    char legacy[4200]=""; char self[4096];
+    if (exe_realpath(self,sizeof self)==0){ char *sl=strrchr(self,'/'); if (sl){ *sl=0; snprintf(legacy,sizeof legacy,"%s/history",self); } }
+#ifdef __APPLE__
+    int mac=1;
+#else
+    int mac=0;
+#endif
+    if (hist_dir_for(mac, geteuid()==0, getenv("STATE_DIRECTORY"), getenv("XDG_STATE_HOME"), getenv("HOME"), histdef, sizeof histdef)==0 && mkdir_p(histdef)==0){
+      opt_hist=histdef;
+      if (legacy[0] && strcmp(legacy,histdef)){
+        int n=hist_migrate(legacy,histdef);
+        if (n>0) fprintf(stderr,"[pccd] flight recorder: moved %d day file%s from %s\n",n,n==1?"":"s",legacy);
+      }
+    } else if (legacy[0]){ snprintf(histdef,sizeof histdef,"%s",legacy); opt_hist=histdef; }
   }
   // Self-update is allowed only for a real downloaded tarball: platform baked in, app bundled alongside,
   // and no explicit -w (which marks a dev checkout). This keeps a developer's -w daemon untouched.
@@ -1906,6 +2213,7 @@ int main(int argc, char **argv){
             if (parse_pmtxts(line,&x)==0){
               g_nseen++;
               g_last_ppm = x.calerr*1e6/(32768.0*63.0); g_last_temp = x.temp; g_have_tstats = 1;
+              if ((x.flags & 3) == 3) hist_C(x.epoch, x.subms, x.systick, x.load, x.ext, x.dwt_pps);   // the clock's own 1 Hz phase
               if (x.ext && havePrev){ int32_t d=(int32_t)(x.dwt_pps-prevDwt);
                 if (d>60000000 && d<100000000){ f_dwt = haveRate ? 0.9*f_dwt+0.1*d : (double)d; haveRate=1; } }
               if (x.ext){ prevDwt=x.dwt_pps; havePrev=1; }

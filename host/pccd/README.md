@@ -160,7 +160,7 @@ Auto-pick looks for `/dev/cu.usbmodem*` on macOS, and
 Flags: `-d <device>` serial device, `-s <path>` chrony SOCK socket path,
 `-p <port>` HTTP/WS port (default 4192), `-w <dir>` serve the PCC app from dir
 (same-origin, fixes Safari — see below), `-H <dir>` flight-recorder directory
-(default `history/` next to the binary; `off` disables), `-R <days>` recorder
+(default: the OS data directory, see below; `off` disables), `-R <days>` recorder
 retention (default 365), `-o <secs>` fixed offset trim, `-n` dry-run, `-v` verbose,
 `-r` raw (bypass the sample prefilter), `-t` self-test, `-T` frame-clock probe
 (macOS), `-h` help. `PCCD_DRIVE=<dir>` in the environment points the drive endpoint
@@ -325,18 +325,55 @@ ships with a `-w` line (adjust the path to your checkout).
 ## The flight recorder
 
 The daemon is the always-on component, so it keeps the record — whether or not a PCC
-tab is open. One plain file per UTC day (`<histdir>/YYYY-MM-DD.log`), three row types:
+tab is open. One file per UTC day (`YYYY-MM-DD.log`), four row types:
 
     T,<epoch>,<offset_us>,<jitter_us>,<ppm>,<temp_c>                    one per prefilter group (~8 s)
     S,<epoch>,<fix>,<used>,<hdop>,<TKprn:az:el:cn0;...>                 one sky snapshot per 60 s
     P,<epoch>,<lat>,<lon>,<alt_m>,<hdop>,<pdop>,<vdop>,<fixtype>,<used>   one position sample per 10 s, while fixed
+    C,<epoch>,<dwt_ticks>,<residual_ns>                                 the clock's own phase, every second
+
+`T` is this host's offset against the clock's PPS: what chrony is fed. `C` is the clock
+itself: `dwt_ticks` is the core cycle count over the second minus 80,000,000 (12.5 ns per
+tick), the free-running crystal's frequency error that the firmware's ADEV integrates;
+`residual_ns` is the disciplined clock's position at the PPS edge, centred and folded
+across the 1 ms boundary. SysTick is re-pinned every second, so the residual measures the
+discipline loop and the DWT field measures the crystal. `dwt_ticks` is empty across a
+gap or on firmware without the DWT fields.
+
+Where it lives (unless `-H` says otherwise), following each OS's place for daemon state:
+
+| | service (root) | run by hand |
+|---|---|---|
+| macOS | `/Library/Application Support/Precision Clock Companion/history` | `~/Library/Application Support/Precision Clock Companion/history` |
+| Linux | `/var/lib/pcc/history` (systemd `StateDirectory=pcc`) | `$XDG_STATE_HOME/pcc/history` (`~/.local/state/…`) |
+
+A pccd older than 0.9 kept it in `history/` next to the binary; 0.9 moves those files on
+first start. Uninstalling the service leaves the history where it is.
 
 Real-only by construction (pccd never sees a simulation); a missing span *is* the
-record of the clock being unplugged. Files rotate at UTC midnight and files older than
-`-R` days (default 365) are pruned then. Budget: roughly 1.5 MB a day with a clock
-streaming, so a year is about half a gigabyte. `/health` reports what is on disk and
-the retention window (`"history":{"from","days","bytes","retain"}`) and the app's
-ARCHIVE caption states both, so they never disagree.
+record of the clock being unplugged. Files rotate at UTC midnight. Days older than 7 are
+gzipped (`YYYY-MM-DD.log.gz`, by the system `gzip` in a niced background process) and read
+back through `gzip -dc`; the last week stays plain, so the app's usual windows read
+without decompressing. Files older than `-R` days (default 365) are pruned. Budget with a
+clock streaming: about 3.4 MB a day plain and 0.7 MB compressed, so a year is roughly
+275 MB. `/health` reports what is on disk and the retention window
+(`"history":{"from","days","bytes","retain"}`) and the app's ARCHIVE caption states both.
+
+### Exports
+
+Every row in a window, streamed, in formats other tools read (default window: the last
+24 h; `from`/`to` are epoch seconds):
+
+    curl -OJ 'http://localhost:4192/history?series=phase&format=stable32&from=…&to=…'
+    curl -OJ 'http://localhost:4192/history?series=timing&format=chrony'
+    curl -OJ 'http://localhost:4192/history?series=pos&format=csv'
+
+- `series=phase&format=stable32`: `MJD y` per second, `y` = the crystal's fractional
+  frequency from the `C` rows. Load into Stable32 as frequency data with time tags.
+  Missing seconds are absent rows.
+- `series=timing&format=chrony`: chrony's `refclocks.log` layout (refid `PCC`, offset as
+  sent to chrony's SOCK refclock, jitter as dispersion) for chrony log tooling.
+- `format=csv` with `series=timing|sats|pos|phase`: the raw rows.
 
 The app reads it back decimated: **ARCHIVE** (6 h … 30 d, all) from the `timing` and
 `sky` series; the SKY plot's trails from `sats`; and, from v0.8, SIGNAL's C/N₀ over
@@ -355,9 +392,10 @@ the sky. Same-origin pages and non-browser clients (curl) need no grant.
 - `GET /health` — liveness + capabilities JSON: `version`, `device`, `serial_open`,
   sample counters, `updatable`, `webrefresh`, `history` (above), `raw` (pre-gate
   samples held), `drive` (the mounted CLOCK volume's path, or null).
-- `GET /history?series=timing|sky|sats|pos&from=E&to=E&points=N` — decimated CSV.
-  `timing` and `sky` aggregate per bucket (min/max/mean); `sats` and `pos` pass the
-  first row of each bucket through unchanged. `points` ≤ 4000; the window is clamped
+- `GET /history?series=timing|sky|sats|pos|phase&from=E&to=E&points=N` — decimated CSV.
+  `timing` and `sky` aggregate per bucket (min/max/mean); `sats`, `pos` and `phase` pass
+  the first row of each bucket through unchanged. With `format=` it streams an export
+  instead (see Exports). `points` ≤ 4000; the window is clamped
   to the retention span.
 - `GET /raw[?n=N]` — the in-memory pre-gate offset samples (SIGNAL PATH's real source).
 - `GET /drive` — the clock drive: `{"mounted":<path>|null,"files":[{name,size,mtime}]}`.
