@@ -1161,6 +1161,24 @@ function archAbsent(ctx, w, h, tok, msg) {
   ctx.font = F10; ctx.fillStyle = tok.txt3; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(msg, w / 2, h / 2);
 }
+// A polyline over time-ordered rows that lifts the pen across a gap (a span the record holds nothing
+// for), instead of drawing a chord over it. A gap is a step over 3x the median spacing. Rows whose
+// value is missing are skipped.
+function archLine(ctx, rows, X, Y, key) {
+  const dts = []; for (let i = 1; i < rows.length; i++) dts.push(rows[i].t - rows[i - 1].t);
+  dts.sort((a, b) => a - b);
+  const gap = dts.length ? 3 * Math.max(1, dts[dts.length >> 1]) : Infinity;
+  ctx.beginPath();
+  let pen = false, prevT = null;
+  for (const r of rows) {
+    const v = r[key];
+    if (v == null || !Number.isFinite(v)) { pen = false; continue; }
+    if (prevT != null && r.t - prevT > gap) pen = false;
+    pen ? ctx.lineTo(X(r.t), Y(v)) : ctx.moveTo(X(r.t), Y(v));
+    pen = true; prevT = r.t;
+  }
+  ctx.stroke();
+}
 function archXLabels(ctx, tok, fr, h, t0, t1) {
   const f = (t) => { const d = new Date(t * 1000); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
   const day = (t) => { const d = new Date(t * 1000); return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0'); };
@@ -1187,9 +1205,7 @@ export function drawArchiveOffset(canvas, tok, rows) {
   rows.forEach((r, i) => { const x = X(r.t); i ? ctx.lineTo(x, Y(r.off_max)) : ctx.moveTo(x, Y(r.off_max)); });
   for (let i = rows.length - 1; i >= 0; i--) ctx.lineTo(X(rows[i].t), Y(rows[i].off_min));
   ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = tok.led; ctx.lineWidth = 1.25; ctx.beginPath();
-  rows.forEach((r, i) => { const x = X(r.t), y = Y(r.off_mean); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
-  ctx.stroke();
+  ctx.strokeStyle = tok.led; ctx.lineWidth = 1.25; archLine(ctx, rows, X, Y, 'off_mean');
   if (lo < 0 && hi > 0) { ctx.strokeStyle = tok.line; ctx.globalAlpha = 0.7; ctx.beginPath(); ctx.moveTo(fr.m.l, Y(0)); ctx.lineTo(fr.m.l + fr.iw, Y(0)); ctx.stroke(); ctx.globalAlpha = 1; }
   archXLabels(ctx, tok, fr, h, t0, t1);
 }
@@ -1207,10 +1223,8 @@ export function drawArchiveAux(canvas, tok, rows) {
   ctx.font = F9; ctx.fillStyle = tok.acq; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
   ctx.fillText(thi.toFixed(1) + '°', fr.m.l + fr.iw + 4, Yt(thi - (thi - tlo) * 0.12));
   ctx.fillText(tlo.toFixed(1) + '°', fr.m.l + fr.iw + 4, Yt(tlo + (thi - tlo) * 0.12));
-  ctx.strokeStyle = tok.led; ctx.lineWidth = 1.25; ctx.beginPath();
-  rows.forEach((r, i) => { i ? ctx.lineTo(X(r.t), Yp(r.ppm)) : ctx.moveTo(X(r.t), Yp(r.ppm)); }); ctx.stroke();
-  ctx.strokeStyle = tok.acq; ctx.lineWidth = 1; ctx.beginPath();
-  rows.forEach((r, i) => { i ? ctx.lineTo(X(r.t), Yt(r.temp)) : ctx.moveTo(X(r.t), Yt(r.temp)); }); ctx.stroke();
+  ctx.strokeStyle = tok.led; ctx.lineWidth = 1.25; archLine(ctx, rows, X, Yp, 'ppm');
+  ctx.strokeStyle = tok.acq; ctx.lineWidth = 1; archLine(ctx, rows, X, Yt, 'temp');
   archXLabels(ctx, tok, fr, h, t0, t1);
 }
 export function drawArchiveSky(canvas, tok, rows) {
@@ -1226,12 +1240,10 @@ export function drawArchiveSky(canvas, tok, rows) {
   yTicks(ctx, tok, fr, [{ v: 20, f: 20 / 56 }, { v: 40, f: 40 / 56 }], (v) => v + 'dB');
   ctx.font = F9; ctx.fillStyle = tok.acq; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
   ctx.fillText(umax + ' SAT', fr.m.l + fr.iw + 4, Yu(umax));
-  ctx.strokeStyle = tok.txt3; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); ctx.beginPath();
-  rows.forEach((r, i) => { i ? ctx.lineTo(X(r.t), Yc(r.cn0_max)) : ctx.moveTo(X(r.t), Yc(r.cn0_max)); }); ctx.stroke(); ctx.setLineDash([]);
-  ctx.strokeStyle = tok.led; ctx.lineWidth = 1.25; ctx.beginPath();
-  rows.forEach((r, i) => { i ? ctx.lineTo(X(r.t), Yc(r.cn0_mean)) : ctx.moveTo(X(r.t), Yc(r.cn0_mean)); }); ctx.stroke();
-  ctx.strokeStyle = tok.acq; ctx.beginPath();
-  rows.forEach((r, i) => { i ? ctx.lineTo(X(r.t), Yu(r.used)) : ctx.moveTo(X(r.t), Yu(r.used)); }); ctx.stroke();
+  // MAX is pccd's (per-bucket strongest sat); the browser log's minute rows keep only the mean.
+  ctx.strokeStyle = tok.txt3; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); archLine(ctx, rows, X, Yc, 'cn0_max'); ctx.setLineDash([]);
+  ctx.strokeStyle = tok.led; ctx.lineWidth = 1.25; archLine(ctx, rows, X, Yc, 'cn0_mean');
+  ctx.strokeStyle = tok.acq; archLine(ctx, rows, X, Yu, 'used');
   archXLabels(ctx, tok, fr, h, t0, t1);
 }
 

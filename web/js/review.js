@@ -15,6 +15,13 @@ const PAD_L = 8, PAD_R = 8, PAD_T = 6, PAD_B = 18;
 const STRIP_H = 20;                       // connectivity strip height
 const GAP_S = 3;                          // a run of missing seconds this long = a disconnected gap
 
+// (t, v) pairs where the metric exists — computed once per model, not on every scrub frame.
+function trackPts(rows, get) {
+  const pts = [];
+  for (const r of rows) { const v = get(r); if (v != null && Number.isFinite(v)) pts.push({ t: r.t, v }); }
+  return pts;
+}
+
 // Build the scrub model from sessions + their samples. Segments mark connected
 // spans (from actual sample runs) and the gaps between them.
 export function prepReview(sessions, samples) {
@@ -29,12 +36,21 @@ export function prepReview(sessions, samples) {
     }
     segments.push({ t0: start, t1: prev, connected: true });
   }
-  // span: prefer the sessions' declared bounds, else the samples' extent
+  // span: the 1 Hz rows' extent. Sessions outlive those rows (sessions are kept for the KEEP period,
+  // 1 Hz rows for a day), so a session's declared bounds count only where they meet the rows.
   let tMin = Infinity, tMax = -Infinity;
-  for (const s of (sessions || [])) { if (s.connectedAt) tMin = Math.min(tMin, s.connectedAt / 1000); if (s.disconnectAt) tMax = Math.max(tMax, s.disconnectAt / 1000); }
-  if (samples.length) { tMin = Math.min(tMin, samples[0].t); tMax = Math.max(tMax, samples[samples.length - 1].t); }
+  if (samples.length) {
+    const a = samples[0].t, b = samples[samples.length - 1].t;
+    tMin = a; tMax = b;
+    for (const s of (sessions || [])) {
+      const c = s.connectedAt / 1000, d = s.disconnectAt / 1000;
+      if (s.connectedAt && c >= a - 60 && c < tMin) tMin = c;
+      if (s.disconnectAt && d <= b + 60 && d > tMax) tMax = d;
+    }
+  }
   if (!(tMin < tMax)) { tMin = samples.length ? samples[0].t : 0; tMax = tMin + 1; }
-  return { samples, segments, tMin, tMax, playT: tMax, _plot: null };
+  const tracks = TRACKS.map((tr) => ({ ...tr, pts: trackPts(samples, tr.get) }));
+  return { samples, segments, tracks, tMin, tMax, playT: tMax, _plot: null };
 }
 
 // Nearest sample to time t (seconds). Returns null if none within `maxGap` s.
@@ -68,7 +84,7 @@ export function drawReview(canvas, R, opts = {}) {
 
   const x0 = PAD_L, w = cssW - PAD_L - PAD_R;
   R._plot = { x0, w };
-  const nT = TRACKS.length;
+  const nT = R.tracks.length;
   const trackTop = PAD_T + STRIP_H + 6;
   const trackH = Math.max(24, (cssH - trackTop - PAD_B) / nT - 6);
   const X = (t) => x0 + (t - R.tMin) / (R.tMax - R.tMin) * w;
@@ -90,12 +106,12 @@ export function drawReview(canvas, R, opts = {}) {
   g.strokeStyle = C('var(--line)'); g.lineWidth = 1; g.strokeRect(x0 + .5, PAD_T + .5, w, STRIP_H);
 
   // --- decimated tracks ---
+  // Lift the pen only where a recorded gap lies between two points. Comparing the step to GAP_S
+  // instead broke every segment once decimation spaced points wider than GAP_S (any span over ~10 min).
+  const gaps = R.segments.filter((s) => !s.connected);
   g.textAlign = 'left';
   for (let i = 0; i < nT; i++) {
-    const tr = TRACKS[i], top = trackTop + i * (trackH + 6);
-    // pull (t,v) pairs where the metric exists, then decimate to ~1 pt / pixel
-    const pts = [];
-    for (const r of R.samples) { const v = tr.get(r); if (v != null && Number.isFinite(v)) pts.push({ t: r.t, v }); }
+    const tr = R.tracks[i], top = trackTop + i * (trackH + 6), pts = tr.pts;   // decimated to ~1 pt / pixel below
     g.fillStyle = C('var(--txt3)'); g.font = '8px var(--mono, monospace)';
     g.fillText(tr.label, x0 + 2, top - 1);
     g.strokeStyle = C('var(--line)'); g.globalAlpha = 0.6; g.strokeRect(x0 + .5, top + .5, w, trackH); g.globalAlpha = 1;
@@ -105,9 +121,12 @@ export function drawReview(canvas, R, opts = {}) {
     const Y = (v) => top + trackH - 4 - (v - lo) / (hi - lo) * (trackH - 8);
     const dec = decimate(pts, Math.max(2, w | 0), { mode: 'lttb' });   // <= 1 pt/pixel — the scrub perf guarantee
     g.strokeStyle = C(tr.color); g.lineWidth = 1.25; g.beginPath();
-    let started = false, prevT = null;
+    let started = false, prevT = null, gi = 0;
     for (const p of dec) {
-      if (prevT != null && p.t - prevT > GAP_S) started = false;   // break the line across a disconnected gap
+      if (prevT != null) {                                          // break the line across a disconnected gap
+        while (gi < gaps.length && gaps[gi].t1 <= prevT) gi++;
+        if (gi < gaps.length && gaps[gi].t0 < p.t) started = false;
+      }
       const px = X(p.t), py = Y(p.v);
       if (!started) { g.moveTo(px, py); started = true; } else g.lineTo(px, py);
       prevT = p.t;

@@ -96,6 +96,7 @@ export function createRealDevice(session) {
     const trailLast = new Map();  // sat.key → last wall-clock ms a polar az/el trail point was appended
     const risenReal = new Set();  // sat.key currently above the horizon — rise edges count passes
     let ingesting = false;        // are we CONSUMING this transport? (set on connect, cleared on every leave)
+    let held = false;             // REVIEW holds S at the playhead: lines still reach the monitor and the RX watchdog, not S
     let obsSeeded = false;        // adopt the device's own fix as the observer once per connection
     let obsAtConnect = null;      // pre-connect observer, restored on disconnect
     let lastHistT = 0;            // last whole-second we sampled POSITION/DOP/continuity history
@@ -157,6 +158,7 @@ export function createRealDevice(session) {
     /// replace S.sats. We rebuild the whole array each snapshot because the
     /// buffer already merges/dedupes across constellations for us.
     function mergeSats(sats) {
+        if (held) return;   // a GSV debounce that fires after REVIEW took S must not replace the reviewed sats
         // A GSV debounce timer scheduled just before an unplug/disconnect can fire
         // after teardown; without this guard it would repopulate S.sats and the
         // trail/cn0 buffers with vanished-device satellites in STANDBY.
@@ -328,6 +330,7 @@ export function createRealDevice(session) {
         // Stamp every arriving line; onTick flips to a no-signal state if this ages out.
         lastRxT = Date.now();
         S.lastRxT = lastRxT;
+        if (held) return;   // REVIEW owns S: the clock is still alive (watchdog stamped), its telemetry waits
 
         // GGA — position + fix quality → S.fix
         if (/GGA/.test(text) && text.startsWith('$')) {
@@ -662,6 +665,9 @@ export function createRealDevice(session) {
 
         ingestLine,
         beginIngest() { ingesting = true; },   // arm consumption without a transport (selfTest; mirrors connect())
+        // REVIEW rebuilds S from a recording; while it does, a connected clock's lines must not write into
+        // that frame (live GSV replaced the reviewed sky; live fixes joined a week-old position history).
+        setHold(v) { held = !!v; },
 
         send(cmd) { clock && clock.send(cmd); },
 
