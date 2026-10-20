@@ -3583,7 +3583,7 @@ class Component extends DcLite {
           trBrV: bridge ? (via === 'bridge' ? 'CONNECTED' : 'RUNNING — READY') : 'NOT RUNNING — INSTALL BELOW',
           // The clock's USB drive as pccd sees it: mounted = config.txt reads itself over the bridge.
           trDrSt: bridge ? (st.bridgeInfo.drive ? 'ready' : ('drive' in st.bridgeInfo ? 'warn' : 'absent')) : 'absent',
-          trDrV: bridge ? (st.bridgeInfo.drive ? 'MOUNTED · ' + st.bridgeInfo.drive : ('drive' in st.bridgeInfo ? 'NOT MOUNTED' : 'NEEDS pccd 0.8+')) : '—',   // the path as it is: case matters on Linux
+          trDrV: bridge ? (st.bridgeInfo.drive ? 'MOUNTED · ' + st.bridgeInfo.drive : ('drive' in st.bridgeInfo ? (st.bridgeInfo.drive_error ? 'MOUNTED · pccd CANNOT READ IT' : 'NOT MOUNTED') : 'NEEDS pccd 0.8+')) : '—',   // the path as it is: case matters on Linux
           // Which copy of the app this is, and — on the hosted one — what to do when pccd is around.
           appOrgSt: hosted ? 'ready' : 'live',
           appOrgV: hosted ? ('HOSTED · ' + (typeof location !== 'undefined' ? location.hostname.toUpperCase() : 'PCC.PTRL.WS')) : (servedByPccd ? 'LOCAL · SERVED BY pccd' : 'LOCAL · DEV SERVER'),
@@ -4133,7 +4133,7 @@ class Component extends DcLite {
     if (st.cfgNote) return st.cfgNote;
     if (this.bridgeDrive()) return 'CLOCK DRIVE ' + bi.drive + ' · VIA pccd · ' + (via === 'bridge' ? 'AUTO-READ' : 'NO PICKER NEEDED');
     if (S && S.real && this.realdev && this.realdev.transport && this.realdev.transport() === 'bridge')
-      return (bi && 'drive' in bi) ? 'CLOCK DRIVE NOT MOUNTED ON THE pccd HOST' : 'pccd < 0.8 HAS NO /drive · UPDATE (DEVICE › UPDATES) OR USE THE PICKER';
+      return (bi && 'drive' in bi) ? (bi.drive_error ? 'CLOCK DRIVE MOUNTED · pccd CANNOT READ IT (' + String(bi.drive_error).toUpperCase() + ') · USE READ CLOCK DRIVE' : 'CLOCK DRIVE NOT MOUNTED ON THE pccd HOST') : 'pccd < 0.8 HAS NO /drive · UPDATE (DEVICE › UPDATES) OR USE THE PICKER';
     if (via === 'remembered') return 'CLOCK DRIVE · REMEMBERED · AUTO-READ';
     if (st.cfgReopen) return 'CLOCK DRIVE REMEMBERED · ONE CLICK TO RE-OPEN';
     if (via === 'picker') return 'CLOCK DRIVE · PICKED · REMEMBERED';

@@ -46,7 +46,7 @@
 #endif
 
 #ifndef PCCD_VERSION
-#define PCCD_VERSION "0.10.0"               /* overridable (-DPCCD_VERSION=...) so a test build can look older */
+#define PCCD_VERSION "0.10.1"               /* overridable (-DPCCD_VERSION=...) so a test build can look older */
 #endif
 #ifdef PCCD_GIT
 #define PCCD_VERSTR PCCD_VERSION "+" PCCD_GIT      /* Makefile stamps the short git hash for traceable /health */
@@ -1017,6 +1017,8 @@ static int hist_migrate(const char *from, const char *to){
 // with the clock. macOS mounts it at /Volumes/CLOCK; Linux wherever udisks puts it (/media/<you>/CLOCK,
 // /run/media/<you>/CLOCK) — found by its basename in /proc/mounts.
 static char g_drive[1024] = "";              // mount point; "" = not mounted
+static char g_drive_err[160] = "";           // the volume is mounted but this process can't read it: why (macOS)
+static int exe_realpath(char *out, size_t cap);   // defined with the self-update helpers; the hint names the binary
 static int drive_has_config(const char *dir){
   DIR *d=opendir(dir); if(!d) return 0;
   struct dirent *e; int ok=0;
@@ -1030,6 +1032,27 @@ static void drive_scan(void){
   else {
 #ifdef __APPLE__
   if (drive_has_config("/Volumes/CLOCK")) snprintf(found,sizeof found,"/Volumes/CLOCK");
+  else {
+    // Mounted, yet unreadable from here, is the usual failure for a launchd daemon: macOS gates removable
+    // volumes per process (TCC) and FSKit volumes per login session. Say which errno, not nothing.
+    struct stat st; char err[160]=""; int en=0;
+    if (stat("/Volumes/CLOCK",&st)==0 && S_ISDIR(st.st_mode)){
+      DIR *d=opendir("/Volumes/CLOCK"); en=errno;
+      if (!d) snprintf(err,sizeof err,"%s",strerror(en));
+      else { closedir(d); snprintf(err,sizeof err,"readable, no config.txt"); }
+    }
+    if (strcmp(err,g_drive_err)){
+      snprintf(g_drive_err,sizeof g_drive_err,"%s",err);
+      if (err[0]){
+        char self[4096]="pccd"; exe_realpath(self,sizeof self);
+        fprintf(stderr,"[pccd] /Volumes/CLOCK is mounted but this process cannot read it: %s\n",err);
+        if (en==EPERM || en==EACCES)
+          fprintf(stderr,"[pccd]   macOS privacy control. System Settings > Privacy & Security > Full Disk Access: add %s, then restart pccd. Until then the app's READ CLOCK DRIVE reads the volume itself.\n",self);
+        else
+          fprintf(stderr,"[pccd]   the volume may be visible only to the login session that mounted it. The app's READ CLOCK DRIVE reads it itself.\n");
+      }
+    }
+  }
 #else
   FILE *m=fopen("/proc/mounts","r");
   if (m){
@@ -1049,6 +1072,7 @@ static void drive_scan(void){
   }
 #endif
   }
+  if (found[0]) g_drive_err[0]=0;
   if (strcmp(found,g_drive)){
     snprintf(g_drive,sizeof g_drive,"%s",found);
     if (found[0]) fprintf(stderr,"[pccd] clock drive mounted at %s — config.txt served on /drive\n",found);
@@ -1765,6 +1789,7 @@ static void http_or_upgrade(Client *c){
     } else { snprintf(agebuf,sizeof agebuf,"null"); snprintf(offbuf,sizeof offbuf,"null"); }
     hist_summary(histbuf,sizeof histbuf);
     if (g_drive[0]){ char e[2060]; json_esc(e,sizeof e,g_drive); snprintf(drivebuf,sizeof drivebuf,"\"%s\"",e); }
+    else if (g_drive_err[0]){ char e[400]; json_esc(e,sizeof e,g_drive_err); snprintf(drivebuf,sizeof drivebuf,"null,\"drive_error\":\"%s\"",e); }   // mounted, unreadable: the app says so
     else snprintf(drivebuf,sizeof drivebuf,"null");
     snprintf(json,sizeof json,
       "{\"pccd\":1,\"version\":\"" PCCD_VERSTR "\",\"device\":\"%s\",\"chrony\":%s,"
