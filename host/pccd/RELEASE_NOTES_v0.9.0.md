@@ -19,7 +19,7 @@ download the tarball for your platform below and run `./install-service.sh`.
 
 ## Changed
 
-- **History lives in the OS data directory**: `/Library/Application Support/Precision Clock Companion/history` (macOS
+- **History lives in the OS data directory**: `/Library/Application Support/Precision Clock Companion/pccd/history` (macOS
   service), `/var/lib/pcc/history` (Linux service, systemd `StateDirectory=pcc`), or the user's
   equivalent when run by hand. Files from `history/` next to the binary move there on first start.
   Uninstalling the service leaves them.

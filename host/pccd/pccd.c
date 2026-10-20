@@ -853,13 +853,13 @@ static void hist_summary(char *out, size_t cap){
 
 // Where the recorder lives when -H isn't given: the OS's place for a daemon's state, not next to the
 // binary (an install dir is replaced on upgrade and removed on uninstall; data outlives both).
-//   macOS  root /Library/Application Support/Precision Clock Companion/history      user ~/Library/Application Support/Precision Clock Companion/history
+//   macOS  root /Library/Application Support/Precision Clock Companion/pccd/history      user ~/Library/Application Support/Precision Clock Companion/pccd/history
 //   Linux  $STATE_DIRECTORY/history (systemd StateDirectory=pcc), else root /var/lib/pcc/history,
 //          else ${XDG_STATE_HOME:-~/.local/state}/pcc/history
 static int hist_dir_for(int mac, int root, const char *state, const char *xdg, const char *home, char *out, size_t cap){
   if (mac){
-    if (root){ snprintf(out,cap,"/Library/Application Support/Precision Clock Companion/history"); return 0; }
-    if (home && *home){ snprintf(out,cap,"%s/Library/Application Support/Precision Clock Companion/history",home); return 0; }
+    if (root){ snprintf(out,cap,"/Library/Application Support/Precision Clock Companion/pccd/history"); return 0; }
+    if (home && *home){ snprintf(out,cap,"%s/Library/Application Support/Precision Clock Companion/pccd/history",home); return 0; }
     return -1;
   }
   if (state && *state){ size_t n=strcspn(state,":"); snprintf(out,cap,"%.*s/history",(int)n,state); return 0; }  // first of a list
@@ -1167,8 +1167,8 @@ static int self_test(void){
   g_gz_auto = 1;
   // Data dir: the OS's place for daemon state, per platform and privilege.
   { char o[256]; struct { int mac, root; const char *st, *xdg, *home, *want; } D[] = {
-      { 1, 1, NULL, NULL, NULL,        "/Library/Application Support/Precision Clock Companion/history" },
-      { 1, 0, NULL, NULL, "/Users/x",  "/Users/x/Library/Application Support/Precision Clock Companion/history" },
+      { 1, 1, NULL, NULL, NULL,        "/Library/Application Support/Precision Clock Companion/pccd/history" },
+      { 1, 0, NULL, NULL, "/Users/x",  "/Users/x/Library/Application Support/Precision Clock Companion/pccd/history" },
       { 0, 1, "/var/lib/pcc:/x", NULL, NULL, "/var/lib/pcc/history" },
       { 0, 1, NULL, NULL, NULL,        "/var/lib/pcc/history" },
       { 0, 0, NULL, "/home/x/.st", "/home/x", "/home/x/.st/pcc/history" },

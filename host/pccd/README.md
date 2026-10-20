@@ -344,7 +344,7 @@ Where it lives (unless `-H` says otherwise), following each OS's place for daemo
 
 | | service (root) | run by hand |
 |---|---|---|
-| macOS | `/Library/Application Support/Precision Clock Companion/history` | `~/Library/Application Support/Precision Clock Companion/history` |
+| macOS | `/Library/Application Support/Precision Clock Companion/pccd/history` | `~/Library/Application Support/Precision Clock Companion/pccd/history` |
 | Linux | `/var/lib/pcc/history` (systemd `StateDirectory=pcc`) | `$XDG_STATE_HOME/pcc/history` (`~/.local/state/…`) |
 
 A pccd older than 0.9 kept it in `history/` next to the binary; 0.9 moves those files on

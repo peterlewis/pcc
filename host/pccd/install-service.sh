@@ -38,7 +38,7 @@ if [ "${1:-}" = "--uninstall" ]; then
   stop_existing
   [ "$OS" = Darwin ] && rm -f "$PLIST" || { rm -f "$UNIT"; systemctl daemon-reload 2>/dev/null || true; }
   echo "removed the pccd service. The bundle in $PREFIX, the recorded history and any chrony config were left in place."
-  [ "$OS" = Darwin ] && echo "history: /Library/Application Support/Precision Clock Companion/history" || echo "history: /var/lib/pcc/history"
+  [ "$OS" = Darwin ] && echo "history: /Library/Application Support/Precision Clock Companion/pccd/history" || echo "history: /var/lib/pcc/history"
   exit 0
 fi
 
