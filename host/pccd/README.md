@@ -344,7 +344,13 @@ time and the POSITION scatter/DOP/continuity from `sats` and `pos` — so a 6 H 
 window reaches back through the night, tab or no tab. Where the record is younger than
 the window the chart says so (`RECORDED · 3.2 H OF 6 H`).
 
-## HTTP endpoints (127.0.0.1:<port>, CORS-open unless noted)
+## HTTP endpoints (127.0.0.1:<port>)
+
+Browsers may read these cross-origin only from the app's own origins — the same list the
+WebSocket accepts (`https://pcc.ptrl.ws`, `https://peterlewis.github.io`, any loopback
+origin). The daemon echoes that `Origin` back in `Access-Control-Allow-Origin`; any other
+page gets no CORS grant, so it cannot read the clock's config, the recorded position or
+the sky. Same-origin pages and non-browser clients (curl) need no grant.
 
 - `GET /health` — liveness + capabilities JSON: `version`, `device`, `serial_open`,
   sample counters, `updatable`, `webrefresh`, `history` (above), `raw` (pre-gate

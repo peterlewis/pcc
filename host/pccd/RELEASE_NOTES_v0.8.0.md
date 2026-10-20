@@ -32,4 +32,8 @@ run `./install-service.sh`.
 
 - An HTTP request of any method is parsed (only `GET` was before); `OPTIONS` answers CORS preflights. The
   per-client request buffer grows to 64 KB to hold a posted `config.txt`.
-- Self-test covers the GGA/GSA position parse, the P row, the `pos` readout and drive-name hygiene.
+- Browsers may read the HTTP endpoints cross-origin only from the app's own origins (the WebSocket's list:
+  pcc.ptrl.ws, peterlewis.github.io, loopback). They answered `Access-Control-Allow-Origin: *` before, which
+  would have let any open page read `config.txt` and the recorded position. curl and same-origin pages are
+  unaffected.
+- Self-test covers the GGA/GSA position parse, the P row, the `pos` readout, drive-name hygiene and the CORS gate.

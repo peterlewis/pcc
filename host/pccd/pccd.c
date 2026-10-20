@@ -887,6 +887,7 @@ static void sha1(const unsigned char *msg, size_t len, unsigned char out[20]){
 // buf holds one HTTP request INCLUDING a POST /drive body (config.txt is a few KB; 64 KB is the cap).
 typedef struct { int fd; int ws; char buf[65536]; int len; char lb[256]; int li; double t0; } Client;
 static Client g_cli[MAXCLI];
+static void cors_allow(const Client *c, char *out, size_t cap);   // defined with the HTTP helpers; self-tested
 static int g_listen = -1;
 
 static void b64(const unsigned char *in, int n, char *out){
@@ -979,6 +980,21 @@ static int self_test(void){
   // Drive-name hygiene: nothing outside the volume root is ever resolved, mounted or not.
   { char out[64]; const char *bad[]={ "../etc/passwd", "a/b", ".hidden", "", "x\\y" };
     for (unsigned i=0;i<sizeof bad/sizeof *bad;i++) if (drive_resolve(bad[i],out,sizeof out)==0){ fprintf(stderr,"drive_resolve FAIL: accepted '%s'\n",bad[i]); fail=1; } }
+  // CORS on the private endpoints: the app's origins are echoed, anything else (or an Origin smuggled in
+  // a posted body) gets no Allow-Origin, and no Origin at all needs none.
+  { static Client t; char h[300];
+    static const struct { const char *req; const char *want; } C[] = {
+      { "GET /history HTTP/1.1\r\nHost: x\r\nOrigin: https://pcc.ptrl.ws\r\n\r\n", "Access-Control-Allow-Origin: https://pcc.ptrl.ws\r\n" },
+      { "GET /drive HTTP/1.1\r\nOrigin: http://localhost:8765\r\n\r\n",          "Access-Control-Allow-Origin: http://localhost:8765\r\n" },
+      { "GET /history HTTP/1.1\r\nOrigin: https://evil.example\r\n\r\n",         NULL },
+      { "GET /history HTTP/1.1\r\nOrigin: http://localhost.evil.com\r\n\r\n",    NULL },
+      { "GET /history HTTP/1.1\r\nHost: x\r\n\r\n",                               NULL },
+      { "POST /drive HTTP/1.1\r\nHost: x\r\n\r\nx\nOrigin: https://pcc.ptrl.ws\r\n", NULL },
+    };
+    for (unsigned i=0;i<sizeof C/sizeof *C;i++){
+      snprintf(t.buf,sizeof t.buf,"%s",C[i].req); cors_allow(&t,h,sizeof h);
+      int has=strstr(h,"Allow-Origin")!=NULL;
+      if (C[i].want ? !strstr(h,C[i].want) : has){ fprintf(stderr,"cors FAIL %u: %s\n",i,h); fail=1; } } }
   fprintf(stderr,"[pccd] self-test %s\n",fail?"FAILED":"OK");
   return fail;
 }
@@ -1087,11 +1103,27 @@ static void shq(char *out, size_t cap, const char *in){
   out[o<cap?o:cap-1]=0;
 }
 
-// CORS-open response with a body of known length (the /drive answers; the hosted app reads them cross-origin).
+// The request's Origin header ("" when it has none: same-origin GETs, curl, native clients).
+static void req_origin(const Client *c, char *o, size_t cap){
+  o[0]=0; const char *org = strcasestr(c->buf,"\nOrigin:"), *he = strstr(c->buf,"\r\n\r\n");
+  if (!org || (he && org > he)) return;                  // headers only: a posted body can't supply one
+  org += 8; while (*org==' ') org++;
+  size_t oi=0; while (*org && *org!='\r' && *org!='\n' && oi<cap-1) o[oi++]=*org++; o[oi]=0;
+}
+// CORS for what is private to this machine (the clock's drive, the recorded sky and position): echo an
+// allowed Origin (the hosted app, loopback dev servers) instead of "*", so any other page open in the
+// browser can't read config.txt or where the clock has been. Same-origin requests need no header at all.
+static void cors_allow(const Client *c, char *out, size_t cap){
+  char o[200]; req_origin(c,o,sizeof o);
+  if (o[0] && origin_ok(o)) snprintf(out,cap,"Access-Control-Allow-Origin: %s\r\nVary: Origin\r\n",o);
+  else snprintf(out,cap,"Vary: Origin\r\n");
+}
+// Response with a body of known length (the /drive answers), CORS-allowed to the app's own origins.
 static void http_cors(Client *c, const char *status, const char *type, const char *extra, const char *body, size_t blen){
-  char h[640]; int n=snprintf(h,sizeof h,
-    "HTTP/1.1 %s\r\nContent-Type: %s\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: X-Mtime\r\n"
-    "Cache-Control: no-store\r\n%sContent-Length: %zu\r\nConnection: close\r\n\r\n",status,type,extra?extra:"",blen);
+  char acao[300]; cors_allow(c,acao,sizeof acao);
+  char h[900]; int n=snprintf(h,sizeof h,
+    "HTTP/1.1 %s\r\nContent-Type: %s\r\n%sAccess-Control-Expose-Headers: X-Mtime\r\n"
+    "Cache-Control: no-store\r\n%sContent-Length: %zu\r\nConnection: close\r\n\r\n",status,type,acao,extra?extra:"",blen);
   if (write(c->fd,h,n)>0) for (size_t off=0; off<blen; ){ ssize_t w=write(c->fd,body+off,blen-off); if (w<=0) break; off+=(size_t)w; }
   close(c->fd); c->fd=-1;
 }
@@ -1103,8 +1135,7 @@ static int drive_request(Client *c, const char *method, const char *want){
   char full[1400];
   if (drive_resolve(want,full,sizeof full)!=0){ http_cors(c,"404 Not Found","text/plain",NULL,"no such file on the clock drive\n",31); return 1; }
   if (!strcmp(method,"POST")){
-    char o[200]=""; char *org = strcasestr(c->buf,"Origin:");
-    if (org){ org += 7; while (*org==' ') org++; int oi=0; while (*org && *org!='\r' && *org!='\n' && oi<(int)sizeof o-1) o[oi++]=*org++; o[oi]=0; }
+    char o[200]; req_origin(c,o,sizeof o);
     if (!origin_ok(o)){ fprintf(stderr,"[pccd] rejected drive write from origin %s\n",o); http_cors(c,"403 Forbidden","text/plain",NULL,"cross-origin write rejected\n",28); return 1; }
     if (strcasecmp(want,"config.txt")){ http_cors(c,"403 Forbidden","text/plain",NULL,"only config.txt is writable\n",28); return 1; }
     char *he=strstr(c->buf,"\r\n\r\n"); size_t hl=(size_t)(he-c->buf)+4;
@@ -1137,7 +1168,7 @@ static int drive_request(Client *c, const char *method, const char *want){
   http_cors(c,"200 OK",(dot && !strcasecmp(dot,".txt"))?"text/plain; charset=utf-8":"application/octet-stream",extra,body,got);
   free(body); return 1;
 }
-// One HTTP request per plain connection: /health JSON (CORS-open so the deployed app can probe us),
+// One HTTP request per plain connection: /health JSON (CORS-allowed to the app's origins so it can probe us),
 // a WebSocket upgrade, the archive/raw/drive readouts, an optional served file (-w), or a short status page.
 static void http_or_upgrade(Client *c){
   c->buf[c->len]=0;
@@ -1184,10 +1215,12 @@ static void http_or_upgrade(Client *c){
     } }
   char *q=strchr(path,'?'); if (q) *q++=0;                  // split off the query string (q = params or NULL)
   if (!strcmp(method,"OPTIONS")){                           // CORS preflight (a browser may send one before POST /drive)
-    const char *r="HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
-      "Access-Control-Allow-Headers: Content-Type\r\nAccess-Control-Allow-Private-Network: true\r\nAccess-Control-Max-Age: 600\r\n"
-      "Content-Length: 0\r\nConnection: close\r\n\r\n";
-    write(c->fd,r,strlen(r)); close(c->fd); c->fd=-1; return;
+    char acao[300]; cors_allow(c,acao,sizeof acao);         // only the app's own origins get a yes
+    char r[700]; int rn=snprintf(r,sizeof r,"HTTP/1.1 204 No Content\r\n%sAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+      "Access-Control-Allow-Headers: Content-Type\r\n%sAccess-Control-Max-Age: 600\r\n"
+      "Content-Length: 0\r\nConnection: close\r\n\r\n", acao,
+      strstr(acao,"Allow-Origin") ? "Access-Control-Allow-Private-Network: true\r\n" : "");
+    write(c->fd,r,rn); close(c->fd); c->fd=-1; return;
   }
   if (!strcmp(path,"/drive")){
     const char *fn=qval(q,"file"); char want[80]="";
@@ -1198,14 +1231,16 @@ static void http_or_upgrade(Client *c){
   }
 
   if (!strncmp(path,"/history",8)){
-    // decimated archive readout — CORS-open like /health so the hosted app can chart it too
+    // decimated archive readout — the hosted app charts it too, but only the app's origins may read it:
+    // the sats and pos series say where this machine is
     size_t blen=0;
     char *body = opt_hist ? hist_query(q?q:"",&blen) : NULL;
     if (!body){ http_simple(c,"404 Not Found","text/plain","no history\n"); return; }
-    char hdr[256];
+    char acao[300]; cors_allow(c,acao,sizeof acao);
+    char hdr[512];
     int hn=snprintf(hdr,sizeof hdr,
-      "HTTP/1.1 200 OK\r\nContent-Type: text/csv\r\nAccess-Control-Allow-Origin: *\r\n"
-      "Content-Length: %zu\r\nConnection: close\r\n\r\n",blen);
+      "HTTP/1.1 200 OK\r\nContent-Type: text/csv\r\n%s"
+      "Content-Length: %zu\r\nConnection: close\r\n\r\n",acao,blen);
     if (write(c->fd,hdr,hn)>0){
       for (size_t off=0; off<blen; ){ ssize_t w=write(c->fd,body+off,blen-off); if (w<=0) break; off+=(size_t)w; }
     }
@@ -1213,7 +1248,7 @@ static void http_or_upgrade(Client *c){
   }
   if (!strncmp(path,"/raw",4)){
     // In-memory pre-gate raw samples, oldest->newest CSV `t,off_us`. Feeds the SIGNAL PATH panel's
-    // REAL source. n=<count> caps the window (default = all held, ~600). CORS-open like /history.
+    // REAL source. n=<count> caps the window (default = all held, ~600). The app's origins only, like /history.
     long n = raw_cnt; const char *pp;
     if ((pp=qval(q,"n"))) { long v=atol(pp); if (v>0 && v<n) n=v; }   // exact-key parse (not substring)
     size_t cap = (size_t)n*28 + 32; char *body=malloc(cap); if(!body){ http_simple(c,"500 Internal Server Error","text/plain","oom\n"); return; }
@@ -1225,10 +1260,11 @@ static void http_or_upgrade(Client *c){
       if (r < 0 || (size_t)r >= cap-o) break;                 // never advance o past what was written
       o += (size_t)r;
     }
-    char hdr[256];
+    char acao[300]; cors_allow(c,acao,sizeof acao);
+    char hdr[512];
     int hn=snprintf(hdr,sizeof hdr,
-      "HTTP/1.1 200 OK\r\nContent-Type: text/csv\r\nAccess-Control-Allow-Origin: *\r\n"
-      "Content-Length: %zu\r\nConnection: close\r\n\r\n",o);
+      "HTTP/1.1 200 OK\r\nContent-Type: text/csv\r\n%s"
+      "Content-Length: %zu\r\nConnection: close\r\n\r\n",acao,o);
     if (write(c->fd,hdr,hn)>0){ for (size_t off=0; off<o; ){ ssize_t w=write(c->fd,body+off,o-off); if (w<=0) break; off+=(size_t)w; } }
     free(body); close(c->fd); c->fd=-1; return;
   }
@@ -1253,10 +1289,13 @@ static void http_or_upgrade(Client *c){
       g_updatable?"true":"false", g_platform?g_platform:"",
       (opt_webroot && !opt_webroot_flag)?"true":"false",   // this build understands pccd:web-refresh (gates the app's button)
       histbuf, raw_cnt, drivebuf);                           // drive: the mounted CLOCK volume (/drive serves it), or null
-    char resp[3200];
+    // The app's origins only: open, it would tell any page that pccd runs here, and the drive path
+    // (/media/<user>/CLOCK on Linux) names the account.
+    char acao[300]; cors_allow(c,acao,sizeof acao);
+    char resp[3400];
     int n=snprintf(resp,sizeof resp,
-      "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\n"
-      "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",strlen(json),json);
+      "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n%s"
+      "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",acao,strlen(json),json);
     write(c->fd,resp,n); close(c->fd); c->fd=-1; return;
   }
   if (web_serve_root() && path[0]=='/' && !strstr(path,"..")){   // serve the app (same-origin; overlay or bundle)
