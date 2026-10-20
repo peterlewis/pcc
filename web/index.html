@@ -179,7 +179,7 @@
         <span style="width:8px;height:8px;flex:none;border-radius:50%;background:var(--beta);box-shadow:0 0 8px var(--beta)"></span>
         <span style="font-family:var(--mono);font-size:var(--fs-label);font-weight:700;letter-spacing:.1em;color:var(--beta)">REVIEWING HISTORY</span>
         <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.06em;color:var(--txt2)">{{reviewBannerTime}}</span>
-        <span class="meta meta--wide">— every room shows this moment</span>
+        <span class="meta meta--wide">ALL ROOMS SHOW THIS TIME</span>
         <span class="spacer"></span>
         <button onClick="{{onExitReview}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.08em;color:var(--beta);background:transparent;border:1px solid var(--beta);border-radius:var(--r-1);padding:5px 12px;cursor:pointer">EXIT TO LIVE</button>
       </div>
@@ -1576,10 +1576,10 @@
 
               <sc-if value="{{archShown}}">
               <section style="background:var(--panel);border:1px solid var(--line);grid-column:1/-1">
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:27px;padding:4px 11px;background:var(--strip);border-bottom:1px solid var(--line);flex-wrap:wrap"><span class="lbl">ARCHIVE — OFFSET TO GPS TIME</span><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button onClick="{{onArchR6}}" style="{{archR6Style}}">6H</button><button onClick="{{onArchR24}}" style="{{archR24Style}}">24H</button><button onClick="{{onArchR7}}" style="{{archR7Style}}">7D</button><button onClick="{{onArchR30}}" style="{{archR30Style}}">30D</button><button onClick="{{onArchRAll}}" style="{{archRAllStyle}}">ALL</button></div></div><div style="padding:6px 12px 0;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3)">{{archCaption}}</div>
-                <div style="padding:8px 12px 4px"><canvas ref="{{refArchOffset}}" style="width:100%;height:200px;display:block"></canvas></div>
-                <div style="padding:0 12px 8px"><canvas ref="{{refArchAux}}" style="width:100%;height:130px;display:block"></canvas></div>
-                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">TOP: OFFSET SENT TO chrony · BAND = MIN/MAX · ONE POINT PER ~8 s. BOTTOM: DRIFT ppm (RED) · DIE TEMP (AMBER).</div>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:27px;padding:4px 11px;background:var(--strip);border-bottom:1px solid var(--line);flex-wrap:wrap"><span class="lbl">{{archTimTitle}}</span><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button onClick="{{onArchR6}}" style="{{archR6Style}}">6H</button><button onClick="{{onArchR24}}" style="{{archR24Style}}">24H</button><button onClick="{{onArchR7}}" style="{{archR7Style}}">7D</button><button onClick="{{onArchR30}}" style="{{archR30Style}}">30D</button><button onClick="{{onArchRAll}}" style="{{archRAllStyle}}">ALL</button></div></div><div style="padding:6px 12px 0;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3)">{{archCaption}}</div>
+                <sc-if value="{{archOffOn}}"><div style="padding:8px 12px 4px"><canvas ref="{{refArchOffset}}" style="width:100%;height:200px;display:block"></canvas></div></sc-if>
+                <div style="padding:8px 12px 8px"><canvas ref="{{refArchAux}}" style="width:100%;height:130px;display:block"></canvas></div>
+                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">{{archTimNote}}</div>
               </section>
               </sc-if>
             </div>
@@ -1662,11 +1662,11 @@
               <section class="mod">
                 <div class="panelhead">
                   <span class="lbl">08 · SKY ARCHIVE</span>
-                  <span class="lbl lbl--nano">DAEMON · AGGREGATE</span>
+                  <span class="lbl lbl--nano">{{archSkyTag}}</span>
                 </div>
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:27px;padding:4px 11px;background:var(--strip);border-bottom:1px solid var(--line);flex-wrap:wrap"><span class="lbl">RANGE</span><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button onClick="{{onArchR6}}" style="{{archR6Style}}">6H</button><button onClick="{{onArchR24}}" style="{{archR24Style}}">24H</button><button onClick="{{onArchR7}}" style="{{archR7Style}}">7D</button><button onClick="{{onArchR30}}" style="{{archR30Style}}">30D</button><button onClick="{{onArchRAll}}" style="{{archRAllStyle}}">ALL</button></div></div><div style="padding:6px 12px 0;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3)">{{archCaption}}</div>
                 <div style="padding:8px 12px 8px"><canvas ref="{{refArchSky}}" style="width:100%;height:280px;display:block"></canvas></div>
-                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">C/N0 MEAN (RED) · MAX (DASHED) · SATS USED (AMBER, RIGHT SCALE) · ONE SNAPSHOT PER 60 s</div>
+                <div style="padding:0 12px 12px;font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.06em;color:var(--txt3);line-height:1.6">{{archSkyNote}}</div>
               </section>
             </sc-if>
             <sc-if value="{{archAbsent}}" hint-placeholder-val="{{false}}">
@@ -1675,9 +1675,9 @@
                 <div style="margin:12px;padding:12px;background:var(--well);border:1px solid var(--line2)">
                   <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
                     <span style="width:8px;height:8px;background:var(--none)"></span>
-                    <span style="font-family:var(--mono);font-size:var(--fs-label);font-weight:700;letter-spacing:.08em;color:var(--none)">NO RECORDER</span>
+                    <span style="font-family:var(--mono);font-size:var(--fs-label);font-weight:700;letter-spacing:.08em;color:var(--none)">{{archAbsentTitle}}</span>
                   </div>
-                  <div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3);line-height:1.7">Connect through pccd to record the sky archive.</div>
+                  <div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.05em;color:var(--txt3);line-height:1.7">{{archAbsentMsg}}</div>
                 </div>
               </section>
             </sc-if>
@@ -1818,7 +1818,7 @@
                   <button onClick="{{onReviewDrive}}" title="Replay this moment across every room" style="{{reviewDriveStyle}}">{{reviewDriveLabel}}</button>
                   <button onClick="{{onReviewReload}}" title="Reload from the log" style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.06em;color:var(--txt2);background:transparent;border:1px solid var(--line2);border-radius:var(--r-1);padding:7px 12px;cursor:pointer">RELOAD</button>
                   <span style="flex:1;min-width:20px"></span>
-                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);max-width:300px;line-height:1.5;text-align:right">Drag the timeline to scrub. Hatched spans are CLOCK DISCONNECTED (no data recorded).</span>
+                  <span style="font-family:var(--sans);font-size:var(--fs-body);color:var(--txt2);max-width:300px;line-height:1.5;text-align:right">Drag the timeline to scrub. Hatched spans have no data.</span>
                 </div>
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:1px;background:var(--line);border:1px solid var(--line)">
                   <div style="background:var(--panel);padding:8px 11px"><div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.12em;color:var(--txt3)">POSITION</div><div style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt);margin-top:3px">{{rvPos}}</div></div>
@@ -1919,6 +1919,6 @@
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=295"></script>
+<script type="module" src="js/app-controller.js?v=296"></script>
 </body>
 </html>

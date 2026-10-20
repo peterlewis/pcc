@@ -5,8 +5,8 @@
 import { DcLite } from './dc-lite.js?v=91';
 import * as ASTRO from './astro-fw.js?v=90';
 import * as DS from './datasources.js?v=90';
-import { TelemetryLog } from './telemetrylog.js?v=4';
-import { prepReview, drawReview, sampleAt, tAtX } from './review.js?v=1';
+import { TelemetryLog } from './telemetrylog.js?v=5';
+import { prepReview, drawReview, sampleAt, tAtX } from './review.js?v=2';
 import { subSatellitePoint } from './satpass.js?v=1';
 import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=2';
 import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=8';
@@ -105,6 +105,8 @@ class Component extends DcLite {
     // Telemetry log — persists the CONNECTED real stream to IndexedDB for later scrub/rewind.
     // Opt-in (default off); never records simulation. record() guards on its own _db, so no await.
     try { this.telemetryLog = new TelemetryLog(); } catch (e) { this.telemetryLog = null; }
+    // The browser's answer to "keep this log" (navigator.storage.persist) shows in the log's stats line.
+    if (this.telemetryLog) this.telemetryLog.addEventListener('persist', () => this.setState({}));
     // Closing the tab is the normal way to leave — stamp the open session's disconnectAt so it
     // isn't orphaned (an un-stamped session never prunes and stretches the scrub timeline).
     window.addEventListener('pagehide', () => { try { this.telemetryLog && this.telemetryLog.endSession(); } catch (e) {} });
@@ -125,7 +127,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=110'), import('./realdev.js?v=120'), import('./emu-driver.js?v=44'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=4')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=111'), import('./realdev.js?v=121'), import('./emu-driver.js?v=44'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=4')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.SB = SB;
       try { localStorage.removeItem('pccweb.cuckoo'); } catch (e) {}   // parked feature's persisted setting — clear the ghost
       this.session = SIM.createSession({ preroll: 1560 });
@@ -139,6 +141,8 @@ class Component extends DcLite {
         // A different pccd (updated, restarted, or gone) may answer the per-satellite / position series differently.
         if ((next && next.version) !== (prev && prev.version)) { this._archTrail = null; this._archTrailNone = false; this._archHist = null; this._archPosNone = false; }
         if (JSON.stringify(next) !== JSON.stringify(prev || null)) this.setState({ bridgeInfo: next });
+        // A recorder came or went: the archive changes source (pccd's record, else the browser log).
+        if (!!(next && next.history) !== !!(prev && prev.history)) this._arch = null;
         // The hosted page with a daemon on this machine: offer the local app, or go there if that is remembered.
         this.localHandoff(next);
         // The clock's drive appeared under a live bridge connection → config.txt reads itself, no click.
@@ -297,7 +301,7 @@ class Component extends DcLite {
       el.addEventListener('pointermove', (e) => { if (dragging) this._reviewPointer(e); });
       const up = () => { dragging = false; };
       el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
-      if (this._review) this.renderReview();
+      if (this._review) this.renderReview(); else this.openReview();   // a load straight into EXPORT has no model yet
       return;
     }
     if (name === 'hwJson') { el.value = JSON.stringify(this.hwConfig, null, 2); return; }
@@ -1725,7 +1729,7 @@ class Component extends DcLite {
       if (avail >= need) this.setState({ hdrAutoHide: false });
     }
     // REVIEW: session.S is frozen to the playhead by the scrub — never advance live data over it.
-    if (this._reviewing) { this.onTickStats(); return; }
+    if (this._reviewing) { this.onTickStats(); this.drawCharts(); return; }
     // When a real device is streaming, its NMEA drives session.S — don't let the
     // simulator overwrite it. The sim only advances when not mirroring hardware.
     if (!this.session.S.real) this.session.tick(Date.now());
@@ -1871,7 +1875,7 @@ class Component extends DcLite {
     // observation immediately if it's already sized).
     if ((el.clientWidth | 0) < 2 || (el.clientHeight | 0) < 2) { this.observeCanvas(el, name); return; }
     const T = this.tok(), S = this.session.S, CH = this.CH, st = this.state;
-    const nowS = Math.floor(Date.now() / 1000);
+    const nowMs = this.viewNowMs(), nowS = Math.floor(nowMs / 1000);   // the playhead while REVIEWING
     if (name === 'gammaCurve') return CH.drawGamma(el, T, st.gamma, st.brightness);
     if (name === 'dacCurve') return CH.drawDacCurve(el, T, st.dacCurve, this._dacDrag, {
       presets: Object.values(this.DAC_PRESETS).map((p) => p.map(([adc, dac]) => ({ adc, dac }))),
@@ -1909,13 +1913,13 @@ class Component extends DcLite {
           const m = Math.max(0, Math.round((nowS - oldest) / 60));
           const rec = m < 60 ? m + ' MIN' : (m / 60).toFixed(m % 60 ? 1 : 0) + ' H';
           const win = cut >= 3600 ? (cut / 3600) + ' H' : Math.round(cut / 60) + ' MIN';
-          accNote = (comp ? 'RECORDED · ' : 'LIVE BUFFER · ') + rec + ' OF ' + win;
+          accNote = (comp || this._reviewing ? 'RECORDED · ' : 'LIVE BUFFER · ') + rec + ' OF ' + win;   // REVIEW draws the record
         }
       }
       return CH.drawSky(el, T, {
         sats: S.sats, trails, now: nowS,
-        sun: this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon),
-        moon: this.SIM.moonPos(Date.now(), S.obs.lat, S.obs.lon),
+        sun: this.SIM.sunPos(nowMs, S.obs.lat, S.obs.lon),
+        moon: this.SIM.moonPos(nowMs, S.obs.lat, S.obs.lon),
       }, { heatmap: st.skyHeatmap, horizon: st.skyHorizon, trails: st.skyTrails, labels: st.skyLabels, trailAge: cut, heatLong, lineAge, accNote });
     }
     if (name === 'cn0elev') return CH.drawCn0Elev(el, T, S.sats, st.sigMedian);
@@ -1939,7 +1943,7 @@ class Component extends DcLite {
     if (name === 'stair') return CH.drawStair(el, T, sby ? [] : S.pps.samples, 1800, nowS, sby ? 0 : S.pps.temp, sby ? [] : (S.pps.tempHist || []), sby ? 0 : S.pps.lastEdge);
     if (name === 'ppmtemp') return CH.drawPpmTemp(el, T, sby ? [] : S.pps.samples, sby ? null : (this._timing && this._timing.fit));
     if (name === 'adev') return CH.drawAdev(el, T, this.adevData(), this.adevHint());
-    if (name === 'archOffset') return CH.drawArchiveOffset(el, T, this._arch && this._arch.t);
+    if (name === 'archOffset') return CH.drawArchiveOffset(el, T, this._arch && this._arch.src === 'pccd' ? this._arch.t : null);
     if (name === 'archAux') return CH.drawArchiveAux(el, T, this._arch && this._arch.t);
     if (name === 'archSky') return CH.drawArchiveSky(el, T, this._arch && this._arch.s);
     if (name === 'signalPath') {
@@ -1961,8 +1965,8 @@ class Component extends DcLite {
     if (name === 'globe') {
       return CH.drawGlobe(el, T, {
         rot: this.globeRot, land: this.land, sats: S.sats, gtrails: gcut(S.gtrails),
-        sun: this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon),
-        moon: this.SIM.moonPos(Date.now(), S.obs.lat, S.obs.lon), obs: S.obs,
+        sun: this.SIM.sunPos(nowMs, S.obs.lat, S.obs.lon),
+        moon: this.SIM.moonPos(nowMs, S.obs.lat, S.obs.lon), obs: S.obs,
         opts: { terminator: st.globeTerm, trails: st.globeTrails, labels: st.globeLabels, graticule: st.globeGrat, trailAge: st.skyTrailAge },
         dark: st.theme === 'dark',
       });
@@ -1970,8 +1974,8 @@ class Component extends DcLite {
     if (name === 'map') {
       return CH.drawMap(el, T, {
         land: this.land, sats: S.sats, gtrails: gcut(S.gtrails),
-        sun: this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon),
-        moon: this.SIM.moonPos(Date.now(), S.obs.lat, S.obs.lon), obs: S.obs,
+        sun: this.SIM.sunPos(nowMs, S.obs.lat, S.obs.lon),
+        moon: this.SIM.moonPos(nowMs, S.obs.lat, S.obs.lon), obs: S.obs,
         // GROUND TRACK is one tab with two projections — one layer-toggle set drives both.
         opts: { terminator: st.globeTerm, trails: st.globeTrails, labels: st.globeLabels, graticule: st.globeGrat, trailAge: st.skyTrailAge },
         dark: st.theme === 'dark',
@@ -2258,9 +2262,10 @@ class Component extends DcLite {
   // this connection, else the live buffers. `note` states the depth when it falls short of the window,
   // so a half-empty 24 h chart reads as honest, not broken.
   histSeries() {
-    const S = this.session && this.session.S, win = this.state.posWindow, nowS = Math.floor(Date.now() / 1000);
+    const S = this.session && this.session.S, win = this.state.posWindow, nowS = Math.floor(this.viewNowMs() / 1000);
     if (!S) return { cn0Hist: new Map(), posHist: [], dopHist: [], fixHist: [], notePos: '', noteCn0: '' };
-    const rec = (S.real && this.state.bridgeInfo && this.state.bridgeInfo.history) ? this.archHist(win) : null;
+    // REVIEWING: S holds the scrubbed window already; the recorder's latest rows would paint over it.
+    const rec = (!this._reviewing && S.real && this.state.bridgeInfo && this.state.bridgeInfo.history) ? this.archHist(win) : null;
     const out = rec || { cn0Hist: S.cn0Hist, posHist: S.posHist, dopHist: S.dopHist, fixHist: S.fixHist };
     // One note per record: C/N0 comes from the S rows (recorded since v0.5), position/DOP/fix from the
     // P rows (since v0.8), so their depths differ — a shared note let the long C/N0 record hide a short
@@ -2270,7 +2275,7 @@ class Component extends DcLite {
       const m = Math.max(0, Math.round((nowS - oldest) / 60));
       const have = m < 60 ? m + ' MIN' : (m / 60).toFixed(m % 60 ? 1 : 0) + ' H';
       const want = win >= 3600 ? (win / 3600) + ' H' : Math.round(win / 60) + ' MIN';
-      return (rec ? 'RECORDED · ' : S.real ? 'LIVE BUFFER · ' : 'SIMULATION BUFFER · ') + have + ' OF ' + want;
+      return (rec || this._reviewing ? 'RECORDED · ' : S.real ? 'LIVE BUFFER · ' : 'SIMULATION BUFFER · ') + have + ' OF ' + want;
     };
     let oldPos = nowS, oldCn0 = nowS;
     for (const arr of [out.posHist, out.dopHist, out.fixHist]) if (arr.length && arr[0].t < oldPos) oldPos = arr[0].t;
@@ -2281,7 +2286,7 @@ class Component extends DcLite {
   // ---------- stats ----------
   posStats() {
     const S = this.session && this.session.S;
-    const win = this.state.posWindow, nowS = Math.floor(Date.now() / 1000);
+    const win = this.state.posWindow, nowS = Math.floor(this.viewNowMs() / 1000);
     const pts = S ? (this._hist || this.histSeries()).posHist.filter((p) => nowS - p.t <= win) : [];
     if (!pts.length) return { pts, me: 0, mn: 0, cep: 0, drms: 0, sigE: 0, sigN: 0, n: 0 };
     let me = 0, mn = 0;
@@ -2299,7 +2304,7 @@ class Component extends DcLite {
     const S = this.session && this.session.S;
     if (!S) return { rms: 0, p2p: 0, anom: 0, ppm: 0, hold: 0, temp: 0, seq: 0, drop: 0, locked: true, fit: null };
     // .t is in whole seconds (sim tick floors ms→s; realdev matches). Last 900 s.
-    const nowS = Math.floor(Date.now() / 1000);
+    const nowS = Math.floor(this.viewNowMs() / 1000);
     const win = S.pps.list.filter((p) => nowS - p.t <= 900).map((p) => p.us);
     // Jitter is deviation about the CENTRE, robustly. The absolute offset (fixed ISR latency,
     // the ~1 ms sub-second DC term) isn't jitter, and neither are the occasional single-sample
@@ -3732,9 +3737,10 @@ class Component extends DcLite {
         kRecSt: 'absent', kRecSub: 'NOTHING RECORDED YET' });
       return out;
     }
-    const sun = this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon);
-    const moon = this.SIM.moonPos(Date.now(), S.obs.lat, S.obs.lon);
-    const times = this.SIM.sunTimes(Date.now(), S.obs.lat, S.obs.lon);
+    const at = this.viewNowMs();   // the playhead while REVIEWING
+    const sun = this.SIM.sunPos(at, S.obs.lat, S.obs.lon);
+    const moon = this.SIM.moonPos(at, S.obs.lat, S.obs.lon);
+    const times = this.SIM.sunTimes(at, S.obs.lat, S.obs.lon);
     const vis = S.sats.filter((x) => x.visible);
     const cnt = (id) => vis.filter((x) => x.constId === id).length;
     Object.assign(out, {
@@ -3940,7 +3946,7 @@ class Component extends DcLite {
 
   rvGlobe() {
     const st = this.state, S = this.session && this.session.S;
-    const sun = S ? this.SIM.sunPos(Date.now(), S.obs.lat, S.obs.lon) : null;
+    const sun = S ? this.SIM.sunPos(this.viewNowMs(), S.obs.lat, S.obs.lon) : null;
     const vis = S ? S.sats.filter((x) => x.visible) : [];
     const cnt = (id) => vis.filter((x) => x.constId === id).length;
     return {
@@ -4150,15 +4156,17 @@ class Component extends DcLite {
     this.setState({ cfgName: r.name, cfgDirty: false, cfgReopen: false, cfgNote: '' });
   }
 
-  // ---- flight-recorder archive (pccd /history) ----------------------------------------------------
+  // ---- flight-recorder archive (pccd /history, else the browser log) ------------------------------
   // The daemon records timing + sky rows continuously; these fetch a decimated slice for the ARCHIVE
   // panels. Real recorded data with its source named, so it may render in any app state (incl. Standby).
+  // Without a recorder (Web Serial), the same charts read the browser log's 1-minute tier.
   archSpans() { return { '6h': 21600, '24h': 86400, '7d': 604800, '30d': 2592000, 'all': 0 }; }
   fetchArchive(force) {
     const hi = this.state.bridgeInfo && this.state.bridgeInfo.history;
-    if (!hi || !this.realdev) { this._arch = null; return; }
+    if (!hi) return this.fetchArchiveLog(force);
+    if (!this.realdev) { this._arch = null; return; }
     const range = this.state.archRange || '24h';
-    const fresh = this._arch && this._arch.range === range && Date.now() - this._arch.at < 60000;
+    const fresh = this._arch && this._arch.src === 'pccd' && this._arch.range === range && Date.now() - this._arch.at < 60000;
     if ((fresh && !force) || this._archBusy) return;
     this._archBusy = true;
     const to = Math.floor(Date.now() / 1000);
@@ -4168,11 +4176,54 @@ class Component extends DcLite {
       this.realdev.fetchBridgeHistory({ series: 'timing', from, to, points: 700 }),
       this.realdev.fetchBridgeHistory({ series: 'sky', from, to, points: 400 }),
     ]).then(([t, s]) => {
-      this._arch = { t, s, range, at: Date.now() };
+      this._arch = { t, s, range, at: Date.now(), src: 'pccd' };
       this._archBusy = false;
       this.setState({});
       this.drawChart('archOffset'); this.drawChart('archAux'); this.drawChart('archSky');
-    }).catch(() => { this._archBusy = false; this._arch = { t: [], s: [], range, at: Date.now() }; this.setState({}); });
+    }).catch(() => { this._archBusy = false; this._arch = { t: [], s: [], range, at: Date.now(), src: 'pccd' }; this.setState({}); });
+  }
+  // The browser log's 1-minute rollups for the range, bucketed like pccd's /history (700 timing,
+  // 400 sky points) so the charts draw the same shape from either source. The log has no chrony
+  // offset (that is pccd's), so the timing rows carry drift + temperature only.
+  fetchArchiveLog(force) {
+    const tl = this.telemetryLog;
+    if (!tl) { this._arch = null; this._archLog = null; return; }
+    const range = this.state.archRange || '24h';
+    const fresh = this._arch && this._arch.src === 'browser' && this._arch.range === range && Date.now() - this._arch.at < 60000;
+    if ((fresh && !force) || this._archBusy) return;
+    this._archBusy = true;
+    const to = Math.floor(Date.now() / 1000), span = this.archSpans()[range];
+    tl.minuteSpans().then(async (spans) => {
+      const first = spans.length ? Math.min(...spans.map((x) => x.m0)) : to;
+      const rows = spans.length ? await tl.minuteRange(span ? to - span : first, to) : [];
+      const days = new Set();
+      for (const x of spans) for (let d = Math.floor(x.m0 / 86400); d <= Math.floor(x.m1 / 86400); d++) days.add(d);
+      this._archLog = { days: days.size, since: spans.length ? new Date(first * 1000).toISOString().slice(0, 10) : '' };
+      if (this.state.bridgeInfo && this.state.bridgeInfo.history) { this._archBusy = false; return; }   // pccd arrived meanwhile: its record wins
+      this._arch = { ...this.archFromMinutes(rows, span ? to - span : first, to), range, at: Date.now(), src: 'browser' };
+      this._archBusy = false;
+      this.setState({});
+      this.drawChart('archAux'); this.drawChart('archSky');
+    }).catch((e) => { console.warn('archive (browser log) failed', e); this._archBusy = false; this._arch = { t: [], s: [], range, at: Date.now(), src: 'browser' }; this.setState({}); });
+  }
+  archFromMinutes(rows, from, to) {
+    const bucket = (n, add, out) => {
+      const bw = Math.max(60, (to - from) / n), B = new Map();
+      for (const r of rows) {
+        const i = Math.floor((r.m + 30 - from) / bw);
+        let b = B.get(i); if (!b) { b = { t: from + (i + 0.5) * bw, n: {} }; B.set(i, b); }
+        add(b, r);
+      }
+      return [...B.values()].sort((a, b) => a.t - b.t).map(out).filter(Boolean);
+    };
+    const acc = (b, k, v) => { if (v != null && Number.isFinite(v)) { b[k] = (b[k] || 0) + v; b.n[k] = (b.n[k] || 0) + 1; } };
+    const mean = (b, k) => (b.n[k] ? b[k] / b.n[k] : null);
+    const mid = (lo, hi) => (lo != null && hi != null ? (lo + hi) / 2 : null);
+    const t = bucket(700, (b, r) => { acc(b, 'ppm', mid(r.ppmMin, r.ppmMax)); acc(b, 'temp', mid(r.tempMin, r.tempMax)); },
+      (b) => (b.n.ppm && b.n.temp ? { t: b.t, ppm: mean(b, 'ppm'), temp: mean(b, 'temp') } : null));
+    const s = bucket(400, (b, r) => { acc(b, 'cn0', r.cn0); acc(b, 'used', r.sats); },
+      (b) => (b.n.cn0 || b.n.used ? { t: b.t, cn0_mean: mean(b, 'cn0') ?? 0, used: Math.round(mean(b, 'used') ?? 0) } : null));
+    return { t, s };
   }
   // ---- extended satellite trails --------------------------------------------------------------------
   // For long TRAIL windows (>90 min live buffer) in SIMULATION, compute each sat's whole track over the
@@ -4197,7 +4248,7 @@ class Component extends DcLite {
   // or until the first reply lands (the live buffer draws meanwhile).
   archTrails(winSec) {
     const S = this.session.S, hi = this.state.bridgeInfo && this.state.bridgeInfo.history;
-    if (!hi || !S.real || !this.realdev || this._archTrailNone) return null;
+    if (!hi || !S.real || !this.realdev || this._archTrailNone || this._reviewing) return null;   // REVIEW: S.trails is the scrubbed window
     const c = this._archTrail, now = Date.now();
     if (!this._archTrailBusy && now >= (this._archTrailRetryAt || 0) && (!c || c.win !== winSec || now - c.at >= 60000)) this.fetchArchTrails(winSec);
     if (!c || c.win !== winSec) return null;
@@ -4455,12 +4506,26 @@ class Component extends DcLite {
     // What is on disk AND how long the daemon keeps it (its -R window, reported since 0.8), so the two
     // never disagree on the panel; size says what that costs.
     const mb = hi && hi.bytes ? (hi.bytes >= 1048576 ? (hi.bytes / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(hi.bytes / 1024)) + ' KB') : '';
+    // No recorder: the browser log's minute tier, once a read has found any (archLog is null until then).
+    const lg = !hi && this._archLog, logOn = !!(lg && lg.days > 0), tl = this.telemetryLog;
+    const keepD = tl ? Math.round(tl.retention / 86400) : 0;
     return {
-      archShown: !!hi,
-      archAbsent: !hi,   // ARCHIVE tab honest empty state: no recorder behind this connection
+      archShown: !!hi || logOn,
+      archAbsent: !hi && !!lg && !logOn,   // ARCHIVE tab honest empty state: nothing recorded on either side
+      archOffOn: !!hi,                      // the chrony offset is pccd's; the browser log has none
+      archTimTitle: hi ? 'ARCHIVE — OFFSET TO GPS TIME' : 'ARCHIVE — DRIFT AND TEMPERATURE',
+      archTimNote: hi ? 'TOP: OFFSET SENT TO chrony · BAND = MIN/MAX · ONE POINT PER ~8 s. BOTTOM: DRIFT ppm (RED) · DIE TEMP (AMBER).'
+        : 'DRIFT ppm (RED) · DIE TEMP (AMBER) · 1-MIN MEAN.',
+      archSkyTag: hi ? 'DAEMON · AGGREGATE' : 'BROWSER LOG · 1-MIN',
+      archSkyNote: hi ? 'C/N0 MEAN (RED) · MAX (DASHED) · SATS USED (AMBER, RIGHT SCALE) · ONE SNAPSHOT PER 60 s'
+        : 'C/N0 MEAN (RED) · SATS USED (AMBER, RIGHT SCALE) · 1-MIN MEAN',
+      archAbsentTitle: tl && tl.enabled ? 'NO RECORDING YET' : 'NO RECORDER',
+      archAbsentMsg: tl && tl.enabled ? 'Connect the clock to start the browser log.' : 'Turn on the browser log in EXPORT, or connect through pccd.',
       archCaption: hi ? ('pccd ARCHIVE · ' + days + (days === 1 ? ' DAY' : ' DAYS') + ' ON DISK' + (mb ? ' · ' + mb : '') +
         (hi.retain ? ' · KEEPS ' + hi.retain + ' DAYS' : '') + (hi.from ? ' · SINCE ' + hi.from : '') +
-        (this._arch ? '' : ' · FETCHING…')) : '',   // fetched-and-empty is the charts' honest state, not a wait
+        (this._arch && this._arch.src === 'pccd' ? '' : ' · FETCHING…'))   // fetched-and-empty is the charts' honest state, not a wait
+        : logOn ? ('BROWSER LOG · ' + lg.days + (lg.days === 1 ? ' DAY' : ' DAYS') + (keepD ? (keepD >= 3650 ? ' · KEEPS ALL' : ' · KEEPS ' + keepD + ' DAYS') : '') +
+          (lg.since ? ' · SINCE ' + lg.since : '') + (this._arch && this._arch.src === 'browser' ? '' : ' · READING…')) : '',
       archR6Style: chip('6h'), archR24Style: chip('24h'), archR7Style: chip('7d'), archR30Style: chip('30d'), archRAllStyle: chip('all'),
       onArchR6: () => this.setArchRange('6h'), onArchR24: () => this.setArchRange('24h'),
       onArchR7: () => this.setArchRange('7d'), onArchR30: () => this.setArchRange('30d'), onArchRAll: () => this.setArchRange('all'),
@@ -4709,7 +4774,11 @@ class Component extends DcLite {
       // Persistent telemetry log (IndexedDB) — the data-safety controls. Opt-in; never simulation.
       cbTelLog: this.cb(!!(this.telemetryLog && this.telemetryLog.enabled)),
       onTelLog: () => { if (!this.telemetryLog) return; this.telemetryLog.setEnabled(!this.telemetryLog.enabled); this.setState({}); },
-      telStat: (() => { const s = this._telStats; return (this.pccdRecords() ? 'PAUSED · pccd RECORDS THIS CLOCK · ' : '') + (s ? (s.rows.toLocaleString() + ' SAMPLES · ' + s.sessions + ' SESSION' + (s.sessions === 1 ? '' : 'S') + (s.kb ? ' · ' + (s.kb > 1024 ? (s.kb / 1024).toFixed(1) + ' MB' : s.kb + ' KB') : '')) : '—'); })(),
+      telStat: (() => {
+        const s = this._telStats, ps = this.telemetryLog && this.telemetryLog.persistence;
+        return (this.pccdRecords() ? 'PAUSED · pccd RECORDS THIS CLOCK · ' : '') + (s ? (s.rows.toLocaleString() + ' SAMPLES · ' + s.sessions + ' SESSION' + (s.sessions === 1 ? '' : 'S') + (s.kb ? ' · ' + (s.kb > 1024 ? (s.kb / 1024).toFixed(1) + ' MB' : s.kb + ' KB') : '')) : '—') +
+          (ps === 'persistent' ? ' · PERSISTENT' : ps === 'evictable' ? ' · MAY BE EVICTED' : '');
+      })(),
       telRetVal: String(this.telemetryLog ? this.telemetryLog.retention : 31536000),
       onTelRet: (e) => { if (this.telemetryLog) this.telemetryLog.setRetention(+e.target.value).then(() => this.refreshTelStats()); },
       onTelClear: () => {
@@ -4722,6 +4791,8 @@ class Component extends DcLite {
           this._review = null;
           this.reviewPause();
           this.renderReview();                       // wipes the canvas (no model) + refreshes the readout
+          if (this._arch && this._arch.src === 'browser') this._arch = null;   // the archive read the same log
+          this._archLog = null;
           return this.refreshTelStats();
         });
       },
@@ -4766,10 +4837,14 @@ class Component extends DcLite {
   }
 
   // ---------- REWIND / SCRUB over the persisted telemetry log -----------------
+  // The moment the rooms draw as "now": the playhead while REVIEWING (their windows, trails and the
+  // sun/moon end there), else the wall clock.
+  viewNowMs() { return this._reviewing && this._review ? this._review.playT * 1000 : Date.now(); }
   // Load every session's samples into one scrub model, spanning the whole log,
   // with connected/disconnected segments derived from the sample runs.
   async openReview() {
     if (!this.telemetryLog) return;
+    const seq = this._rvSeq = (this._rvSeq || 0) + 1;    // a later open (RELOAD, a second mount) wins
     try {
       const sessions = await this.telemetryLog.sessions();
       let samples = [];
@@ -4778,9 +4853,15 @@ class Component extends DcLite {
         samples = samples.concat(rows);
         if (samples.length > 200000) break;            // safety cap; scrub still decimates to pixels
       }
-      this._review = prepReview(sessions, samples);
+      if (seq !== this._rvSeq) return;
+      const R = prepReview(sessions, samples);
+      // A reload while REVIEWING keeps the playhead where it was, if the new range still holds it.
+      const old = this._review;
+      if (this._reviewing && old && old.playT >= R.tMin && old.playT <= R.tMax) R.playT = old.playT;
+      this._review = R;
       this.reviewPause();
       this.renderReview();
+      if (this._reviewing) this.applyReviewFrame(R.playT);
     } catch (e) { console.warn('openReview failed', e); }
   }
   renderReview() {
@@ -4939,14 +5020,16 @@ class Component extends DcLite {
       // reconstructReview now rebuilds S.gtrails too, so it must be snapshotted or the live ground
       // tracks would be replaced by the scrubbed window on exit.
       gtrails: S.gtrails instanceof Map ? new Map(S.gtrails) : S.gtrails,
-      pps: S.pps ? { ...S.pps, list: cpArr(S.pps.list) } : S.pps,
+      pps: S.pps ? { ...S.pps, list: cpArr(S.pps.list), tempHist: cpArr(S.pps.tempHist) } : S.pps,
     };
     this._reviewing = true;
+    if (this.realdev && this.realdev.setHold) this.realdev.setHold(true);   // a connected clock's lines stop writing into S
     this.applyReviewFrame(this._review.playT);
   }
   exitReview() {
     if (!this._reviewing) return;
     this._reviewing = false;
+    if (this.realdev && this.realdev.setHold) this.realdev.setHold(false);
     const s = this._liveSnap, S = this.session.S;
     if (s) Object.assign(S, s);   // restore the live buffers untouched
     this._liveSnap = null;
@@ -4957,6 +5040,7 @@ class Component extends DcLite {
   applyReviewFrame(t) {
     if (!this._reviewing || !this._review) return;
     this.reconstructReview(t);
+    this.onTickStats();                        // the rooms' KPI tiles read these: recompute before the render
     if (this.drawCharts) this.drawCharts();   // repaint whichever room's charts are mounted
     this.setState({});
   }

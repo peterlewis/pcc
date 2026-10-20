@@ -46,7 +46,10 @@ export class TelemetryLog extends EventTarget {
     this._retention = Number.isFinite(r) && r > 0 ? r : DEFAULT_RETENTION;
 
     this._ready = this._open();
-    this._ready.then(() => this._prune()).catch((err) => console.warn('TelemetryLog open failed:', err));
+    this._ready.then(() => this._prune())
+      // A log with data asks to be kept: 1 Hz rows, or only sessions (+ their minute rows) once those age out.
+      .then(() => Promise.all([this.count(), this.sessions()])).then(([n, ss]) => { if (n > 0 || ss.length) this.ensurePersisted(); })
+      .catch((err) => console.warn('TelemetryLog open failed:', err));
   }
 
   // --- public toggles (persisted, like skytrailstore) ----------------------
@@ -104,6 +107,7 @@ export class TelemetryLog extends EventTarget {
     const row = this._snapshot(S, t);
     this._put(STORE_SAMPLES, row);                 // fire-and-forget
     this._count++;
+    if (this._count === 1) this.ensurePersisted();   // the log has data now: ask the browser to keep it (once per load)
     this._accumulateMinute(row);
     if (t - (this._prunedAt || 0) >= 3600) { this._prunedAt = t; this._prune(); }   // hourly while connected: the 1 Hz tier stays at a day
     this.dispatchEvent(new CustomEvent('sample', { detail: { t, count: this._count } }));
@@ -220,6 +224,81 @@ export class TelemetryLog extends EventTarget {
   }
   async estimateBytes() {
     try { const e = await navigator.storage.estimate(); return e.usage || 0; } catch { return 0; }
+  }
+
+  // --- minute tier read path (the ARCHIVE charts without pccd) -------------
+  // 1-minute rollups with m in [from, to] (epoch s) across every session, oldest first. The store is
+  // keyed [sessionId, m] with no time index, so read each session's slice in one transaction; a
+  // session whose span cannot reach the window is skipped. Rollups carry no sim flag: they are
+  // derived only from rows record() wrote, and record() runs only for a real clock.
+  async minuteRange(from, to) {
+    await this._ready;
+    if (!this._db) return [];
+    const lo = Math.floor(from || 0), hi = Math.floor(to || 4e9);
+    const sess = (await this.sessions()).filter((s) => !(s.connectedAt / 1000 > hi + 60) &&
+      !(s.disconnectAt != null && s.disconnectAt / 1000 < lo - 60));
+    if (!sess.length) return [];
+    return new Promise((resolve) => {
+      const out = [];
+      const tx = this._db.transaction(STORE_MINUTE, 'readonly');
+      const os = tx.objectStore(STORE_MINUTE);
+      for (const s of sess) {
+        const rq = os.getAll(IDBKeyRange.bound([s.sessionId, lo], [s.sessionId, hi]));
+        rq.onsuccess = () => { for (const r of rq.result || []) out.push(r); };
+      }
+      tx.oncomplete = () => resolve(out.sort((a, b) => a.m - b.m));
+      tx.onerror = () => resolve(out.sort((a, b) => a.m - b.m));
+    });
+  }
+  // First and last minute of each session's rollups: [{ sessionId, m0, m1 }], oldest first. Two
+  // one-step cursors per session, so the archive caption can say how many days the log holds
+  // without reading every row.
+  async minuteSpans() {
+    await this._ready;
+    if (!this._db) return [];
+    const sess = await this.sessions();
+    if (!sess.length) return [];
+    return new Promise((resolve) => {
+      const spans = new Map();
+      const tx = this._db.transaction(STORE_MINUTE, 'readonly');
+      const os = tx.objectStore(STORE_MINUTE);
+      for (const s of sess) {
+        const rng = IDBKeyRange.bound([s.sessionId, 0], [s.sessionId, Infinity]);
+        for (const dir of ['next', 'prev']) {
+          const rq = os.openCursor(rng, dir);
+          rq.onsuccess = () => {
+            const c = rq.result; if (!c) return;
+            const e = spans.get(s.sessionId) || { sessionId: s.sessionId, m0: c.value.m, m1: c.value.m };
+            e.m0 = Math.min(e.m0, c.value.m); e.m1 = Math.max(e.m1, c.value.m);
+            spans.set(s.sessionId, e);
+          };
+        }
+      }
+      const done = () => resolve([...spans.values()].sort((a, b) => a.m0 - b.m0));
+      tx.oncomplete = done; tx.onerror = done;
+    });
+  }
+
+  // --- eviction (navigator.storage.persist) --------------------------------
+  // IndexedDB is best-effort storage: the browser may clear it under storage pressure, and Safari
+  // clears script-written storage after 7 days without a visit. Ask once per page load, when the
+  // log has data, to make it persistent. Chromium answers from site engagement with no prompt;
+  // Firefox asks the user. `persistence` is null until asked, then 'persistent' or 'evictable'.
+  get persistence() { return this._persist || null; }
+  async ensurePersisted() {
+    if (this._persistAsk) return this._persistAsk;
+    this._persistAsk = (async () => {
+      let ok = false;
+      try {
+        const st = navigator.storage;
+        if (st && st.persisted) ok = await st.persisted();
+        if (!ok && st && st.persist) ok = await st.persist();
+      } catch { ok = false; }
+      this._persist = ok ? 'persistent' : 'evictable';
+      this.dispatchEvent(new CustomEvent('persist', { detail: { persistent: ok } }));
+      return this._persist;
+    })();
+    return this._persistAsk;
   }
 
   // --- clear (keeps the sessions list; wipes the telemetry) ----------------
