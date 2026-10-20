@@ -128,7 +128,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=111'), import('./realdev.js?v=122'), import('./emu-driver.js?v=44'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=4')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=111'), import('./realdev.js?v=122'), import('./emu-driver.js?v=45'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=4')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.SB = SB;
       try { localStorage.removeItem('pccweb.cuckoo'); } catch (e) {}   // parked feature's persisted setting — clear the ghost
       this.session = SIM.createSession({ preroll: 1560 });
@@ -667,8 +667,17 @@ class Component extends DcLite {
   }
 
   driveEmu() {
-    if (this._reviewing) {   // REVIEW: the face shows the historical wall-clock time at the playhead
-      this.paintFaceAt(new Date(((this._review && this._review.playT) || 0) * 1000));
+    if (this._reviewing) {   // REVIEW: the face shows the firmware at the playhead, else its wall-clock time
+      // The live emulator keeps time behind REVIEW (no lines reach it: realdev holds them), so exit finds
+      // it on the current second, not the one REVIEW began on. Standby and an open menu do not tick it.
+      if (this.emu && this.appMode() !== 'standby' && !(this.emu.menuState && this.emu.menuState().layer !== 0)) {
+        const t = performance.now();
+        this.emu.tick(t - (this._emuLast || t));
+        this._emuLast = t;
+      }
+      const shown = this.paintReviewEmu();
+      if (shown !== this._rvEmuShown) { this._rvEmuShown = shown; this.setState({}); }   // the rack reads it
+      if (!shown) this.paintFaceAt(new Date(((this._review && this._review.playT) || 0) * 1000));
       return;
     }
     // MENU OPEN → the firmware's menu display owns the face in every state (the physical menu works
@@ -761,18 +770,19 @@ class Component extends DcLite {
   }
 
   // Read the firmware's latched segment buffers and push them onto the six emulator-driven faces.
-  paintEmuFrame() {
-    const frame = this.emu.frame();
+  // emu: the live emulator, or REVIEW's private one.
+  paintEmuFrame(emu = this.emu) {
+    const frame = emu.frame();
     // Colon fix-tell — the canonical hardware affordance: an animated colon means a live
     // GPS-disciplined fix; the firmware HOLDS it SOLID whenever it lacks one (acquiring, or
     // holdover after signal loss). The emulator's colonStep free-runs, so gate it here — the
     // same rule applyFaceState applies to JS faces (noFixFreeze) and the FORMATS caption
     // documents. Without this a DROP-GPS scenario kept pulsing the colons as if still locked.
-    const pr = this.emu.precision ? this.emu.precision() : null;
+    const pr = emu.precision ? emu.precision() : null;
     const heldSolid = pr ? !(pr.hadPps && pr.signal !== false) : false;
-    const colon = heldSolid ? 'solid' : this.emu.colonName();
+    const colon = heldSolid ? 'solid' : emu.colonName();
     // boot reveal: multiply brightness by the driver's 0..1 fade so a reboot goes blank then fades in.
-    const bright = Math.pow(this.state.brightness, this.state.gamma) * (this.emu.reveal ? this.emu.reveal() : 1);
+    const bright = Math.pow(this.state.brightness, this.state.gamma) * (emu.reveal ? emu.reveal() : 1);
     for (const k of this.EMU_FACES) {
       const f = this.faces[k];
       if (!f) continue;
@@ -785,7 +795,7 @@ class Component extends DcLite {
       if (f._emuStandby !== this.state.standby) { if (f.setStandby) f.setStandby(this.state.standby); f._emuStandby = this.state.standby; }
       f.applyDeviceFrame(frame);
     }
-    this.driveCuckoo(frame);
+    if (emu === this.emu) this.driveCuckoo(frame);
   }
 
   // FIRMWARE cuckoo animations (the clock4 `cuckoo` branch): when the engine's dither interleave
@@ -3028,7 +3038,10 @@ class Component extends DcLite {
 
     // 1 · SIGNIFICANT TO — the finest digit that is still true, and its 3σ bound.
     const P = { P3: ['1', 'ms'], P2: ['10', 'ms'], P1: ['0.1', 's'], P0: ['1', 's'] };
-    const pr = (!standby && this.emu && this.emu.precision) ? this.emu.precision() : null;
+    // REVIEW: the emulator the face shows (REVIEW's own, or none while it paints the wall time).
+    const fe = this._reviewing ? (this._rvEmuShown ? this._rvEmu : null) : standby ? null : this.emu;
+    const pr = fe && fe.precision ? fe.precision() : null;
+    const noSig = this._reviewing ? !pr : standby;   // no firmware precision to report
     const pv = pr ? (P[pr.level] || P.P0) : null;
     const uUs = pr && Number.isFinite(pr.uUs) ? pr.uUs : null;
 
@@ -3066,8 +3079,8 @@ class Component extends DcLite {
     return {
 
       rkSigV: pv ? pv[0] : dash, rkSigU: pv ? pv[1] : '',
-      rkSigS: standby ? 'NO FIX · HOST CLOCK' : (uUs != null ? '±' + (uUs < 1 ? '<1' : uUs) + ' µs' : 'ACQUIRING'),
-      rkSigSt: standby ? 'absent' : (pr && pr.level === 'P3' ? 'live' : 'stale'),
+      rkSigS: noSig ? (this._reviewing ? 'WALL TIME ONLY' : 'NO FIX · HOST CLOCK') : (uUs != null ? '±' + (uUs < 1 ? '<1' : uUs) + ' µs' : 'ACQUIRING'),
+      rkSigSt: noSig ? 'absent' : (pr && pr.level === 'P3' ? 'live' : 'stale'),
 
       rkRowV: em.m === 'text' ? 'TEXT' : em.m === 'countdown' ? 'COUNTDOWN' : st.standby ? 'BLANK' : 'MODES',
       rkRowS: dispName, rkRowSt: st.standby ? 'absent' : 'live',
@@ -5137,6 +5150,7 @@ class Component extends DcLite {
       S.obsUserSet = obsUserSet;
     }
     this._liveSnap = null;
+    this._rvEmuKey = null; this._rvEmuShown = false;   // the next REVIEW seeds its emulator afresh
     // After the restore: traffic held during REVIEW joins the restored monitor (or, if the clock left
     // meanwhile, its buffers go).
     if (this.realdev && this.realdev.setHold) this.realdev.setHold(false);
@@ -5160,6 +5174,63 @@ class Component extends DcLite {
       if (f._emuBright !== bright) { f.setBrightness(bright); f._emuBright = bright; }
       f.applyDeviceFrame(frame);
     }
+  }
+  // REVIEW, paused or scrubbed: the firmware's own frame at the playhead. A private emulator takes the
+  // replayed lines (none reach the live one, so exit finds it as it was). 120x playback outruns the
+  // firmware's 1 kHz tick, and a playhead with no stream has nothing to feed: both paint the wall time
+  // (returns false). While a seek is in flight the last seeded frame stays up, as the other rooms do.
+  paintReviewEmu() {
+    const R = this._review, P = this._replay, emu = this._rvEmu;
+    if (this._reviewPlaying || !R || !P || !this.emu) { this._rvEmuKey = null; return false; }
+    if (!emu) {
+      if (!this.ED) return false;
+      this._rvEmu = 'boot';
+      this.ED.createEmuDriver({ config: this.emu.getConfig(), sats: false })
+        .then((d) => { this._rvEmu = d; }, (e) => { console.warn('[pcc] review emulator failed:', e); this._rvEmu = 'failed'; });
+      return false;
+    }
+    if (typeof emu === 'string') return false;   // booting, or failed
+    const K = this._rvEmuKey;
+    if (P.frame && P.t === R.playT && !(K && K.frame === P.frame && K.t === P.t)) {
+      this._rvEmuKey = { frame: P.frame, t: P.t, ok: this.seedReviewEmu(emu, P.frame.nmeaLog, Math.round(P.t * 1000)) };
+      this.setState({});   // the rack's SIGNIFICANT TO follows the seeded firmware
+    }
+    if (!this._rvEmuKey || !this._rvEmuKey.ok) return false;
+    this.paintEmuFrame(emu);
+    return true;
+  }
+  // Cold-boot emu a few seconds before endMs and feed it the replayed lines on their recorded stamps,
+  // through the CONNECTED path's feedLine/pulsePps: one PPS pulse per GPS second, at that second's edge
+  // (the $PMTXTS epoch, else the RMC second) so the shown milliseconds are the playhead's, not the
+  // line's arrival. It locks in about a second, like a connect. False = no RMC there to lock to.
+  seedReviewEmu(emu, log, endMs) {
+    const SEED_MS = 5000;
+    const lines = (log || []).filter((it) => it && it.dir === 'rx' && !it.err && typeof it.text === 'string' &&
+      it.text[0] === '$' && it.t > endMs - SEED_MS && it.t <= endMs);
+    if (!lines.some((it) => /^\$G.RMC,/.test(it.text))) return false;
+    const live = this.emu;   // the same config, zone setting and display mode as the live face
+    if (emu.getConfig() !== live.getConfig()) emu.applyConfig(live.getConfig());
+    emu.setUtc(live.tz().utc);
+    emu.setLive(true);
+    let cur = lines[0].t, sec = null;
+    emu.reboot(Math.floor(cur / 1000));
+    const mode = live.state().mode;
+    for (let g = 0; emu.state().mode !== mode && g < 40; g++) emu.button1();
+    const run = (to) => { while (cur < to) { const d = Math.min(250, to - cur); emu.tick(d); cur += d; } };
+    for (const it of lines) {
+      let m = it.text.match(/RMC,\d{4}(\d{2})/), s = null, edge = null;
+      if (m) { s = +m[1]; for (let k = Math.floor(it.t / 1000), n = 0; n < 3; k--, n++) if (k % 60 === s) { edge = k * 1000; break; } }
+      else if ((m = it.text.match(/PMTXTS,\d+,(\d+)/))) { s = +m[1] % 60; edge = +m[1] * 1000; }
+      if (s !== null && s !== sec) {
+        sec = s;
+        run(edge != null && edge <= it.t && it.t - edge < 1000 ? edge : it.t);
+        emu.pulsePps();
+      }
+      run(it.t);
+      emu.feedLine(it.text);
+    }
+    run(endMs);
+    return true;
   }
 }
 

@@ -41,7 +41,8 @@ export const DEFAULT_CONFIG = [
   'zone2 = UTC',                   // give the second-zone mode a real target (else it shows dashes)
 ].join('\n');
 
-export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = DEFAULT_CONFIG } = {}) {
+// sats: false = no CelesTrak constellation (a private instance fed recorded NMEA, e.g. REVIEW's).
+export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = DEFAULT_CONFIG, sats = true } = {}) {
   const M = await factory();
   const w = (n, r = 'void', a = []) => M.cwrap(n, r, a);
   const E = {
@@ -176,7 +177,7 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
   const tracker = createSatTracker();
   let visSats = [];             // current real sats in view [{prn,az,el,cn0}]
   let satsAge = 0;             // ms since last recompute
-  tracker.load().then((ok) => { if (ok) refreshSats(); });   // best-effort; sim fallback offline
+  if (sats) tracker.load().then((ok) => { if (ok) refreshSats(); });   // best-effort; sim fallback offline
   function refreshSats() {
     if (!tracker.loaded) return;
     try { visSats = tracker.visible(state.lat, state.lon, new Date(), 5); satsAge = 0; } catch (e) {}
@@ -187,8 +188,9 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     .filter(s => s && !s.startsWith('#') && !/^reboot\b/i.test(s));
 
   // Cold power-on: apply the config through the REAL parser, seed position + power, start the GPS.
-  function boot() {
-    E.bootCold(Math.floor(Date.now()/1000));
+  // atSec: the RTC's time at power-on (default now; REVIEW boots at a recorded moment).
+  function boot(atSec) {
+    E.bootCold(Math.floor(atSec != null ? atSec : Date.now()/1000));
     for (const line of configLines(state.configText)) E.configLine(line);
     E.configDone();   // post-config hook: warm-start the tempco model if the config carried a seed
     E.setPos(state.lat, state.lon);
@@ -448,7 +450,7 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
     },      // reboot with new config.txt
     configLine(line) { for (const l of configLines(line)) E.configLine(l); },  // live single line
     getConfig() { return state.configText; },
-    reboot() { boot(); },
+    reboot(atSec) { boot(atSec); },
     // --- colon animation name for the face (honesty: LST/SOLAR read as 'not civil') ---
     colonName() { return COLON_NAME[E.colonMode()] || 'heartbeat'; },
     // --- state read-out for the UI ---
