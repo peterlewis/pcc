@@ -572,10 +572,10 @@ export function drawAdev(canvas, tok, stab, hint) {
     // never happens when the clock isn't in ADEV mode — reads as fiction). `hint` comes from the caller.
     ctx.font = F9; ctx.fillStyle = tok.txt3; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const msgs = {
-      'no-answer': ['adev_dump REQUESTED — THE CLOCK IS NOT ANSWERING.', 'ITS FIRMWARE PREDATES THE FIXED $PMADEV SERIAL DUMP', '(A MATURE RECORD OVERRAN A 128-BYTE BUFFER AND WAS DROPPED).', 'FLASH THE CURRENT mk4-time BUILD TO ENABLE THIS CHART.'],
-      'waiting': ['σ_y(τ) REQUESTED FROM THE CLOCK.', 'THE FIRST REPLY NORMALLY LANDS WITHIN ~15 s.'],
-      'sim': ['COMPUTING σ_y(τ) FROM THE VIRTUAL PPS.', 'THE FIRST TAUS APPEAR IN ~A MINUTE;', 'EACH LONGER OCTAVE TAKES ~2× AS LONG.'],
-      'standby': ['NO PPS SOURCE.', 'CONNECT A CLOCK OR RUN A SIMULATION.'],
+      'no-answer': ['NO $PMADEV REPLY TO adev_dump.', 'FLASH THE CURRENT mk4-time BUILD.'],
+      'waiting': ['σ_y(τ) REQUESTED.', 'FIRST REPLY ≈15 s.'],
+      'sim': ['COMPUTING σ_y(τ) FROM THE VIRTUAL PPS.', 'FIRST τ ≈1 MIN · EACH OCTAVE ≈2× LONGER.'],
+      'standby': ['NO PPS SOURCE.', 'CONNECT A CLOCK OR SIMULATE.'],
     }[hint] || ['NO σ_y(τ) DATA YET.'];
     const lh = 14, y0 = h / 2 - (msgs.length - 1) * lh / 2;
     msgs.forEach((ln, i) => ctx.fillText(ln, w / 2, y0 + i * lh));
