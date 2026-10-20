@@ -1923,11 +1923,11 @@ class Component extends DcLite {
       // One live WINDOW across the strip charts (SIGNAL + POSITION) — a dropout here lines up
       // with the DOP spike and position jump at the same instant on the POSITION tab.
       const H = this._hist || this.histSeries();
-      return CH.drawCn0Time(el, T, top.map((x) => ({ tok: x.tok, pts: H.cn0Hist.get(x.key) || [] })), st.posWindow, nowS, H.note);
+      return CH.drawCn0Time(el, T, top.map((x) => ({ tok: x.tok, pts: H.cn0Hist.get(x.key) || [] })), st.posWindow, nowS, H.noteCn0);
     }
-    if (name === 'posScatter') return CH.drawPosScatter(el, T, this._pos.pts, { ...this._pos, note: (this._hist || this.histSeries()).note }, nowS);
-    if (name === 'dop') { const H = this._hist || this.histSeries(); return CH.drawDop(el, T, H.dopHist, st.posWindow, nowS, H.note); }
-    if (name === 'cont') { const H = this._hist || this.histSeries(); return CH.drawContinuity(el, T, H.fixHist, st.posWindow, nowS, S.ttff, S.t0, H.note); }
+    if (name === 'posScatter') return CH.drawPosScatter(el, T, this._pos.pts, { ...this._pos, note: (this._hist || this.histSeries()).notePos }, nowS);
+    if (name === 'dop') { const H = this._hist || this.histSeries(); return CH.drawDop(el, T, H.dopHist, st.posWindow, nowS, H.notePos); }
+    if (name === 'cont') { const H = this._hist || this.histSeries(); return CH.drawContinuity(el, T, H.fixHist, st.posWindow, nowS, S.ttff, S.t0, H.notePos); }
     // Standby draws the ABSENT state, never a leftover buffer — same rule (and reason) as rvTiming's
     // `standby` gate. adevData() already gates itself on appMode; these three read S.pps directly.
     // REVIEW is the one legitimate "data with no live state": reconstructReview rebuilds S.pps from the
@@ -2257,22 +2257,23 @@ class Component extends DcLite {
   // so a half-empty 24 h chart reads as honest, not broken.
   histSeries() {
     const S = this.session && this.session.S, win = this.state.posWindow, nowS = Math.floor(Date.now() / 1000);
-    if (!S) return { cn0Hist: new Map(), posHist: [], dopHist: [], fixHist: [], note: '' };
+    if (!S) return { cn0Hist: new Map(), posHist: [], dopHist: [], fixHist: [], notePos: '', noteCn0: '' };
     const rec = (S.real && this.state.bridgeInfo && this.state.bridgeInfo.history) ? this.archHist(win) : null;
     const out = rec || { cn0Hist: S.cn0Hist, posHist: S.posHist, dopHist: S.dopHist, fixHist: S.fixHist };
-    let note = '';
-    if (S.connected) {
-      let oldest = nowS;
-      for (const arr of [out.posHist, out.dopHist, out.fixHist]) if (arr.length && arr[0].t < oldest) oldest = arr[0].t;
-      for (const h of out.cn0Hist.values()) if (h.length && h[0].t < oldest) oldest = h[0].t;
-      if (nowS - oldest < win * 0.95) {
-        const m = Math.max(0, Math.round((nowS - oldest) / 60));
-        const have = m < 60 ? m + ' MIN' : (m / 60).toFixed(m % 60 ? 1 : 0) + ' H';
-        const want = win >= 3600 ? (win / 3600) + ' H' : Math.round(win / 60) + ' MIN';
-        note = (rec ? 'RECORDED · ' : S.real ? 'LIVE BUFFER · ' : 'SIMULATION BUFFER · ') + have + ' OF ' + want;
-      }
-    }
-    return { ...out, note };
+    // One note per record: C/N0 comes from the S rows (recorded since v0.5), position/DOP/fix from the
+    // P rows (since v0.8), so their depths differ — a shared note let the long C/N0 record hide a short
+    // position one.
+    const depth = (oldest) => {
+      if (!S.connected || nowS - oldest >= win * 0.95) return '';
+      const m = Math.max(0, Math.round((nowS - oldest) / 60));
+      const have = m < 60 ? m + ' MIN' : (m / 60).toFixed(m % 60 ? 1 : 0) + ' H';
+      const want = win >= 3600 ? (win / 3600) + ' H' : Math.round(win / 60) + ' MIN';
+      return (rec ? 'RECORDED · ' : S.real ? 'LIVE BUFFER · ' : 'SIMULATION BUFFER · ') + have + ' OF ' + want;
+    };
+    let oldPos = nowS, oldCn0 = nowS;
+    for (const arr of [out.posHist, out.dopHist, out.fixHist]) if (arr.length && arr[0].t < oldPos) oldPos = arr[0].t;
+    for (const h of out.cn0Hist.values()) if (h.length && h[0].t < oldCn0) oldCn0 = h[0].t;
+    return { ...out, notePos: depth(oldPos), noteCn0: depth(oldCn0) };
   }
 
   // ---------- stats ----------
@@ -3516,7 +3517,10 @@ class Component extends DcLite {
       // say what is missing, which is also the room's call to action.
       ...(() => {
         const real = !!(S && S.real);
-        const cfg = (S && S.cfg && S.cfg.modes) ? Object.keys(S.cfg).length : 0;
+        // Which transport carries the real clock: 'bridge' (pccd) or 'serial' (Web Serial); null when none.
+        const via = (conn && real && this.realdev && this.realdev.transport) ? this.realdev.transport() : null;
+        // config.txt as adoptClockVolume left it (any route: pccd, a remembered drive, the picker).
+        const cfg = (conn && real && st.cfgName) ? this.cfgKeyCount(this._cfgOriginal) : 0;
         return {
           vLinkSt: conn ? (real ? 'live' : 'sim') : 'absent',
           vLinkV: conn ? '115200' : '—',
@@ -3527,22 +3531,23 @@ class Component extends DcLite {
           vFwS: conn ? (real ? 'READ FROM DEVICE' : 'BUILT FROM SOURCE') : 'CONNECT TO READ',
           vCfgSt: cfg ? 'live' : 'absent',
           vCfgV: cfg || '—', vCfgU: cfg ? 'keys' : '',
-          vCfgS: cfg ? 'config.txt · READ' : 'NOT READ · USE READ CLOCK DRIVE',
+          vCfgS: cfg ? st.cfgName + ' · ' + (this._cfgVia === 'bridge' ? 'READ VIA pccd' : this._cfgVia === 'remembered' ? 'READ · REMEMBERED DRIVE' : 'READ')
+            : 'NOT READ · USE READ CLOCK DRIVE',
           vTransSt: conn ? 'live' : 'absent',
-          vTransV: conn ? (real ? 'SERIAL' : 'EMU') : '—',
-          vTransS: conn ? (real ? this.withAge('WEB SERIAL · USB CDC') : 'IN-BROWSER FIRMWARE') : (chrom ? 'WEB SERIAL AVAILABLE' : 'NEEDS A CHROMIUM BROWSER'),
+          vTransV: conn ? (real ? (via === 'bridge' ? 'BRIDGE' : 'SERIAL') : 'EMU') : '—',
+          vTransS: conn ? (real ? this.withAge(via === 'bridge' ? 'PCC BRIDGE · pccd' : 'WEB SERIAL · USB CDC') : 'IN-BROWSER FIRMWARE') : (chrom ? 'WEB SERIAL AVAILABLE' : 'NEEDS A CHROMIUM BROWSER'),
 
           // ---- CONNECTING A REAL CLOCK: each transport reports its READINESS AS A VALUE, so the
           // room answers "can I use this, here, now?" instead of making you read a walkthrough and
           // work it out. live = this one is carrying the clock; ready = usable now; warn = usable
           // once something changes; absent = not available in this browser.
-          trWsSt: (conn && real) ? 'live' : (ctxOk && chrom ? 'ready' : 'absent'),
-          trWsV: (conn && real) ? 'CONNECTED'
+          trWsSt: via === 'serial' ? 'live' : (ctxOk && chrom ? 'ready' : 'absent'),
+          trWsV: via === 'serial' ? 'CONNECTED'
             : !chrom ? 'UNAVAILABLE — NOT CHROMIUM'
             : !ctxOk ? 'UNAVAILABLE — NEEDS HTTPS OR LOCALHOST'
             : 'AVAILABLE',
-          trBrSt: bridge ? (conn && real ? 'live' : 'ready') : 'warn',
-          trBrV: bridge ? ((conn && real) ? 'CONNECTED' : 'RUNNING — READY') : 'NOT RUNNING — INSTALL BELOW',
+          trBrSt: bridge ? (via === 'bridge' ? 'live' : 'ready') : 'warn',
+          trBrV: bridge ? (via === 'bridge' ? 'CONNECTED' : 'RUNNING — READY') : 'NOT RUNNING — INSTALL BELOW',
           // The clock's USB drive as pccd sees it: mounted = config.txt reads itself over the bridge.
           trDrSt: bridge ? (st.bridgeInfo.drive ? 'ready' : ('drive' in st.bridgeInfo ? 'warn' : 'absent')) : 'absent',
           trDrV: bridge ? (st.bridgeInfo.drive ? 'MOUNTED · ' + st.bridgeInfo.drive : ('drive' in st.bridgeInfo ? 'NOT SEEN — MOUNT THE CLOCK VOLUME' : 'NEEDS pccd 0.8+')) : '—',   // the path as it is: case matters on Linux
@@ -4036,6 +4041,12 @@ class Component extends DcLite {
   bridgeDrive() {
     const bi = this.state.bridgeInfo;
     return !!(bi && bi.drive && this.realdev && this.realdev.transport && this.realdev.transport() === 'bridge');
+  }
+  // `key = value` lines a config.txt actually sets (comments and blanks skipped) — the CONFIG tile's count.
+  cfgKeyCount(text) {
+    let n = 0;
+    for (const raw of String(text || '').split(/\r?\n/)) { const l = raw.trim(); if (l && l[0] !== '#' && l[0] !== ';' && l.includes('=')) n++; }
+    return n;
   }
   async readClockDrive(mode) {
     if (!this.realdev || this._cfgReading) return;
