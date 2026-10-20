@@ -46,7 +46,7 @@
 #endif
 
 #ifndef PCCD_VERSION
-#define PCCD_VERSION "0.9.0"               /* overridable (-DPCCD_VERSION=...) so a test build can look older */
+#define PCCD_VERSION "0.10.0"               /* overridable (-DPCCD_VERSION=...) so a test build can look older */
 #endif
 #ifdef PCCD_GIT
 #define PCCD_VERSTR PCCD_VERSION "+" PCCD_GIT      /* Makefile stamps the short git hash for traceable /health */
@@ -322,10 +322,12 @@ static int serial_autopick(char *out, size_t n){
 // Assert `pps = on` on the clock's serial port. See g_last_ppson above: the firmware only emits the
 // $PMTXTS we feed chrony with when this is on, the config default is off, and any app that sends
 // `pps = off` on disconnect would otherwise silently end our stratum-1 feed. Idempotent + cheap.
+static void raw_line(const char *line, int tx);   // the full-stream recorder (below): commands are part of the record
 static void pps_assert(int sfd){
   if (sfd < 0) return;
   static const char cmd[] = "pps = on\r\n";
   ssize_t w = write(sfd, cmd, sizeof cmd - 1); (void)w;
+  raw_line("pps = on",1);
   g_last_ppson = now_mono_ns();
 }
 
@@ -554,18 +556,21 @@ static const char *gzip_path(void){
   return NULL;
 }
 static void shq(char *out, size_t cap, const char *in);       // defined with the HTTP helpers
-// Open one day's file for reading: the plain .log, else the .log.gz through `gzip -dc`. A day that is
-// mid-compression still has its .log (gzip removes it only after the .gz is complete).
-static FILE *hist_open_day(const char *day, int *piped){
-  char p[4400]; *piped=0;
-  snprintf(p,sizeof p,"%s/%s.log",opt_hist,day);
-  FILE *fp=fopen(p,"r"); if (fp) return fp;
-  snprintf(p,sizeof p,"%s/%s.log.gz",opt_hist,day);
+// Open a recorder file for reading: `plain` itself, else `plain`.gz through `gzip -dc`. A file that is
+// mid-compression still has its plain copy (gzip removes it only after the .gz is complete).
+static FILE *open_maybe_gz(const char *plain, int *piped){
+  *piped=0;
+  FILE *fp=fopen(plain,"r"); if (fp) return fp;
+  char p[4500]; snprintf(p,sizeof p,"%s.gz",plain);
   const char *gz=gzip_path(); struct stat st;
   if (!gz || stat(p,&st)!=0) return NULL;
-  char q[4500], cmd[4700]; shq(q,sizeof q,p); snprintf(cmd,sizeof cmd,"%s -dc %s 2>/dev/null",gz,q);
+  char q[4600], cmd[4800]; shq(q,sizeof q,p); snprintf(cmd,sizeof cmd,"%s -dc %s 2>/dev/null",gz,q);
   fp=popen(cmd,"r"); if (fp) *piped=1;
   return fp;
+}
+static FILE *hist_open_day(const char *day, int *piped){
+  char p[4400]; snprintf(p,sizeof p,"%s/%s.log",opt_hist,day);
+  return open_maybe_gz(p,piped);
 }
 static void hist_close_day(FILE *fp, int piped){ if (piped) pclose(fp); else fclose(fp); }
 // Compress day files older than HIST_GZ_AFTER days, in one detached, niced gzip: the double fork means
@@ -573,20 +578,11 @@ static void hist_close_day(FILE *fp, int piped){ if (piped) pclose(fp); else fcl
 // app's 6H / 24H / 7D windows read without decompressing. `sync_wait` (self-test) waits for gzip.
 #define HIST_GZ_AFTER 7
 static int g_gz_auto = 1;                                       // rotation compresses; the self-test turns it off
-static int hist_compress_old(int sync_wait){
-  const char *gz=gzip_path(); if (!gz || !opt_hist) return 0;
-  char keep[16]; hist_day_of(time(NULL)-(time_t)HIST_GZ_AFTER*86400,keep,sizeof keep);
-  DIR *d=opendir(opt_hist); if (!d) return 0;
-  char *argv[516]; int n=0; argv[n++]=(char*)gz; argv[n++]="-f";
-  struct dirent *e;
-  while ((e=readdir(d)) && n<514){
-    if (hist_dayname(e->d_name)!=1 || strncmp(e->d_name,keep,10)>=0) continue;
-    char *p=malloc(4400); if (!p) break;
-    snprintf(p,4400,"%s/%s",opt_hist,e->d_name); argv[n++]=p;
-  }
-  closedir(d);
-  int files=n-2; argv[n]=NULL;
-  if (files>0){
+// One gzip over a list of files (argv[2..n-1], malloc'd; freed here). Detached unless sync_wait.
+static int gzip_files(char **argv, int n, int sync_wait){
+  const char *gz=gzip_path(); int files=n-2;
+  if (gz && files>0){
+    argv[0]=(char*)gz; argv[1]="-f"; argv[n]=NULL;
     pid_t k=fork();
     if (k==0){
       pid_t g = sync_wait ? 0 : fork();
@@ -596,7 +592,21 @@ static int hist_compress_old(int sync_wait){
     if (k>0) waitpid(k,NULL,0);
   }
   for (int i=2;i<n;i++) free(argv[i]);
-  return files;
+  return gz ? files : 0;
+}
+static int hist_compress_old(int sync_wait){
+  if (!gzip_path() || !opt_hist) return 0;
+  char keep[16]; hist_day_of(time(NULL)-(time_t)HIST_GZ_AFTER*86400,keep,sizeof keep);
+  DIR *d=opendir(opt_hist); if (!d) return 0;
+  char *argv[516]; int n=2;
+  struct dirent *e;
+  while ((e=readdir(d)) && n<514){
+    if (hist_dayname(e->d_name)!=1 || strncmp(e->d_name,keep,10)>=0) continue;
+    char *p=malloc(4400); if (!p) break;
+    snprintf(p,4400,"%s/%s",opt_hist,e->d_name); argv[n++]=p;
+  }
+  closedir(d);
+  return gzip_files(argv,n,sync_wait);
 }
 // Open (or rotate to) the file for `now`. Returns g_histf or NULL when disabled/unwritable.
 static FILE *hist_file(time_t now){
@@ -709,6 +719,98 @@ static void hist_S(double now){
   }
   fputc('\n',f);
 }
+// ---- the full stream ------------------------------------------------------------------------------
+// Every line the clock sends and every command written to it, as received, one file per UTC hour:
+//   <histdir>/stream/YYYY-MM-DDTHH.nmea   `<epoch_ms> <line>`  and  `<epoch_ms> > <command>`
+// REVIEW replays it through the app's own parser, so a past moment reads exactly as it did live; with
+// the stamps stripped (format=nmea) it is plain NMEA for any GNSS tool. (series=stream, not raw: GET /raw
+// is the pre-gate offset window.) Closed hours are gzipped, hours
+// older than opt_raw_days are pruned. About 12 lines/s: 56 MB a day plain, 9 MB gzipped.
+static int  opt_raw_days = 30;           // -F days: full-stream retention; 0 = off
+static FILE *g_rawf = NULL;
+static char g_raw_hour[16] = "";         // "YYYY-MM-DDTHH" the open file belongs to
+static double g_raw_flushed = 0;
+static double wall_ms(void){ struct timeval tv; gettimeofday(&tv,NULL); return (double)tv.tv_sec*1000.0 + (double)tv.tv_usec/1000.0; }
+static void raw_hour_of(time_t t, char *out, size_t cap){
+  struct tm tm; gmtime_r(&t,&tm);
+  snprintf(out,cap,"%04d-%02d-%02dT%02d",tm.tm_year+1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour);
+}
+// YYYY-MM-DDTHH.nmea (1) or YYYY-MM-DDTHH.nmea.gz (2), else 0.
+static int raw_name(const char *n){
+  size_t l=strlen(n);
+  if (l<18 || n[4]!='-' || n[7]!='-' || n[10]!='T') return 0;
+  for (int i=0;i<13;i++) if (i!=4 && i!=7 && i!=10 && (n[i]<'0'||n[i]>'9')) return 0;
+  if (l==18 && !strcmp(n+13,".nmea")) return 1;
+  if (l==21 && !strcmp(n+13,".nmea.gz")) return 2;
+  return 0;
+}
+// Prune hours past retention; gzip every closed hour (anything but the one being written).
+static int raw_housekeep(int sync_wait){
+  if (!opt_hist) return 0;
+  char dir[4400]; snprintf(dir,sizeof dir,"%s/stream",opt_hist);
+  char cut[16]; raw_hour_of(time(NULL)-(time_t)opt_raw_days*86400,cut,sizeof cut);
+  DIR *d=opendir(dir); if (!d) return 0;
+  char *argv[516]; int n=2; struct dirent *e;
+  while ((e=readdir(d))){
+    int k=raw_name(e->d_name); if (!k) continue;
+    char p[4500]; snprintf(p,sizeof p,"%s/%s",dir,e->d_name);
+    if (strncmp(e->d_name,cut,13)<0){ unlink(p); continue; }
+    if (k==1 && strncmp(e->d_name,g_raw_hour,13) && n<514){ char *q=malloc(4500); if (q){ snprintf(q,4500,"%s",p); argv[n++]=q; } }
+  }
+  closedir(d);
+  return gzip_files(argv,n,sync_wait);
+}
+static FILE *raw_file(double ms){
+  if (!opt_hist || opt_raw_days<=0) return NULL;
+  char hr[16]; raw_hour_of((time_t)(ms/1000.0),hr,sizeof hr);
+  if (g_rawf && !strcmp(hr,g_raw_hour)) return g_rawf;
+  if (g_rawf){ fclose(g_rawf); g_rawf=NULL; }
+  char dir[4400], p[4500]; snprintf(dir,sizeof dir,"%s/stream",opt_hist); mkdir(dir,0755);
+  snprintf(p,sizeof p,"%s/%s.nmea",dir,hr);
+  g_rawf=fopen(p,"a");
+  if (g_rawf){
+    fcntl(fileno(g_rawf),F_SETFD,FD_CLOEXEC); setvbuf(g_rawf,NULL,_IOFBF,1<<16);
+    snprintf(g_raw_hour,sizeof g_raw_hour,"%s",hr);
+    if (g_gz_auto) raw_housekeep(0);
+  }
+  return g_rawf;
+}
+static void raw_flush(void){ if (g_rawf) fflush(g_rawf); }
+// One line into the stream at time `ms` (tx: a command written to the clock). Flushed about once a
+// second, so at most a second is lost if the process dies.
+static void raw_line_at(double ms, const char *line, int tx){
+  FILE *f=raw_file(ms); if (!f) return;
+  int n=(int)strcspn(line,"\r\n");
+  fprintf(f,"%.0f %s%.*s\n",ms,tx?"> ":"",n,line);
+  if (ms-g_raw_flushed>=1000.0){ fflush(f); g_raw_flushed=ms; }
+}
+static void raw_line(const char *line, int tx){ raw_line_at(wall_ms(),line,tx); }
+// Stream the window [from,to] (epoch s) to a client: as recorded (series=stream), or as plain NMEA with
+// the stamps and commands stripped (strip, format=nmea).
+static int write_all(int fd, const char *b, size_t n);
+static void raw_export(int fd, double from, double to, int strip){
+  raw_flush();
+  size_t cap=65536, o=0; char *buf=malloc(cap); if (!buf) return;
+  int dead=0;
+  for (time_t h=(time_t)from-((time_t)from%3600); h<=(time_t)to && !dead; h+=3600){
+    char hr[16], p[4500]; raw_hour_of(h,hr,sizeof hr);
+    snprintf(p,sizeof p,"%s/stream/%s.nmea",opt_hist,hr);
+    int piped; FILE *fp=open_maybe_gz(p,&piped); if (!fp) continue;
+    char ln[1024];
+    while (fgets(ln,sizeof ln,fp)){
+      double ms=atof(ln); if (ms<from*1000.0 || ms>to*1000.0) continue;
+      const char *body=strchr(ln,' '); if (!body) continue; body++;
+      if (strip && body[0]=='>') continue;                      // commands are not NMEA
+      const char *out=strip?body:ln; size_t sl=strcspn(out,"\r\n");
+      if (o+sl+2>cap){ if (write_all(fd,buf,o)!=0){ dead=1; break; } o=0; }
+      memcpy(buf+o,out,sl); o+=sl; buf[o++]= '\n';
+    }
+    hist_close_day(fp,piped);
+  }
+  if (!dead && o) write_all(fd,buf,o);
+  free(buf);
+}
+
 // GET /history?series=timing|sky|sats|pos&from=E&to=E&points=N  →  decimated CSV (server-side min/max/mean
 // buckets, so a 90-day chart is one small response). series=sats is the per-satellite record for the
 // app's trails: each bucket's first S row, its satellite list passed through as `t,<TKprn:az:el:cn0;…>`.
@@ -847,8 +949,18 @@ static void hist_summary(char *out, size_t cap){
     if (stat(p,&st)==0) bytes += st.st_size;                    // on disk, so compressed days count compressed
   }
   closedir(d);
+  // The full stream beside it: first hour, hours on disk, bytes, retention in days.
+  char sfirst[16]=""; int hours=0; long long sbytes=0; char rdir[4400]; snprintf(rdir,sizeof rdir,"%s/stream",opt_hist);
+  DIR *rd = opt_raw_days>0 ? opendir(rdir) : NULL;
+  if (rd){ struct dirent *re; while ((re=readdir(rd))){ if (!raw_name(re->d_name)) continue; hours++;
+      if (!sfirst[0] || strncmp(re->d_name,sfirst,13)<0) snprintf(sfirst,sizeof sfirst,"%.13s",re->d_name);
+      char p[4500]; struct stat st; snprintf(p,sizeof p,"%s/%s",rdir,re->d_name); if (stat(p,&st)==0) sbytes+=st.st_size; }
+    closedir(rd); }
+  char stream[160];
+  if (hours) snprintf(stream,sizeof stream,",\"stream\":{\"from\":\"%s\",\"hours\":%d,\"bytes\":%lld,\"retain\":%d}",sfirst,hours,sbytes,opt_raw_days);
+  else stream[0]=0;
   if (!days) snprintf(out,cap,"null");
-  else snprintf(out,cap,"{\"from\":\"%s\",\"days\":%d,\"bytes\":%lld,\"retain\":%d}",first,days,bytes,opt_retain);
+  else snprintf(out,cap,"{\"from\":\"%s\",\"days\":%d,\"bytes\":%lld,\"retain\":%d%s}",first,days,bytes,opt_retain,stream);
 }
 
 // Where the recorder lives when -H isn't given: the OS's place for a daemon's state, not next to the
@@ -1146,6 +1258,34 @@ static int self_test(void){
         }
         if (hist_export(&tc,"pos","stable32",90000,90600)!=-1){ fprintf(stderr,"export accepted pos/stable32\n"); fail=1; }
       }
+      // Full stream: lines and commands land in hourly files with their stamps; closed hours gzip;
+      // series=stream reads them back as kept, format=nmea strips the stamps and the commands.
+      { int keepF=opt_raw_days; opt_raw_days=30000;
+        raw_line_at(90000000.0,"$GNRMC,010000.00,A*00",0);
+        raw_line_at(90000500.0,"pps = on",1);
+        raw_line_at(90001000.0,"$PMTXTS,1,90001*00\r",0);
+        raw_line_at(93600000.0,"$GNRMC,020000.00,A*00",0);          // the next UTC hour
+        if (g_rawf){ fclose(g_rawf); g_rawf=NULL; } g_raw_hour[0]=0;
+        if (gzip_path() && raw_housekeep(1)!=2){ fprintf(stderr,"stream gzip FAIL\n"); fail=1; }
+        static const struct { double from, to; int strip; const char *want; } R[] = {
+          { 90000, 90000.6, 0, "90000000 $GNRMC,010000.00,A*00\n90000500 > pps = on\n" },    // the window cuts at 600 ms
+          { 90000, 93601, 1, "$GNRMC,010000.00,A*00\n$PMTXTS,1,90001*00\n$GNRMC,020000.00,A*00\n" },
+        };
+        for (unsigned i=0;i<sizeof R/sizeof *R;i++){
+          int sv[2]; if (socketpair(AF_UNIX,SOCK_STREAM,0,sv)!=0){ fail=1; break; }
+          raw_export(sv[0],R[i].from,R[i].to,R[i].strip); close(sv[0]);
+          char got[2048]; size_t gl=0; ssize_t r;
+          while (gl<sizeof got-1 && (r=read(sv[1],got+gl,sizeof got-1-gl))>0) gl+=(size_t)r;
+          got[gl]=0; close(sv[1]);
+          if (strcmp(got,R[i].want)){ fprintf(stderr,"stream read %u FAIL:\n%s\n",i,got); fail=1; }
+        }
+        char hs[320]; int kr=opt_retain; opt_retain=30000; hist_summary(hs,sizeof hs); opt_retain=kr;
+        if (!strstr(hs,"\"stream\":{\"from\":\"1970-01-02T01\",\"hours\":2,")){ fprintf(stderr,"stream summary FAIL: %s\n",hs); fail=1; }
+        char rd[4400]; snprintf(rd,sizeof rd,"%s/stream",hdir);
+        DIR *d=opendir(rd); struct dirent *e;
+        if (d){ while ((e=readdir(d))) if (raw_name(e->d_name)){ char p[4500]; snprintf(p,sizeof p,"%s/%s",rd,e->d_name); unlink(p); } closedir(d); }
+        rmdir(rd);
+        opt_raw_days=keepF; }
       // gzip: an old day compresses, reads back the same through `gzip -dc`, and counts once.
       if (gzip_path()){
         size_t n0=0; char *b0=hist_query("series=pos&from=90000&to=90600&points=600",&n0);
@@ -1452,6 +1592,75 @@ static int drive_request(Client *c, const char *method, const char *want){
 }
 // One HTTP request per plain connection: /health JSON (CORS-allowed to the app's origins so it can probe us),
 // a WebSocket upgrade, the archive/raw/drive readouts, an optional served file (-w), or a short status page.
+// Fork a grandchild to answer one client, so a long read or a slow client never holds up the timing
+// loop. Returns 1 in the grandchild (answer, then _exit), 0 in the parent (its copy of the socket is
+// closed; nothing more to do), -1 when the fork failed (answer inline, as before). The same double
+// fork as the web-refresh worker and gzip: the middle child exits at once, so no zombie and no wait.
+static int respond_detached(Client *c){
+  raw_flush(); if (g_histf) fflush(g_histf);                 // the grandchild reads files the parent writes
+  pid_t k=fork();
+  if (k<0) return -1;
+  if (k==0){
+    if (fork()!=0) _exit(0);
+    for (int fd=3; fd<1024; fd++) if (fd!=c->fd) close(fd);  // not the port, the listener or the other tabs
+    g_rawf=NULL; g_histf=NULL;                               // their fds are gone here; the parent still owns them
+    return 1;
+  }
+  waitpid(k,NULL,0);
+  close(c->fd); c->fd=-1; return 0;
+}
+// GET /history: the stream (series=stream), an export (format=), or the decimated rows. Always answers
+// and closes c->fd.
+static void history_respond(Client *c, const char *q){
+  // The full stream: series=stream is the record as kept (REVIEW's replay source, at most 24 h a request);
+  // with format=nmea it is a plain-NMEA download over any window inside the retention.
+  { const char *sv = qval(q,"series");
+    if (sv && !strncmp(sv,"stream",6) && (sv[6]==0 || sv[6]=='&')){
+      const char *fv=qval(q,"format"); int nmea = fv && !strncmp(fv,"nmea",4);
+      char f[40]; const char *p; double from=0, to=0, nowt=(double)time(NULL);
+      if ((p=qval(q,"from"))){ snprintf(f,sizeof f,"%.30s",p); from=atof(f); }
+      if ((p=qval(q,"to")))  { snprintf(f,sizeof f,"%.30s",p); to=atof(f); }
+      if (!isfinite(from) || !isfinite(to) || !opt_hist || opt_raw_days<=0){ http_cors(c,"404 Not Found","text/plain",NULL,"no full-stream record\n",22); return; }
+      if (to<=0 || to>nowt+3600) to=nowt;
+      if (from<=0) from=to-3600;
+      double span = nmea ? (double)opt_raw_days*86400.0 : 86400.0;
+      if (to-from>span) from=to-span;
+      char d0[16], acao[300], h[900]; raw_hour_of((time_t)from,d0,sizeof d0); cors_allow(c,acao,sizeof acao);
+      int hn = nmea
+        ? snprintf(h,sizeof h,"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n%sContent-Disposition: attachment; filename=\"pccd-%s.nmea\"\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",acao,d0)
+        : snprintf(h,sizeof h,"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n%sCache-Control: no-store\r\nConnection: close\r\n\r\n",acao);
+      if (write_all(c->fd,h,(size_t)hn)==0) raw_export(c->fd,from,to,nmea);
+      close(c->fd); c->fd=-1; return;
+    } }
+  if (qval(q,"format")){
+    char series[12]="timing", format[12]="", f[40]; const char *p; double from=0, to=0;
+    if ((p=qval(q,"series"))){ size_t n=0; while(p[n]&&p[n]!='&'&&n<sizeof series-1){series[n]=p[n];n++;} series[n]=0; }
+    if ((p=qval(q,"format"))){ size_t n=0; while(p[n]&&p[n]!='&'&&n<sizeof format-1){format[n]=p[n];n++;} format[n]=0; }
+    if ((p=qval(q,"from"))){ snprintf(f,sizeof f,"%.30s",p); from=atof(f); }
+    if ((p=qval(q,"to")))  { snprintf(f,sizeof f,"%.30s",p); to=atof(f); }
+    if (!opt_hist || hist_export(c,series,format,from,to)!=0){
+      static const char *m="export: series=phase&format=stable32, series=timing&format=chrony, or format=csv\n";
+      http_cors(c,"400 Bad Request","text/plain",NULL,m,strlen(m));
+    }
+    return;
+  }
+  {
+    // decimated archive readout — the hosted app charts it too, but only the app's origins may read it:
+    // the sats and pos series say where this machine is
+    size_t blen=0;
+    char *body = opt_hist ? hist_query(q?q:"",&blen) : NULL;
+    if (!body){ http_simple(c,"404 Not Found","text/plain","no history\n"); return; }
+    char acao[300]; cors_allow(c,acao,sizeof acao);
+    char hdr[512];
+    int hn=snprintf(hdr,sizeof hdr,
+      "HTTP/1.1 200 OK\r\nContent-Type: text/csv\r\n%s"
+      "Content-Length: %zu\r\nConnection: close\r\n\r\n",acao,blen);
+    if (write(c->fd,hdr,hn)>0){
+      for (size_t off=0; off<blen; ){ ssize_t w=write(c->fd,body+off,blen-off); if (w<=0) break; off+=(size_t)w; }
+    }
+    free(body); close(c->fd); c->fd=-1; return;
+  }
+}
 static void http_or_upgrade(Client *c){
   c->buf[c->len]=0;
   if (!strstr(c->buf,"\r\n\r\n")) return;               // wait for full headers
@@ -1512,33 +1721,16 @@ static void http_or_upgrade(Client *c){
     return;
   }
 
-  if (!strncmp(path,"/history",8) && qval(q,"format")){
-    char series[12]="timing", format[12]="", f[40]; const char *p; double from=0, to=0;
-    if ((p=qval(q,"series"))){ size_t n=0; while(p[n]&&p[n]!='&'&&n<sizeof series-1){series[n]=p[n];n++;} series[n]=0; }
-    if ((p=qval(q,"format"))){ size_t n=0; while(p[n]&&p[n]!='&'&&n<sizeof format-1){format[n]=p[n];n++;} format[n]=0; }
-    if ((p=qval(q,"from"))){ snprintf(f,sizeof f,"%.30s",p); from=atof(f); }
-    if ((p=qval(q,"to")))  { snprintf(f,sizeof f,"%.30s",p); to=atof(f); }
-    if (!opt_hist || hist_export(c,series,format,from,to)!=0){
-      static const char *m="export: series=phase&format=stable32, series=timing&format=chrony, or format=csv\n";
-      http_cors(c,"400 Bad Request","text/plain",NULL,m,strlen(m));
-    }
-    return;
-  }
   if (!strncmp(path,"/history",8)){
-    // decimated archive readout — the hosted app charts it too, but only the app's origins may read it:
-    // the sats and pos series say where this machine is
-    size_t blen=0;
-    char *body = opt_hist ? hist_query(q?q:"",&blen) : NULL;
-    if (!body){ http_simple(c,"404 Not Found","text/plain","no history\n"); return; }
-    char acao[300]; cors_allow(c,acao,sizeof acao);
-    char hdr[512];
-    int hn=snprintf(hdr,sizeof hdr,
-      "HTTP/1.1 200 OK\r\nContent-Type: text/csv\r\n%s"
-      "Content-Length: %zu\r\nConnection: close\r\n\r\n",acao,blen);
-    if (write(c->fd,hdr,hn)>0){
-      for (size_t off=0; off<blen; ){ ssize_t w=write(c->fd,body+off,blen-off); if (w<=0) break; off+=(size_t)w; }
-    }
-    free(body); close(c->fd); c->fd=-1; return;
+    // Any /history answer may read a lot (a day of the stream, a year of C rows, ARCHIVE · ALL through
+    // 70-odd gzips) and write a lot: 0.2–0.9 s on a Mac, several seconds on a Pi. The timing loop can't
+    // wait that long (chrony starves; the SOF path rejects samples past ~1 s), so a grandchild answers
+    // and the loop carries on at once.
+    int det=respond_detached(c);
+    if (det==0) return;                                      // the grandchild answers
+    history_respond(c,q);
+    if (det==1) _exit(0);                                    // grandchild: done. _exit — the stdio buffers are the parent's
+    return;
   }
   if (!strncmp(path,"/raw",4)){
     // In-memory pre-gate raw samples, oldest->newest CSV `t,off_us`. Feeds the SIGNAL PATH panel's
@@ -1566,7 +1758,7 @@ static void http_or_upgrade(Client *c){
     // liveness, not just presence: is the tty open, when did the last accepted PPS land, what was
     // it, and how many samples have flowed vs been rejected — so the app can tell a streaming clock
     // from one that unplugged (serial_open:false) or went quiet (last_sample_age_s grows unbounded).
-    char json[2800], agebuf[32], offbuf[32], histbuf[112], drivebuf[2100];
+    char json[3000], agebuf[32], offbuf[32], histbuf[320], drivebuf[2100];
     if (g_last_sample_mono>0){
       snprintf(agebuf,sizeof agebuf,"%.3f",(now_mono_ns()-g_last_sample_mono)*1e-9);
       snprintf(offbuf,sizeof offbuf,"%.9f",g_last_offset);
@@ -1586,7 +1778,7 @@ static void http_or_upgrade(Client *c){
     // The app's origins only: open, it would tell any page that pccd runs here, and the drive path
     // (/media/<user>/CLOCK on Linux) names the account.
     char acao[300]; cors_allow(c,acao,sizeof acao);
-    char resp[3400];
+    char resp[3700];
     int n=snprintf(resp,sizeof resp,
       "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n%s"
       "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",acao,strlen(json),json);
@@ -1640,6 +1832,7 @@ static void ws_read(Client *c, int serial_fd){
           else upd_progress(c,"error unknown-control");
         } else if (serial_fd>=0){
           write(serial_fd,cmd,n); write(serial_fd,"\r\n",2);
+          raw_line(cmd,1);
         }
       }
     }
@@ -1835,6 +2028,7 @@ static int self_update(int dry, Client *cli){
   // Daemon self-relaunch: execv preserves the PID, so a launchd/systemd supervisor keeps tracking this
   // job (no KeepAlive dependency, no restart gap); g_argv are the daemon's own args, minus any --update.
   // The long-lived sockets are FD_CLOEXEC, so the fresh image re-binds the port and re-opens the tty cleanly.
+  raw_flush();                                   // the stream's last second, before this image is replaced
   execv(self,g_argv);
   upd_progress(cli,"error execv-failed — restart pccd to finish");
   return -1;
@@ -1987,6 +2181,7 @@ int main(int argc, char **argv){
     "  -w dir    serve the PCC web app from this dir (same-origin bridge)\n"
     "  -H dir    history dir for the flight recorder (default: history/ next to the binary; 'off' disables)\n"
     "  -R days   history retention, prune older files at rotation (default 365)\n"
+    "  -F days   full-stream retention: every line to and from the clock (default 30; 0 = off)\n"
     "  -o secs   fixed offset trim added to every sample\n"
     "  -n        dry run: compute offsets, never write to chrony\n"
     "  -v        verbose per-sample logging\n"
@@ -2010,7 +2205,7 @@ int main(int argc, char **argv){
     else if (!strcmp(a,"-r")) opt_raw=1;
     else if (!strcmp(a,"-t")) return self_test();
     else if (!strcmp(a,"-T")) return frame_probe();
-    else if (!strcmp(a,"-d")||!strcmp(a,"-p")||!strcmp(a,"-s")||!strcmp(a,"-o")||!strcmp(a,"-w")||!strcmp(a,"-H")||!strcmp(a,"-R")){
+    else if (!strcmp(a,"-d")||!strcmp(a,"-p")||!strcmp(a,"-s")||!strcmp(a,"-o")||!strcmp(a,"-w")||!strcmp(a,"-H")||!strcmp(a,"-R")||!strcmp(a,"-F")){
       if (i+1>=argc){ fprintf(stderr,"[pccd] missing value for %s\n%s",a,USAGE); return 2; }
       const char *val=argv[++i];
       if (!strcmp(a,"-d")) opt_dev=val;
@@ -2018,6 +2213,7 @@ int main(int argc, char **argv){
       else if (!strcmp(a,"-o")) opt_trim=atof(val);
       else if (!strcmp(a,"-H")){ if (!strcmp(val,"off")){ opt_hist=NULL; opt_hist_off=1; } else opt_hist=val; }
       else if (!strcmp(a,"-R")){ int r=atoi(val); if (r<1){ fprintf(stderr,"[pccd] invalid -R '%s' (want days >= 1)\n",val); return 2; } opt_retain=r; }
+      else if (!strcmp(a,"-F")){ char *end=NULL; long r=strtol(val,&end,10); if (!*val || (end&&*end) || r<0 || r>3650){ fprintf(stderr,"[pccd] invalid -F '%s' (want days 0..3650)\n",val); return 2; } opt_raw_days=(int)r; }
       else if (!strcmp(a,"-w")){ opt_webroot=val; opt_webroot_flag=1; }   // serve the PCC app same-origin (e07d308)
       else {                                              // -p: reject non-numeric / out-of-range ports
         char *end=NULL; long p=strtol(val,&end,10);
@@ -2075,7 +2271,7 @@ int main(int argc, char **argv){
   if (opt_webroot) fprintf(stderr,"[pccd] serving the PCC app from %s\n[pccd]   -> open http://localhost:%d in ANY browser, then CONNECT DEVICE\n",opt_webroot,opt_port);
   if (g_web_track && opt_webroot && !opt_webroot_flag){ g_web_next = now_mono_ns()+30e9; fprintf(stderr,"[pccd] Pages app tracking ON (PCCD_WEB_TRACK) — checking for web-app updates every 6h\n"); }
   else g_web_track = 0;   // tracking needs a bundled app; a -w dev server manages its own files
-  if (opt_hist) fprintf(stderr,"[pccd] flight recorder: %s (retain %d days; -H off to disable)\n",opt_hist,opt_retain);
+  if (opt_hist) fprintf(stderr,"[pccd] flight recorder: %s (retain %d days; full stream %d days%s; -H off to disable)\n",opt_hist,opt_retain,opt_raw_days,opt_raw_days?"":" = off");
   else fprintf(stderr,"[pccd] no bundled app found next to this binary — open the hosted app in a Chromium\n[pccd]   browser (it will use this bridge), or pass -w <web-dir> to serve the app same-origin\n");
 
   int sfd=-1; double next_retry=0;
@@ -2205,6 +2401,7 @@ int main(int argc, char **argv){
           line[li]=0; int len=li; li=0;
           if (!len) continue;
           broadcast_line(line);                          // every line goes to every PCC tab
+          raw_line(line,0);                              // ...and into the full-stream record
           if (len>10 && (line[0]=='$') && strncmp(line,"$PMTXTS,",8))
             hist_feed_nmea(line,(double)time(NULL));     // GGA/GSV update the recorder's sat table
           if (len>8 && !strncmp(line,"$PMTXTS,",8)){

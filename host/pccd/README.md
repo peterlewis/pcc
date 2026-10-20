@@ -161,7 +161,7 @@ Flags: `-d <device>` serial device, `-s <path>` chrony SOCK socket path,
 `-p <port>` HTTP/WS port (default 4192), `-w <dir>` serve the PCC app from dir
 (same-origin, fixes Safari — see below), `-H <dir>` flight-recorder directory
 (default: the OS data directory, see below; `off` disables), `-R <days>` recorder
-retention (default 365), `-o <secs>` fixed offset trim, `-n` dry-run, `-v` verbose,
+retention (default 365), `-F <days>` full-stream retention (default 30, `0` off), `-o <secs>` fixed offset trim, `-n` dry-run, `-v` verbose,
 `-r` raw (bypass the sample prefilter), `-t` self-test, `-T` frame-clock probe
 (macOS), `-h` help. `PCCD_DRIVE=<dir>` in the environment points the drive endpoint
 at any directory holding a `config.txt` (development without a clock).
@@ -359,6 +359,20 @@ clock streaming: about 3.4 MB a day plain and 0.7 MB compressed, so a year is ro
 275 MB. `/health` reports what is on disk and the retention window
 (`"history":{"from","days","bytes","retain"}`) and the app's ARCHIVE caption states both.
 
+### The full stream
+
+Beside the rows, pccd keeps every line the clock sends and every command written to it, as
+received, one file per UTC hour (`stream/YYYY-MM-DDTHH.nmea`):
+
+    1792519798123 $GNRMC,170958.00,A,...
+    1792519798530 > pps = on
+
+The stamp is the host's receive time in ms; `>` marks a command. The app's REVIEW replays
+this through the same parser as a live connection, so every room shows a past moment as
+it showed it live. Closed hours are gzipped; hours older than `-F` days (default 30) are
+pruned. About 12 lines a second: 56 MB a day plain, 9 MB compressed, so 30 days is roughly
+280 MB. `/health` reports it as `history.stream` (`from`, `hours`, `bytes`, `retain`).
+
 ### Exports
 
 Every row in a window, streamed, in formats other tools read (default window: the last
@@ -367,6 +381,7 @@ Every row in a window, streamed, in formats other tools read (default window: th
     curl -OJ 'http://localhost:4192/history?series=phase&format=stable32&from=…&to=…'
     curl -OJ 'http://localhost:4192/history?series=timing&format=chrony'
     curl -OJ 'http://localhost:4192/history?series=pos&format=csv'
+    curl -OJ 'http://localhost:4192/history?series=stream&format=nmea&from=…&to=…'
 
 - `series=phase&format=stable32`: `MJD y` per second, `y` = the crystal's fractional
   frequency from the `C` rows. Load into Stable32 as frequency data with time tags.
@@ -374,6 +389,9 @@ Every row in a window, streamed, in formats other tools read (default window: th
 - `series=timing&format=chrony`: chrony's `refclocks.log` layout (refid `PCC`, offset as
   sent to chrony's SOCK refclock, jitter as dispersion) for chrony log tooling.
 - `format=csv` with `series=timing|sats|pos|phase`: the raw rows.
+- `series=stream&format=nmea`: the full stream as plain NMEA (stamps and commands stripped),
+  for RTKLIB, gpsd's `gpsfake`, u-center and the like. Without `format`, `series=stream` returns
+  the stream as kept (at most 24 h a request): REVIEW's source.
 
 The app reads it back decimated: **ARCHIVE** (6 h … 30 d, all) from the `timing` and
 `sky` series; the SKY plot's trails from `sats`; and, from v0.8, SIGNAL's C/N₀ over
