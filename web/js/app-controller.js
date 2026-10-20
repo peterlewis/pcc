@@ -537,7 +537,7 @@ class Component extends DcLite {
       if (pref === 'always') {
         if (this._localWent) return;
         this._localWent = true;
-        if (this.session && this.session.log) this.session.log('rx', 'pccd detected on this machine — opening the local app (ALWAYS OPEN LOCAL; add ?hosted to the URL to stay)');
+        if (this.session && this.session.log) this.session.log('rx', 'pccd on this machine. Opening the local app (ALWAYS OPEN LOCAL). Add ?hosted to the URL to stay.');
         this.openLocalApp(); return;
       }
       if (pref === 'ask' && !this._localDismissed && this.state.localBand !== 'detected') this.setState({ localBand: 'detected' });
@@ -3153,7 +3153,7 @@ class Component extends DcLite {
       onHwJsonInput: () => this.onHwJsonInput(),
       hwJsonBorder: this._hwJsonErr ? 'var(--none)' : 'var(--line2)',
       hwJsonStatusColor: this._hwJsonErr ? 'var(--none)' : 'var(--lock)',
-      hwJsonStatus: this._hwJsonErr ? '✗ INVALID JSON — last valid edit still applied' : '✓ APPLIED LIVE TO THE CLOCK',
+      hwJsonStatus: this._hwJsonErr ? '✗ INVALID JSON · LAST VALID EDIT APPLIED' : '✓ APPLIED LIVE TO THE CLOCK',
       onHwCopy: () => { try { navigator.clipboard.writeText(JSON.stringify(this.hwConfig, null, 2)); } catch (e) {} },
       onHwReset: () => this.resetHwConfig(),
       // External button strip → drive the on-device menu (the board furniture buttons are hidden).
@@ -3169,10 +3169,10 @@ class Component extends DcLite {
       standbyOn: _mode === 'standby',
       onStandbyConnect: () => this.connectRealDevice(),
       onStandbyExplore: () => this.setSim(true),
-      standbySerialNote: this.state.bridgeInfo ? 'PCC BRIDGE DETECTED — ANY BROWSER CONNECTS'
-        : (typeof navigator !== 'undefined' && !!navigator.serial) ? 'WEB SERIAL READY — OR RUN THE PCC BRIDGE'
-        : 'NO WEB SERIAL — RUN THE PCC BRIDGE (DEVICE › CONNECT)',
-      sourceTag: (S && S.real) ? 'MK IV — LIVE · CONTROLS COMMAND DEVICE · BUTTONS NOT REPORTED' : this.emuSourceTag(),
+      standbySerialNote: this.state.bridgeInfo ? 'PCC BRIDGE DETECTED'
+        : (typeof navigator !== 'undefined' && !!navigator.serial) ? 'WEB SERIAL READY'
+        : 'NO WEB SERIAL · RUN pccd (DEVICE › CONNECT)',
+      sourceTag: (S && S.real) ? 'MK IV · LIVE · CONTROLS COMMAND DEVICE · BUTTONS NOT REPORTED' : this.emuSourceTag(),
       cbHdrBar: this.cb(st.hdrBar),
       oHdrBar: () => {
         const v = !st.hdrBar;
@@ -3272,8 +3272,8 @@ class Component extends DcLite {
           tolRowStyle: fadeOn ? 'opacity:.38;pointer-events:none' : '',
           tolApplyStyle: 'font-family:var(--sans);font-size:12px;padding:5px 14px;background:transparent;border:1px solid var(--led);color:var(--txt);cursor:' + (fadeOn ? 'not-allowed' : 'pointer'),
           tolNote: fadeOn
-            ? 'OVERRIDDEN: SIGNIFICANCE FADE is on. Digits are dashed by the measured 3σ holdover uncertainty. Turn the fade off to use these timers.'
-            : 'Holdover seconds before each digit is dashed (Tolerance_time_* in config.txt). Ignored while SIGNIFICANCE FADE is on.',
+            ? 'OVERRIDDEN BY SIGNIFICANCE FADE (3σ). Turn the fade off to use these timers.'
+            : 'Holdover seconds until each digit dashes (Tolerance_time_*).',
         };
       })(),
       onTolApply: () => {
@@ -3297,7 +3297,7 @@ class Component extends DcLite {
           ambientDisabled: conn,
           ambientNote: !conn ? 'FED TO THE EMULATOR PHOTOTRANSISTOR (ADC1_IN10)'
             : b ? 'MEASURED BY THE CLOCK · $PMBRIT'
-            : this.brightOverdue() ? 'NO $PMBRIT FROM THIS CLOCK · NEEDS FIRMWARE WITH brightness_report'
+            : this.brightOverdue() ? 'NO $PMBRIT · NEEDS FIRMWARE WITH brightness_report'
             : 'WAITING FOR $PMBRIT',
         };
       })(),
@@ -3316,14 +3316,14 @@ class Component extends DcLite {
         if (this.appMode() !== 'connected') {
           const bs = this.emu && this.emu.balanceState ? this.emu.balanceState() : null;
           return { balSeg: bs ? bs.seg : '—', balColon: bs ? bs.colon : '—',
-            balNote: 'CURRENT-SHARING COMPENSATION · OFF / AUTO / MANUAL STRENGTH · SET VIA config.txt OR MENU' };
+            balNote: 'CURRENT-SHARING COMPENSATION · SET IN config.txt OR MENU' };
         }
         const b = this.brightLive(), dark = b && b.src === 'S';
         return {
           balSeg: !b ? '—' : dark ? 'DISPLAY OFF' : b.segk ? String(b.segk) : 'OFF',
           balColon: !b ? '—' : dark ? 'DISPLAY OFF' : b.colon + ' / 256',
-          balNote: b ? 'LIVE FROM THE CLOCK · STRENGTH AT THIS RAIL · COLON SCALE OF 256'
-            : this.brightOverdue() ? 'NO READ-BACK FROM THIS CLOCK · NEEDS FIRMWARE WITH brightness_report'
+          balNote: b ? 'LIVE · STRENGTH AT THIS RAIL · COLON OF 256'
+            : this.brightOverdue() ? 'NO READ-BACK · NEEDS FIRMWARE WITH brightness_report'
             : 'WAITING FOR $PMBRIT',
         };
       })(),
@@ -3361,8 +3361,8 @@ class Component extends DcLite {
         if (this._emuCfgNote) return this._emuCfgNote;
         const S = this.session && this.session.S;
         return (S && S.real && this.realdev)
-          ? 'MK IV CONNECTED. APPLY ALSO MIRRORS THESE SETTINGS TO THE CLOCK OVER SERIAL (RUNTIME ONLY). THE CLOCK’S config.txt IS UNCHANGED. EXPORT AND DROP ON THE DRIVE TO PERSIST.'
-          : 'EMULATOR ONLY. CONNECT A MK IV TO MIRROR APPLY ONTO THE PHYSICAL CLOCK.';
+          ? 'APPLY ALSO SENDS THESE TO THE CLOCK (RAM ONLY). TO KEEP THEM, EXPORT TO THE CLOCK DRIVE.'
+          : 'EMULATOR ONLY. CONNECT A MK IV TO ALSO SEND APPLY TO THE CLOCK.';
       })(),
       onEmuCfgApply: () => {
         if (!this.emu || !this.els.emuCfg) return;
@@ -3374,7 +3374,7 @@ class Component extends DcLite {
         this.setState(configToState(txt), () => this.syncFaces());
         const n = this.mirrorConfigToDevice(txt);     // 0 if no clock attached
         this._emuCfgNote = n
-          ? ('✓ SENT ' + n + ' SETTINGS TO THE CLOCK (RUNTIME-ONLY). EXPORT config.txt TO PERSIST ACROSS A POWER-CYCLE.')
+          ? ('✓ SENT ' + n + ' SETTINGS TO THE CLOCK (RAM ONLY). EXPORT config.txt TO KEEP THEM.')
           : '';
         this.setState({ tick: this.state.tick });     // re-render the sync note
       },
@@ -3418,10 +3418,10 @@ class Component extends DcLite {
       onDacApply: () => this.applyDacCurve(),
       dacApplyOff: !(S && S.real),
       onDacCopy: () => { try { navigator.clipboard.writeText(this.dacCommands().join('\n')); } catch (e) {} },
-      dacApplyNote: (S && S.real) ? 'APPLY → BS1..BS5 OVER SERIAL' : 'CONNECT A CLOCK TO SEND · OR COPY THE BS LINES',
+      dacApplyNote: (S && S.real) ? 'APPLY → BS1..BS5 OVER SERIAL' : 'CONNECT A CLOCK TO SEND · OR COPY BS',
       rbColSlow: this.rb(st.colon === 'slowfade'), rbColHeart: this.rb(st.colon === 'heartbeat'), rbColSaw: this.rb(st.colon === 'sawtooth'), rbColAlt: this.rb(st.colon === 'alt_sawtooth'), rbColTog: this.rb(st.colon === 'toggle'), rbColSolid: this.rb(st.colon === 'solid'),
       oColSlow: () => this.set2({ colon: 'slowfade' }), oColHeart: () => this.set2({ colon: 'heartbeat' }), oColSaw: () => this.set2({ colon: 'sawtooth' }), oColAlt: () => this.set2({ colon: 'alt_sawtooth' }), oColTog: () => this.set2({ colon: 'toggle' }), oColSolid: () => this.set2({ colon: 'solid' }),
-      colonFreezeNote: this.noFixFreeze() ? 'HELD SOLID — FIRMWARE FREEZES THE ANIMATION WITHOUT FIX' : 'RESYNCED ON THE EVEN UTC SECOND · 2 S CYCLE',
+      colonFreezeNote: this.noFixFreeze() ? 'HELD SOLID · NO FIX' : 'SYNCED TO THE EVEN UTC SECOND · 2 S CYCLE',
       ssSrcLocal: this.seg(!st.utc, true), ssSrcUtc: this.seg(st.utc, false),
       // .seg carries its own state in CSS off aria-pressed, so the segmented control no longer
       // needs a computed style string pushed into markup — and it announces correctly.
@@ -3479,7 +3479,7 @@ class Component extends DcLite {
     if (this.hostedPage() && !(typeof navigator !== 'undefined' && navigator.serial) && !this.state.bridgeInfo) {
       const blocked = this.bridgeProbeBlocked();
       this.setState({ localBand: blocked ? 'blocked' : 'absent' });
-      if (this.session) this.session.log('rx', 'no transport on this page — ' + (blocked ? 'this browser cannot reach a local pccd from an https page' : 'no Web Serial, and no pccd answered') + '. See the band at the top.', true);
+      if (this.session) this.session.log('rx', 'no transport: ' + (blocked ? 'browser blocks a local pccd from https' : 'no Web Serial, no pccd') + '. See the band at the top.', true);
       return;
     }
     this._devCaps = null;   // unknown until this device's config.txt is read (assume full meanwhile)
@@ -3548,7 +3548,7 @@ class Component extends DcLite {
           vCfgSt: cfg ? 'live' : 'absent',
           vCfgV: cfg || '—', vCfgU: cfg ? 'keys' : '',
           vCfgS: cfg ? st.cfgName + ' · ' + (this._cfgVia === 'bridge' ? 'READ VIA pccd' : this._cfgVia === 'remembered' ? 'READ · REMEMBERED DRIVE' : 'READ')
-            : 'NOT READ · USE READ CLOCK DRIVE',
+            : 'NOT READ',
           vTransSt: conn ? 'live' : 'absent',
           vTransV: conn ? (real ? (via === 'bridge' ? 'BRIDGE' : 'SERIAL') : 'EMU') : '—',
           vTransS: conn ? (real ? this.withAge(via === 'bridge' ? 'PCC BRIDGE · pccd' : 'WEB SERIAL · USB CDC') : 'IN-BROWSER FIRMWARE') : (chrom ? 'WEB SERIAL AVAILABLE' : 'NEEDS A CHROMIUM BROWSER'),
@@ -3566,7 +3566,7 @@ class Component extends DcLite {
           trBrV: bridge ? (via === 'bridge' ? 'CONNECTED' : 'RUNNING — READY') : 'NOT RUNNING — INSTALL BELOW',
           // The clock's USB drive as pccd sees it: mounted = config.txt reads itself over the bridge.
           trDrSt: bridge ? (st.bridgeInfo.drive ? 'ready' : ('drive' in st.bridgeInfo ? 'warn' : 'absent')) : 'absent',
-          trDrV: bridge ? (st.bridgeInfo.drive ? 'MOUNTED · ' + st.bridgeInfo.drive : ('drive' in st.bridgeInfo ? 'NOT SEEN — MOUNT THE CLOCK VOLUME' : 'NEEDS pccd 0.8+')) : '—',   // the path as it is: case matters on Linux
+          trDrV: bridge ? (st.bridgeInfo.drive ? 'MOUNTED · ' + st.bridgeInfo.drive : ('drive' in st.bridgeInfo ? 'NOT MOUNTED' : 'NEEDS pccd 0.8+')) : '—',   // the path as it is: case matters on Linux
           // Which copy of the app this is, and — on the hosted one — what to do when pccd is around.
           appOrgSt: hosted ? 'ready' : 'live',
           appOrgV: hosted ? ('HOSTED · ' + (typeof location !== 'undefined' ? location.hostname.toUpperCase() : 'PCC.PTRL.WS')) : (servedByPccd ? 'LOCAL · SERVED BY pccd' : 'LOCAL · DEV SERVER'),
@@ -3657,8 +3657,8 @@ class Component extends DcLite {
         })),
       ] : [],
       menuOvrNote: this._menuOvr ? (this._menuOvr.stampOk
-        ? `config.txt unchanged since the menu edit (stamp match). Menu values take precedence, including keys config.txt defines · store gen ${this._menuOvr.gen}`
-        : `config.txt was re-saved after the menu edit. config.txt takes precedence wherever both define a key · store gen ${this._menuOvr.gen}`) : '',
+        ? `Menu values apply. config.txt is unchanged since the menu edit · store gen ${this._menuOvr.gen}`
+        : `config.txt applies where both set a key. It was saved after the menu edit · store gen ${this._menuOvr.gen}`) : '',
       // Transpose the on-device menu state into the config.txt editor as key = value lines. Existing
       // lines for those keys are commented out and the block is APPENDED — the firmware parses top to
       // bottom, last write wins, so the appended block is authoritative and the history stays visible.
@@ -3679,7 +3679,7 @@ class Component extends DcLite {
         for (const [k, v] of kv) lines.push(v == null ? `# ${k}: AUTO in the menu — key left unset` : `${k} = ${v}`);
         lines.push('');
         this.els.cfgEditor.value = lines.join('\n');
-        if (this.session && this.session.log) this.session.log('tx', `[config] transposed ${kv.length} menu value${kv.length === 1 ? '' : 's'} into the editor — SAVE TO CLOCK to write them`);
+        if (this.session && this.session.log) this.session.log('tx', `[config] ${kv.length} menu value${kv.length === 1 ? '' : 's'} added to the editor. SAVE TO CLOCK to write.`);
         this.setState({ cfgDirty: this.els.cfgEditor.value !== (this._cfgOriginal || '') });
       },
       cfgSaveDisabled: !(st.cfgDirty && st.cfgWrite && (this.cfgHandle || (this._cfgVia === 'bridge' && this.bridgeDrive()))),
@@ -3884,7 +3884,7 @@ class Component extends DcLite {
                       : { tJitter: jv, tJitterU: ju, tP2p: pv, tP2pU: pu };
       })()),
       tDrift: noData ? '—' : (T.ppm || 0).toFixed(2), tHold: noData ? '—' : (T.locked ? '0' : String(T.hold || 0)),
-      tHoldSub: noData ? 'NO PPS — CONNECT A CLOCK OR SIMULATE' : (T.locked ? 'GPS DISCIPLINED' : 'FREE-RUNNING — LSE (TEMP COMP HOST-SIDE)'),
+      tHoldSub: noData ? 'NO PPS' : (T.locked ? 'GPS DISCIPLINED' : 'FREE-RUNNING · LSE'),
       tTemp: noData ? '—' : (T.temp || 0).toFixed(1), tSeq: noData ? '—' : String(T.seq || 0), tDrop: noData ? '—' : String(T.drop || 0),
       // Rack state for TIMING. noData is the honest absent case — the room's six cells all show an
       // em-dash and cell 6 carries the reason, rather than the charts implying a stream that isn't
@@ -3895,8 +3895,8 @@ class Component extends DcLite {
       fitSpread: fit ? fit.spread.toFixed(1) + ' °C' : '—',
       fitRms: fit ? fit.rms.toFixed(2) + ' ppm' : '—',
       fitN: fit ? String(fit.n) : '0',
-      fitStatus: fit ? (fit.ready ? (fit.lineOnly ? 'READY — LINE FIT' : 'READY — QUADRATIC') : 'COLLECTING — NEED ≥30 SAMPLES / ≥8 °C')
-        : (streaming ? 'COLLECTING — NEED ≥30 SAMPLES / ≥8 °C' : 'AWAITING SAMPLES'),
+      fitStatus: fit ? (fit.ready ? (fit.lineOnly ? 'READY — LINE FIT' : 'READY — QUADRATIC') : 'NEED ≥30 SAMPLES · ≥8 °C')
+        : (streaming ? 'NEED ≥30 SAMPLES · ≥8 °C' : 'AWAITING SAMPLES'),
       fitStatusC: fit && fit.ready ? 'var(--lock)' : 'var(--acq)',
       // Emit the tempcomp firmware's REAL seed vocabulary (tc_t0 / tc_lse_a/b/c / tc_seed) — the
       // legacy `temp_comp = k0,k1,k2` key was never parsed by any firmware. The block is only shown
@@ -3906,24 +3906,24 @@ class Component extends DcLite {
       compStateC: noData ? 'var(--txt3)' : (fit && fit.ready ? 'var(--lock)' : 'var(--txt2)'),
       compLine: fit && fit.ready && this.PT
         ? this.PT.tcSeedBlock({ k0: fit.k0, k1: fit.k1, k2: fit.k2, tlo: fit.tMin, thi: fit.tMax, n: fit.n, rms: fit.rms }).configBlock
-        : (fit ? `# characterising — need ≥30 samples & ≥8 °C span (have ${fit.n}, ${fit.spread.toFixed(1)} °C)`
+        : (fit ? `# need ≥30 samples, ≥8 °C span · have ${fit.n}, ${fit.spread.toFixed(1)} °C`
           : (streaming && S && S.pps && S.pps.samples && S.pps.samples.length
             ? (() => {   // stream live but the fit hasn't engaged: say what's been collected, not "awaiting"
                 const t = S.pps.samples.map((x) => x.temp);
-                return `# characterising — collecting samples (${S.pps.samples.length}, ${(Math.max(...t) - Math.min(...t)).toFixed(1)} °C span; need ≥30 & ≥8 °C)`;
+                return `# need ≥30 samples, ≥8 °C span · have ${S.pps.samples.length}, ${(Math.max(...t) - Math.min(...t)).toFixed(1)} °C`;
               })()
             : '# tc seed — awaiting timing stream')),
-      // FIRMWARE LEARNED MODEL — the device's own on-die tempcomp state, read back over serial
+      // TEMP COMP · FIRMWARE — the device's own on-die tempcomp state, read back over serial
       // ("tc_dump = on" → $PMTXTC H/L + a state header, parsed in realdev.js → S.tc). Distinct from
       // the host fit above: this is what the CLOCK ITSELF has learned and steers holdover with.
       ...((() => {
         const tc = S && S.real ? S.tc : null;
-        if (!S || !S.real) return { fwTcState: S && S.connected ? 'REAL HARDWARE ONLY — SIM HAS NO ON-DIE MODEL' : 'CONNECT A CLOCK TO READ ITS MODEL',
+        if (!S || !S.real) return { fwTcState: S && S.connected ? 'REAL HARDWARE ONLY' : 'CONNECT TO READ',
           fwTcStateC: 'var(--txt3)', fwTcHse: '—', fwTcLse: '—', fwTcRange: '—', fwTcMeta: '—' };
         if (!tc || (!tc.hse && !tc.lse)) return { fwTcState: 'AWAITING tc_dump REPLY…', fwTcStateC: 'var(--acq)',
           fwTcHse: '—', fwTcLse: '—', fwTcRange: '—', fwTcMeta: 'sent "tc_dump = on" at connect' };
-        const stateName = { A: 'APPLYING — HOLDOVER STEERING ACTIVE', F: 'FROZEN — config.txt OVERRIDES LEARNING',
-          L: 'LEARNING', S: 'SEEDED — EVOLVING FROM WARM-START', '-': 'IDLE' }[tc.state] || ('STATE ' + (tc.state || '?'));
+        const stateName = { A: 'APPLYING · HOLDOVER STEERING', F: 'FROZEN BY config.txt',
+          L: 'LEARNING', S: 'SEEDED · LEARNING FROM WARM START', '-': 'IDLE' }[tc.state] || ('STATE ' + (tc.state || '?'));
         const h = tc.hse, l = tc.lse;
         const age = Math.max(0, Math.floor(Date.now() / 1000) - tc.at);
         return {
@@ -3962,7 +3962,7 @@ class Component extends DcLite {
       gClock: new Date().toISOString().slice(11, 19) + ' UTC',
       // (used to promise "production uses photographic earth" — a leftover from the macOS-app port
       // plan. This IS production; the cartographic render is the design, so say only what's true.)
-      landNote: this.landTried && !this.land ? 'COASTLINE DATA UNAVAILABLE — GRATICULE ONLY' : 'CARTOGRAPHIC RENDER — VECTOR COASTLINES + GRATICULE',
+      landNote: this.landTried && !this.land ? 'NO COASTLINE DATA · GRATICULE ONLY' : 'VECTOR COASTLINES + GRATICULE',
     };
   }
 
@@ -4083,7 +4083,7 @@ class Component extends DcLite {
         }
         if (got === 'gone') {
           if (mode === 'reopen') { this.setState({ cfgReopen: false, cfgNote: '' }); r = await this.realdev.readClockVolume(); }
-          else { this.setState({ cfgReopen: false, cfgNote: 'REMEMBERED CLOCK DRIVE NOT FOUND — PLUG THE CLOCK IN, OR PICK IT AGAIN' }); return; }
+          else { this.setState({ cfgReopen: false, cfgNote: 'REMEMBERED DRIVE NOT FOUND · PLUG IN THE CLOCK OR PICK AGAIN' }); return; }
         } else if (!got) {
           // Nothing readable without a click. Say whether a click would do (a handle is remembered).
           const has = await this.realdev.hasRememberedVolume();
@@ -4105,12 +4105,12 @@ class Component extends DcLite {
   cfgDriveNote() {
     const st = this.state, bi = st.bridgeInfo, via = this._cfgVia, S = this.session && this.session.S;
     if (st.cfgNote) return st.cfgNote;
-    if (this.bridgeDrive()) return 'CLOCK DRIVE ' + bi.drive + ' · VIA pccd · ' + (via === 'bridge' ? 'READ BY ITSELF' : 'READS WITHOUT A PICKER');
+    if (this.bridgeDrive()) return 'CLOCK DRIVE ' + bi.drive + ' · VIA pccd · ' + (via === 'bridge' ? 'AUTO-READ' : 'NO PICKER NEEDED');
     if (S && S.real && this.realdev && this.realdev.transport && this.realdev.transport() === 'bridge')
-      return (bi && 'drive' in bi) ? 'pccd SEES NO CLOCK DRIVE — IS THE CLOCK VOLUME MOUNTED ON THE BRIDGE HOST?' : 'THIS pccd PREDATES /drive (0.8) — UPDATE IT IN DEVICE › UPDATES, OR USE THE PICKER';
-    if (via === 'remembered') return 'CLOCK DRIVE · REMEMBERED · READ BY ITSELF';
-    if (st.cfgReopen) return 'CLOCK DRIVE REMEMBERED — RE-OPEN IS ONE CLICK, NO PICKER';
-    if (via === 'picker') return 'CLOCK DRIVE · PICKED · REMEMBERED FOR NEXT TIME';
+      return (bi && 'drive' in bi) ? 'CLOCK DRIVE NOT MOUNTED ON THE pccd HOST' : 'pccd < 0.8 HAS NO /drive · UPDATE (DEVICE › UPDATES) OR USE THE PICKER';
+    if (via === 'remembered') return 'CLOCK DRIVE · REMEMBERED · AUTO-READ';
+    if (st.cfgReopen) return 'CLOCK DRIVE REMEMBERED · ONE CLICK TO RE-OPEN';
+    if (via === 'picker') return 'CLOCK DRIVE · PICKED · REMEMBERED';
     return '';
   }
   // A read of the CLOCK volume (any route) becomes the app's picture of the clock: config.txt ⊕ the
@@ -4366,7 +4366,7 @@ class Component extends DcLite {
     const sp = this.state.sp;
     const atRec = sp.K === PF_REC.k && sp.window === PF_REC.window && sp.group === PF_REC.group && sp.floorUs === PF_REC.floorUs && sp.corrRatio === PF_REC.corrRatio;
     const head = atRec ? '# recommended configuration'
-      : '# NON-DEFAULT — values below differ from the shipped build (rebuild pccd for the prefilter built-ins)';
+      : '# NON-DEFAULT · differs from the shipped build · rebuild pccd to use';
     return head + '\n' +
       '# pccd build: PF_WIN=' + sp.window + '  PF_AGG=' + sp.group + '  gate=' + sp.K.toFixed(1) + 'σ  floor=' + sp.floorUs + 'us   (compile-time constants in pccd.c pf_push)\n' +
       'refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4 poll ' + PF_REC.poll + ' filter ' + PF_REC.filter + ' prefer\n' +
@@ -4403,13 +4403,13 @@ class Component extends DcLite {
     if (sp.source === 'none') chip = { txt: 'NO SOURCE', col: 'var(--txt3)' };
     else if (cal.live) chip = { txt: 'THIS CLOCK — pccd RAW SAMPLES · ' + (cal.n || 0) + ' HELD', col: 'var(--lock)' };
     else if (sp.source === 'real') chip = { txt: 'THIS CLOCK — LOADING pccd RAW SAMPLES', col: 'var(--acq)' };
-    else if (cal.calibrated) chip = { txt: "SAMPLE DATA · SYNTHETIC, JITTER MATCHED TO THIS CLOCK'S RECORD σ≈" + Math.round(cal.us) + 'µs', col: 'var(--acq)' };
-    else chip = { txt: 'SAMPLE DATA · SYNTHETIC, NOMINAL JITTER', col: 'var(--acq)' };
+    else if (cal.calibrated) chip = { txt: "SAMPLE DATA · SYNTHETIC · σ≈" + Math.round(cal.us) + "µs FROM THIS CLOCK'S RECORD", col: 'var(--acq)' };
+    else chip = { txt: 'SAMPLE DATA · SYNTHETIC · NOMINAL JITTER', col: 'var(--acq)' };
     const realSel = sp.source === 'real';
     // Absent state: no real feed and no simulation — say why, per cause.
     const spAbsentMsg = this.appMode() === 'connected'
-      ? 'THIS CONNECTION CARRIES NO RAW-SAMPLE FEED. THE pccd BRIDGE RECORDS PRE-GATE SAMPLES; DIRECT WEB SERIAL DOES NOT.'
-      : "NO SOURCE. CONNECT THROUGH THE pccd BRIDGE FOR THIS CLOCK'S RAW SAMPLES, OR START A SIMULATION TO EXPLORE THE FILTER ON SAMPLE DATA.";
+      ? 'NO RAW SAMPLES OVER WEB SERIAL. CONNECT THROUGH pccd.'
+      : 'NO SOURCE. CONNECT THROUGH pccd OR START A SIMULATION.';
     return {
       spRawRms: fmt(st.rawRms, 1), spCleanRms: fmt(st.cleanRms, 1),
       spReduction: st.reduction ? '×' + st.reduction.toFixed(1) : '—',
@@ -4419,8 +4419,8 @@ class Component extends DcLite {
       spGateSub: 'MED-CENTRED' + (floored ? ' · FLOOR ' + sp.floorUs + 'µs' : ''),
       spChipTxt: chip.txt, spChipCol: chip.col,
       spCaption: cal.live
-        ? "THIS CLOCK'S PRE-GATE OFFSET SAMPLES FROM pccd (GET /raw, IN-MEMORY, LAST ~10 MIN). THE KNOBS RE-FILTER YOUR OWN SAMPLES WITH THE SHIPPED pccd MATH (pf_push). REFRESH PULLS THE LATEST WINDOW."
-        : 'SAMPLE DATA — A SYNTHETIC OFFSET STREAM, SHOWN ONLY WHILE SIMULATING. THE GATE AND TRIMMED-MEAN MATH IS THE SHIPPED pccd ALGORITHM (pccd.c pf_push), SO THE KNOB LESSONS HOLD. A CONNECTED CLOCK REPLACES THIS WITH ITS OWN SAMPLES.',
+        ? 'PRE-GATE OFFSETS FROM pccd /raw · LAST ~10 MIN · SHIPPED pf_push MATH. REFRESH LOADS THE LATEST.'
+        : 'SYNTHETIC OFFSETS (SIMULATION) · SHIPPED pccd pf_push MATH.',
       spOn: sp.source !== 'none', spAbsent: sp.source === 'none', spAbsentMsg,
       spRefreshLabel: realSel ? 'REFRESH' : 'RESEED SAMPLE',
       onSpRefresh: () => (realSel ? this.spFetchRaw(false) : this.spReseed()),
@@ -4452,7 +4452,7 @@ class Component extends DcLite {
     return {
       archShown: !!hi,
       archAbsent: !hi,   // ARCHIVE tab honest empty state: no recorder behind this connection
-      archCaption: hi ? ('ARCHIVE · RECORDED BY pccd · ' + days + (days === 1 ? ' DAY' : ' DAYS') + ' ON DISK' + (mb ? ' · ' + mb : '') +
+      archCaption: hi ? ('pccd ARCHIVE · ' + days + (days === 1 ? ' DAY' : ' DAYS') + ' ON DISK' + (mb ? ' · ' + mb : '') +
         (hi.retain ? ' · KEEPS ' + hi.retain + ' DAYS' : '') + (hi.from ? ' · SINCE ' + hi.from : '') +
         (this._arch ? '' : ' · FETCHING…')) : '',   // fetched-and-empty is the charts' honest state, not a wait
       archR6Style: chip('6h'), archR24Style: chip('24h'), archR7Style: chip('7d'), archR30Style: chip('30d'), archRAllStyle: chip('all'),
@@ -4489,7 +4489,7 @@ class Component extends DcLite {
         this._pccdUpd = !tag ? { s: 'CHECK FAILED — UNEXPECTED RESPONSE', c: 'var(--acq)' }
           : !newer ? { s: 'UP TO DATE — ' + tag, c: 'var(--lock)' }
           : bi.updatable ? { s: 'UPDATE AVAILABLE — ' + tag, c: 'var(--acq)' }
-          : { s: 'UPDATE AVAILABLE — ' + tag + ' · UPDATE MANUALLY (THIS pccd IS A DEV / -w BUILD)', c: 'var(--acq)' };
+          : { s: 'UPDATE AVAILABLE — ' + tag + ' · DEV BUILD (-w): UPDATE BY HAND', c: 'var(--acq)' };
         this.setState({});
       })
       .catch(() => { if (manual) { this._pccdUpd = { s: 'CHECK FAILED — OFFLINE OR RATE-LIMITED', c: 'var(--acq)' }; this.setState({}); } });
