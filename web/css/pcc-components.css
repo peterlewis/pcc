@@ -138,6 +138,7 @@
 .mod__stat[data-state="live"]  { color: var(--lock); }
 .mod__stat[data-state="sim"]   { color: var(--acq); }
 .mod__stat[data-state="alert"] { color: var(--none); }
+.mod__stat--case { text-transform: none; }   /* a stat that names something in its own case (pccd) */
 .mod__field { padding: var(--pad-panel-y) var(--pad-panel-x); }
 /* The working field's usual shape: groups stacked down the panel with room between them.
    Retyped 11x as `display:flex;flex-direction:column;gap:14px` — same decision, given a name. */
@@ -383,3 +384,18 @@
 
 .brg-blocked { margin: 2px var(--sp-3) 8px; }
 .brg-blocked__a { display: inline-block; margin-top: 8px; font-family: var(--mono); font-size: var(--fs-data-sm); color: var(--led); }
+
+/* ---- REC lamp: who keeps the clock's record right now (the header). Opens the RECORDER panel. --------
+   Red and lit while a recorder writes (pccd's or this browser's); a dark dot when nothing records. */
+.reclamp { display: flex; align-items: center; gap: 8px; padding: 0 14px; background: transparent;
+  border: 0; border-left: 1px solid var(--line-soft); cursor: pointer; white-space: nowrap;
+  font-family: var(--mono); font-size: var(--fs-nano); letter-spacing: .14em; color: var(--txt3);
+  transition: color var(--t-ui), background var(--t-ui); }
+.reclamp:hover { color: var(--txt); background: var(--strip); }
+.reclamp:focus-visible { outline: 1px solid var(--led); outline-offset: -1px; }
+.reclamp__dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--line2); }
+.reclamp[data-state="live"] { color: var(--txt2); }
+.reclamp[data-state="live"] .reclamp__dot { background: var(--led); box-shadow: 0 0 7px var(--led); }
+/* A button that erases: the none (orange) accent, as the old CLEAR LOG wore it inline. */
+.btn--danger { color: var(--none); border-color: var(--none); }
+.btn--danger:hover { color: var(--none); border-color: var(--none); background: var(--led-fill); }

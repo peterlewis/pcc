@@ -12,15 +12,15 @@
 //
 // Chromium only (Web Serial). Gate the connect button on isSupported().
 
-import { Clock, BridgeClock } from './serial.js?v=23';
-import { parseGGA, parseRMC, parseGSA, GSVBuffer } from './nmea.js?v=2';
+import { Clock, BridgeClock } from './serial.js?v=24';
+import { parseGGA, parseRMC, parseGSA, GSVBuffer } from './nmea.js?v=3';
 import { parsePMTXTS, parsePMTXTC, centrePhase, foldPhase1ms } from './ppsts.js?v=15';
 import { parsePMSTAR, parsePMADEV, parsePMBRIT } from './pmext.mjs?v=2';
 // subSatellitePoint reconstructs a sat's ground point from observer-relative
 // az/el (all GSV gives us) — the exact inverse of the sim's forward azel(). The
 // import also runs satpass.js's augmentConstellations() IIFE, which sets
 // .altitudeKm on the shared nmea CONSTELLATIONS entries we read below.
-import { subSatellitePoint } from './satpass.js?v=1';
+import { subSatellitePoint } from './satpass.js?v=2';
 
 // nmea.js CONSTELLATIONS keys/prefixes → the sim's per-constellation metadata
 // (constId / tok / talker / sysId). The sim tags every sat with these and the
@@ -81,22 +81,34 @@ export function parseDeviceConfig(text) {
     return cfg;
 }
 
-export function createRealDevice(session) {
+export function createRealDevice(session, opts = {}) {
     const S = session.S;
     let clock = null;
+    // REPLAY (opts.replay): an instance with no transport that REVIEW feeds recorded lines through. It
+    // runs on the recording's clock: every wall-clock read below is now(), which a replay sets to the
+    // stamp of the line it is feeding. A past moment then goes through the exact live path.
+    const replay = !!opts.replay;
+    let vNow = 0;
+    const now = replay ? () => vNow : () => Date.now();
+    let onTraffic = null;   // (ms, text, tx): every line in and command out, as it happens (the browser recorder)
 
     // Persistent GSV reassembler. Its onSatellites fires (debounced ~100ms)
     // with a merged, deduped snapshot across all constellations/signals seen
-    // so far; we translate that into sim-shaped S.sats items.
+    // so far; we translate that into sim-shaped S.sats items. A replay runs the
+    // same 100 ms debounce on recorded time (gsvDue), not a timer.
     const gsv = new GSVBuffer({
         onSatellites: (sats) => mergeSats(sats),
+        debounceMs: replay ? -1 : 100,
     });
+    let gsvDue = 0;
 
     const gtrailLast = new Map(); // sat.key → last wall-clock ms a ground-trail point was appended
     const trailLast = new Map();  // sat.key → last wall-clock ms a polar az/el trail point was appended
     const risenReal = new Set();  // sat.key currently above the horizon — rise edges count passes
     let ingesting = false;        // are we CONSUMING this transport? (set on connect, cleared on every leave)
-    let held = false;             // REVIEW holds S at the playhead: lines still reach the monitor and the RX watchdog, not S
+    let held = false;             // REVIEW holds S at the playhead: lines still reach the RX watchdog, not S
+    let heldLog = [];             // ...and wait here for the monitor, which shows the replay meanwhile
+    let clearOnRelease = false;   // the clock left during REVIEW: its buffers go once REVIEW lets go of S
     let obsSeeded = false;        // adopt the device's own fix as the observer once per connection
     let obsAtConnect = null;      // pre-connect observer, restored on disconnect
     let lastHistT = 0;            // last whole-second we sampled POSITION/DOP/continuity history
@@ -109,9 +121,10 @@ export function createRealDevice(session) {
     /// consumer that tracks "new sentences since" by absolute array index silently
     /// breaks once the cap is hit (this froze the emulator clock ~40 s after connect).
     /// `seq` survives the splice, so the drive loop can advance reliably.
-    function log(text, err) {
-        S.nmeaLog.push({ t: Date.now(), dir: 'rx', text, err: !!err, seq: ++rxSeq });
-        if (S.nmeaLog.length > 420) S.nmeaLog.splice(0, S.nmeaLog.length - 420);
+    function log(text, err, dir = 'rx') {
+        const L = held ? heldLog : S.nmeaLog;
+        L.push({ t: now(), dir, text, err: !!err, seq: ++rxSeq });
+        if (L.length > 420) L.splice(0, L.length - 420);
     }
 
     /// Tear down all real-device telemetry so the app can fall to STANDBY (or a
@@ -121,6 +134,11 @@ export function createRealDevice(session) {
         ingesting = false;   // stop consuming: no leave-path may keep refilling telemetry behind our back
         S.real = false;
         S.connected = false;
+        // REVIEW holds S: its buffers are the replay's now. Clear the live ones when REVIEW gives S back.
+        if (held) { clearOnRelease = true; return; }
+        wipeTelemetry();
+    }
+    function wipeTelemetry() {
         S.fix.valid = false;
         S.fix.type = 0;
         S.sats = [];
@@ -162,10 +180,10 @@ export function createRealDevice(session) {
         // A GSV debounce timer scheduled just before an unplug/disconnect can fire
         // after teardown; without this guard it would repopulate S.sats and the
         // trail/cn0 buffers with vanished-device satellites in STANDBY.
-        if (!S.connected || !S.real) return;
+        if (!replay && (!S.connected || !S.real)) return;
         const out = [];
-        const now = Date.now();
-        const tSec = Math.floor(now / 1000);
+        const nowMs = now();
+        const tSec = Math.floor(nowMs / 1000);
         const sampleCn0 = tSec !== lastCn0T; // one C/N0-history point per sat per whole second
         for (const sat of sats) {
             const c = sat.constellation;               // nmea CONSTELLATIONS entry (has .altitudeKm)
@@ -205,24 +223,24 @@ export function createRealDevice(session) {
             // rebuilds S.sats on every GSV frame (~1 Hz), so throttle to one point
             // per sat per 30 s (≈ the sim's 45-tick cadence) and cap at 40 to bound
             // memory and keep the trail a sane length.
-            if (sp && (now - (gtrailLast.get(key) || 0) >= 30000)) {
+            if (sp && (nowMs - (gtrailLast.get(key) || 0) >= 30000)) {
                 let gt = S.gtrails.get(key);
                 if (!gt) { gt = []; S.gtrails.set(key, gt); }
                 // t lets the renderers split the polyline at disconnect gaps instead of drawing
                 // a chord from the last pre-disconnect point to wherever the sat is now.
                 gt.push({ lat: sp.lat, lon: sp.lon, t: tSec });
                 if (gt.length > 40) gt.shift();
-                gtrailLast.set(key, now);
+                gtrailLast.set(key, nowMs);
             }
             // Polar az/el trail — mirrors sim.tick's cadence (1 pt / 30 s / sat, cap 180
             // ≈ 90 min). Without this, CONNECTED mode never accumulated sky trails at all:
             // the polar TRAILS layer and the heatmap's history field only worked in sim.
-            if (visible && (now - (trailLast.get(key) || 0) >= 30000)) {
+            if (visible && (nowMs - (trailLast.get(key) || 0) >= 30000)) {
                 let tr = S.trails.get(key);
                 if (!tr) { tr = []; S.trails.set(key, tr); }
                 tr.push({ t: tSec, az, el, cn0 });
                 if (tr.length > 180) tr.shift();
-                trailLast.set(key, now);
+                trailLast.set(key, nowMs);
             }
             // Per-sat C/N0 history for the "C/N0 over time" chart — mirrors
             // sim.tick's cn0Hist (one point/sec/sat, cap 1800 ≈ 30 min).
@@ -267,7 +285,7 @@ export function createRealDevice(session) {
         const P = S.pps;
         // History timestamps are in WHOLE SECONDS across the app (sim tick floors
         // ms→s; the charts compare against a seconds `now` and a seconds span).
-        const ts = Math.floor(Date.now() / 1000);
+        const ts = Math.floor(now() / 1000);
 
         // missed edges: only count small forward jumps (a reboot/reorder just resyncs)
         if (ppsLastSeq !== null) {
@@ -328,9 +346,9 @@ export function createRealDevice(session) {
         // does NOT close the browser WebSocket (pccd just retries the serial port),
         // so ws.onclose never fires and the app stays CONNECTED on frozen telemetry.
         // Stamp every arriving line; onTick flips to a no-signal state if this ages out.
-        lastRxT = Date.now();
-        S.lastRxT = lastRxT;
+        lastRxT = now();
         if (held) return;   // REVIEW owns S: the clock is still alive (watchdog stamped), its telemetry waits
+        S.lastRxT = lastRxT;
 
         // GGA — position + fix quality → S.fix
         if (/GGA/.test(text) && text.startsWith('$')) {
@@ -344,7 +362,7 @@ export function createRealDevice(session) {
                     // are dead on a live clock — S.fixAgeT was only ever set by the
                     // simulator, so a real device showed '—' forever and could inherit
                     // a prior sim's timestamp. Stamp it here, exactly as sim.tick does.
-                    S.fixAgeT = Date.now();
+                    S.fixAgeT = now();
                     // GGA's quality field (1=GPS, 2=DGPS, 4=RTK…) is not the
                     // GSA 2D/3D flag; any positive quality means we have a
                     // position. Match the sim's convention of type 3 for a
@@ -383,7 +401,7 @@ export function createRealDevice(session) {
                 // are metres of the fix off the observer origin (the inverse of the
                 // sim's forward projection) — the scatter then shows GPS wander about
                 // S.obs. PDOP/VDOP come from GSA (below); HDOP from GGA.
-                const tSec = Math.floor(Date.now() / 1000);
+                const tSec = Math.floor(now() / 1000);
                 if (tSec !== lastHistT) {
                     lastHistT = tSec;
                     if (S.fix.valid && Array.isArray(S.posHist)) {
@@ -426,7 +444,7 @@ export function createRealDevice(session) {
             const r = parseRMC(text);
             if (r && r.active && r.utc instanceof Date && Number.isFinite(r.utc.getTime())) {
                 S.deviceTimeMs = r.utc.getTime();
-                S.deviceTimeAtHost = Date.now(); // host clock when this device second landed → for the time mirror
+                S.deviceTimeAtHost = now(); // host clock when this device second landed → for the time mirror
             }
             return;
         }
@@ -451,7 +469,7 @@ export function createRealDevice(session) {
                 const tc = (S.tc = S.tc || { hse: null, lse: null, state: '', die: null, at: 0 });
                 if (r.kind === 'H') tc.hse = { n: r.n, tmin: r.tmin, tmax: r.tmax, b: r.b, c: r.c, valid: r.valid };
                 else tc.lse = { n: r.n, a: r.a, b: r.b, c: r.c, valid: r.valid };
-                tc.at = Math.floor(Date.now() / 1000);
+                tc.at = Math.floor(now() / 1000);
             }
             return;
         }
@@ -461,7 +479,7 @@ export function createRealDevice(session) {
         // the NEXT TRANSITS readout can age the countdowns between emissions.
         if (text.startsWith('$PMSTAR,')) {
             const r = parsePMSTAR(text);
-            if (r) S.star = { ...r, at: Math.floor(Date.now() / 1000) };
+            if (r) S.star = { ...r, at: Math.floor(now() / 1000) };
             return;
         }
 
@@ -477,7 +495,7 @@ export function createRealDevice(session) {
                 sb[r.kind] = r;
                 sb.hist.push(r);
                 if (sb.hist.length > 64) sb.hist.shift();
-                sb.at = Math.floor(Date.now() / 1000);
+                sb.at = Math.floor(now() / 1000);
             }
             return;
         }
@@ -488,7 +506,7 @@ export function createRealDevice(session) {
         // lets readers drop it once the stream stops, so a silent clock never shows a frozen rail.
         if (text.startsWith('$PMBRIT,')) {
             const r = parsePMBRIT(text);
-            if (r) S.bright = { ...r, at: Date.now() };
+            if (r) S.bright = { ...r, at: now() };
             return;
         }
 
@@ -500,12 +518,57 @@ export function createRealDevice(session) {
                 const tc = (S.tc = S.tc || { hse: null, lse: null, state: '', die: null, at: 0 });
                 tc.die = [+m[1], +m[2]];
                 tc.state = m[3];
-                tc.at = Math.floor(Date.now() / 1000);
+                tc.at = Math.floor(now() / 1000);
             }
             return;
         }
 
         // Everything else ($PMTX ACKs, boot banners, plain text): logged only.
+    }
+
+    /// The telemetry a fresh connection starts from — the sim's convincing leftovers cleared, every
+    /// history empty, the per-device readings (tempcomp model, transits, ladders, dimmer) absent until
+    /// THIS device sends them. connect() and a replay's start share it.
+    function freshTelemetry() {
+        S.sats = [];
+        S.fix.valid = false;
+        S.fix.type = 0;
+        S.fix.sats = 0;
+        // Stale sim ground tracks / trails / chart history must not linger.
+        S.gtrails.clear(); S.trails.clear(); gtrailLast.clear(); trailLast.clear();
+        if (S.cn0Hist && S.cn0Hist.clear) S.cn0Hist.clear();
+        if (Array.isArray(S.posHist)) S.posHist.length = 0;
+        if (Array.isArray(S.dopHist)) S.dopHist.length = 0;
+        if (Array.isArray(S.fixHist)) S.fixHist.length = 0;
+        lastHistT = 0; lastCn0T = 0;
+        // SESSION recorder starts at zero for THIS connection — a prior sim's counts
+        // must never headline a real session — and Started means connect, not page load.
+        S.passes = 0; S.obsCount = 0; S.peakEl = 0;
+        if (S.bins && S.bins.clear) S.bins.clear();
+        risenReal.clear();
+        obsSeeded = false;
+        S.deviceTimeMs = 0;             // no device time until an RMC lands
+
+        // Fresh timing state: the sim leaves S.pps populated with convincing
+        // fake scalars (31.2 °C, SEQ 4211, a ppm). Clear the history AND those
+        // scalars so nothing stale shows before real $PMTXTS lands (the Timing
+        // KPIs also dash until S.pps.list fills — see rvTiming).
+        S.pps.list = [];
+        S.pps.samples = [];
+        S.pps.tempHist = []; S.pps.tempT = 0;
+        S.pps.dropped = 0;
+        S.pps.flags = 0;
+        S.pps.temp = 0; S.pps.ppm = 0; S.pps.seq = 0;
+        S.pps.calerr = 0; S.pps.sincecal = 0; S.pps.lastEdge = 0;
+        S.pps.phaseRef = null; S.pps.msFolds = 0;   // fresh fold state per device session
+        ppsLastSeq = null;
+        ppsLastCalerr = null;
+        S.tc = null;   // learned model belongs to ONE device — never show a previous clock's
+        S.star = null; // same rule for the transit list and stability ladders: they arrive
+        S.stab = null; // fresh from THIS device or not at all
+        S.bright = null;
+        S.fixAgeT = 0; // no fix seen yet this session — FIX AGE dashes until a valid GGA lands
+        S.lastRxT = 0; lastRxT = 0;   // watchdog clock starts when the first line arrives
     }
 
     return {
@@ -521,6 +584,8 @@ export function createRealDevice(session) {
         refreshBridgeApp(onLine) { return BridgeClock.refreshApp(onLine); },// pull the latest web app from Pages (no relaunch)
         fetchBridgeHistory(params) { return BridgeClock.fetchHistory(params); },   // flight-recorder readout
         fetchBridgeRaw(n) { return BridgeClock.fetchRaw(n); },                       // pre-gate raw samples (SIGNAL PATH real source)
+        fetchBridgeStream(from, to) { return BridgeClock.fetchStream(from, to); },   // the full stream (REVIEW's replay)
+        bridgeUrl(path) { return BridgeClock.url(path); },
 
         // RX-staleness watchdog (bridge parity). The direct Web Serial transport detects an unplug
         // two ways (navigator.serial 'disconnect' + readLoop end). The bridge transport only reacts
@@ -555,7 +620,8 @@ export function createRealDevice(session) {
                 throw new Error('No transport: this browser lacks Web Serial and the pccd bridge is not running. Start pccd, or use Chrome/Edge.');
             clock = bridge ? new BridgeClock() : new Clock();
             ingesting = true;   // consume from the first sentence (S.real is only set at the end of connect())
-            clock.addEventListener('line', (e) => this.ingestLine(e.detail));
+            clock.addEventListener('line', (e) => { if (onTraffic) onTraffic(Date.now(), e.detail, false); this.ingestLine(e.detail); });
+            clock.addEventListener('tx', (e) => { if (onTraffic) onTraffic(Date.now(), e.detail, true); });
             clock.addEventListener('status', (e) => {
                 const d = e.detail || {};
                 S.connected = !!d.connected;
@@ -601,53 +667,16 @@ export function createRealDevice(session) {
             // start from the device's honest state and fill in as sentences land.
             S.real = true;
             S.connected = true;
-            S.sats = [];
-            S.fix.valid = false;
-            S.fix.type = 0;
-            S.fix.sats = 0;
-            // Stale sim ground tracks / trails / chart history must not linger.
-            S.gtrails.clear(); S.trails.clear(); gtrailLast.clear(); trailLast.clear();
-            if (S.cn0Hist && S.cn0Hist.clear) S.cn0Hist.clear();
-            if (Array.isArray(S.posHist)) S.posHist.length = 0;
-            if (Array.isArray(S.dopHist)) S.dopHist.length = 0;
-            if (Array.isArray(S.fixHist)) S.fixHist.length = 0;
-            lastHistT = 0; lastCn0T = 0;
-            // SESSION recorder starts at zero for THIS connection — a prior sim's counts
-            // must never headline a real session — and Started means connect, not page load.
-            S.passes = 0; S.obsCount = 0; S.peakEl = 0;
-            if (S.bins && S.bins.clear) S.bins.clear();
-            risenReal.clear();
+            freshTelemetry();
             S.t0 = Math.floor(Date.now() / 1000);
             // Allow one observer seed from the device's first fix; remember the current observer
             // (and whether it was a deliberate user pin) so disconnect() can restore it. Clearing
             // obsUserSet here is essential: without it a manual pin set earlier (e.g. in a prior
             // simulation) would block the real device's own fix from ever seeding the observer.
-            obsSeeded = false;
             obsAtConnect = { lat: S.obs.lat, lon: S.obs.lon, userSet: S.obsUserSet };
             S.obsUserSet = false;
             S.realConnectedAt = Date.now(); // to distinguish "still connecting" from "not a clock"
-            S.deviceTimeMs = 0;             // no device time until an RMC lands
             S.portLabel = clock.describe(); // honest USB id — no invented cu.usbmodem path
-
-            // Fresh timing state: the sim leaves S.pps populated with convincing
-            // fake scalars (31.2 °C, SEQ 4211, a ppm). Clear the history AND those
-            // scalars so nothing stale shows before real $PMTXTS lands (the Timing
-            // KPIs also dash until S.pps.list fills — see rvTiming).
-            S.pps.list = [];
-            S.pps.samples = [];
-            S.pps.dropped = 0;
-            S.pps.flags = 0;
-            S.pps.temp = 0; S.pps.ppm = 0; S.pps.seq = 0;
-            S.pps.calerr = 0; S.pps.sincecal = 0; S.pps.lastEdge = 0;
-            S.pps.phaseRef = null; S.pps.msFolds = 0;   // fresh fold state per device session
-            ppsLastSeq = null;
-            ppsLastCalerr = null;
-            S.tc = null;   // learned model belongs to ONE device — never show a previous clock's
-            S.star = null; // same rule for the transit list and stability ladders: they arrive
-            S.stab = null; // fresh from THIS device or not at all
-            S.bright = null;
-            S.fixAgeT = 0; // no fix seen yet this session — FIX AGE dashes until a valid GGA lands
-            S.lastRxT = 0; lastRxT = 0;   // watchdog clock starts when the first line arrives
         },
 
         async disconnect() {
@@ -667,7 +696,41 @@ export function createRealDevice(session) {
         beginIngest() { ingesting = true; },   // arm consumption without a transport (selfTest; mirrors connect())
         // REVIEW rebuilds S from a recording; while it does, a connected clock's lines must not write into
         // that frame (live GSV replaced the reviewed sky; live fixes joined a week-old position history).
-        setHold(v) { held = !!v; },
+        setHold(v) {
+            held = !!v;
+            if (held) return;
+            // Back to live: the clock left meanwhile → its buffers go now; else the traffic that came in
+            // during REVIEW joins the monitor and the RX clock catches up.
+            if (clearOnRelease) { clearOnRelease = false; heldLog = []; wipeTelemetry(); return; }
+            if (heldLog.length) { S.nmeaLog.push(...heldLog); if (S.nmeaLog.length > 420) S.nmeaLog.splice(0, S.nmeaLog.length - 420); heldLog = []; }
+            if (lastRxT) S.lastRxT = lastRxT;
+        },
+        // The browser recorder's tap: fn(ms, text, tx) for every line received and command sent.
+        setTrafficTap(fn) { onTraffic = typeof fn === 'function' ? fn : null; },
+
+        // ---- REPLAY: recorded lines through this ingest, on the recording's clock (opts.replay) ----
+        // replayBegin starts a fresh frame at `ms`, the way a connect does; replayLine feeds one recorded
+        // line (tx: a command written to the clock, shown in the monitor only); replayTo advances the
+        // clock with no line, so a GSV frame closed just before the playhead still lands.
+        replayBegin(ms) {
+            vNow = ms; gsvDue = 0; ingesting = true;
+            gsv._buffers.clear(); gsv.closedFrame = false;
+            freshTelemetry();
+            S.t0 = Math.floor(ms / 1000);
+            S.obsUserSet = false;   // like a connect: the recorded clock's first fix sets the observer
+        },
+        replayLine(ms, text, tx) {
+            if (gsvDue && ms >= gsvDue) { vNow = gsvDue; gsvDue = 0; gsv._flush(); }
+            vNow = ms;
+            if (tx) { log(String(text).trim(), false, 'tx'); return; }
+            ingestLine(text);
+            if (gsv.closedFrame) { gsv.closedFrame = false; gsvDue = ms + 100; }
+        },
+        replayTo(ms) {
+            if (gsvDue && ms >= gsvDue) { vNow = gsvDue; gsvDue = 0; gsv._flush(); }
+            if (ms > vNow) vNow = ms;
+        },
+        replayNow() { return vNow; },
 
         send(cmd) { clock && clock.send(cmd); },
 

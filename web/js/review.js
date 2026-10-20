@@ -1,76 +1,47 @@
-// review.js — the REWIND / SCRUB renderer over the persisted telemetry log.
+// review.js — the REWIND / SCRUB timeline over the recorder.
 //
-// Draws one canvas: a connectivity strip (when the clock was streaming vs a
-// CLOCK DISCONNECTED gap) above a few decimated tracks — temperature, sats,
-// clock skew — all sharing one time axis with a draggable playhead. This is
-// where decimate() earns its keep: a multi-hour window is downsampled to ~1
-// point per pixel before it ever touches the canvas.
+// Draws one canvas: a connectivity strip (when the clock was streaming vs a CLOCK DISCONNECTED gap)
+// above a few decimated overview tracks (temperature, satellites, oscillator drift), all on one time
+// axis with a draggable playhead. The tracks come from the summary tier (pccd's /history rows, or
+// the browser's 1-minute rollups); the frame at the playhead comes from replaying the stream
+// (streamreplay.js), so the timeline only has to say where to look. decimate() keeps a multi-day
+// span at about one point per pixel.
 //
-// prepReview() turns raw log rows + session boundaries into a scrub model;
-// drawReview() paints it; sampleAt()/tAtX()/xAtT() drive the interaction.
+// prepReview() turns runs + track points into a scrub model; drawReview() paints it; tAtX()/xAtT()
+// drive the interaction.
 
 import { decimate } from './decimate.js?v=1';
 
 const PAD_L = 8, PAD_R = 8, PAD_T = 6, PAD_B = 18;
 const STRIP_H = 20;                       // connectivity strip height
-const GAP_S = 3;                          // a run of missing seconds this long = a disconnected gap
 
-// (t, v) pairs where the metric exists — computed once per model, not on every scrub frame.
-function trackPts(rows, get) {
-  const pts = [];
-  for (const r of rows) { const v = get(r); if (v != null && Number.isFinite(v)) pts.push({ t: r.t, v }); }
-  return pts;
-}
+export const TRACK_DEFS = [
+  { key: 'temp', label: 'TEMPERATURE', unit: '°C', color: 'var(--gal)' },
+  { key: 'sats', label: 'SATELLITES', unit: '', color: 'var(--gps)' },
+  { key: 'ppm', label: 'DRIFT', unit: ' ppm', color: 'var(--led)' },
+];
 
-// Build the scrub model from sessions + their samples. Segments mark connected
-// spans (from actual sample runs) and the gaps between them.
-export function prepReview(sessions, samples) {
-  samples = (samples || []).slice().sort((a, b) => a.t - b.t);
+// The scrub model. runs: [{ t0, t1 }] (s) when the clock was streaming, oldest first; points:
+// { temp: [{t,v}], sats: [...], ppm: [...] }; the span [tMin, tMax] (s). Segments are the runs and
+// the gaps between (and before / after them inside the span).
+export function prepReview({ tMin, tMax, runs = [], points = {}, source = '' }) {
+  if (!(tMin < tMax)) tMax = tMin + 1;
   const segments = [];
-  if (samples.length) {
-    let start = samples[0].t, prev = samples[0].t;
-    for (let i = 1; i < samples.length; i++) {
-      const t = samples[i].t;
-      if (t - prev > GAP_S) { segments.push({ t0: start, t1: prev, connected: true }); segments.push({ t0: prev, t1: t, connected: false }); start = t; }
-      prev = t;
-    }
-    segments.push({ t0: start, t1: prev, connected: true });
+  let at = tMin;
+  for (const r of runs) {
+    const a = Math.max(tMin, r.t0), b = Math.min(tMax, r.t1);
+    if (!(b > a)) continue;
+    if (a > at) segments.push({ t0: at, t1: a, connected: false });
+    segments.push({ t0: a, t1: b, connected: true });
+    at = b;
   }
-  // span: the 1 Hz rows' extent. Sessions outlive those rows (sessions are kept for the KEEP period,
-  // 1 Hz rows for a day), so a session's declared bounds count only where they meet the rows.
-  let tMin = Infinity, tMax = -Infinity;
-  if (samples.length) {
-    const a = samples[0].t, b = samples[samples.length - 1].t;
-    tMin = a; tMax = b;
-    for (const s of (sessions || [])) {
-      const c = s.connectedAt / 1000, d = s.disconnectAt / 1000;
-      if (s.connectedAt && c >= a - 60 && c < tMin) tMin = c;
-      if (s.disconnectAt && d <= b + 60 && d > tMax) tMax = d;
-    }
-  }
-  if (!(tMin < tMax)) { tMin = samples.length ? samples[0].t : 0; tMax = tMin + 1; }
-  const tracks = TRACKS.map((tr) => ({ ...tr, pts: trackPts(samples, tr.get) }));
-  return { samples, segments, tracks, tMin, tMax, playT: tMax, _plot: null };
-}
-
-// Nearest sample to time t (seconds). Returns null if none within `maxGap` s.
-export function sampleAt(R, t, maxGap = 5) {
-  const a = R.samples; if (!a.length) return null;
-  let lo = 0, hi = a.length - 1;
-  while (lo < hi) { const m = (lo + hi) >> 1; if (a[m].t < t) lo = m + 1; else hi = m; }
-  const c = a[lo], p = a[Math.max(0, lo - 1)];
-  const best = Math.abs(c.t - t) <= Math.abs(p.t - t) ? c : p;
-  return Math.abs(best.t - t) <= maxGap ? best : null;
+  if (at < tMax) segments.push({ t0: at, t1: tMax, connected: false });
+  const tracks = TRACK_DEFS.map((tr) => ({ ...tr, pts: (points[tr.key] || []).filter((p) => p.v != null && Number.isFinite(p.v)).sort((a, b) => a.t - b.t) }));
+  return { source, runs, segments, tracks, tMin, tMax, playT: tMax, _plot: null };
 }
 
 export function xAtT(R, t) { const p = R._plot; return p ? p.x0 + (t - R.tMin) / (R.tMax - R.tMin) * p.w : 0; }
 export function tAtX(R, x) { const p = R._plot; if (!p) return R.tMin; return R.tMin + Math.max(0, Math.min(1, (x - p.x0) / p.w)) * (R.tMax - R.tMin); }
-
-const TRACKS = [
-  { key: 'temp', label: 'TEMPERATURE', unit: '°C', get: (r) => (r.pps ? r.pps.temp : null), color: 'var(--gal)' },
-  { key: 'sats', label: 'SATELLITES', unit: '', get: (r) => (r.fix ? r.fix.sats : (r.sats ? r.sats.length : null)), color: 'var(--gps)' },
-  { key: 'skew', label: 'CLOCK SKEW', unit: 'µs', get: (r) => (r.pps ? r.pps.phaseUs : null), color: 'var(--led)' },
-];
 
 export function drawReview(canvas, R, opts = {}) {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -133,19 +104,23 @@ export function drawReview(canvas, R, opts = {}) {
     }
     g.stroke();
     g.fillStyle = C('var(--txt3)'); g.textAlign = 'right';
-    g.fillText(hi.toFixed(tr.key === 'sats' ? 0 : 1) + tr.unit, x0 + w - 2, top + 8);
-    g.fillText(lo.toFixed(tr.key === 'sats' ? 0 : 1), x0 + w - 2, top + trackH - 2);
+    const dp = tr.key === 'sats' ? 0 : tr.key === 'ppm' ? 2 : 1;
+    g.fillText(hi.toFixed(dp) + tr.unit, x0 + w - 2, top + 8);
+    g.fillText(lo.toFixed(dp), x0 + w - 2, top + trackH - 2);
     g.textAlign = 'left';
   }
 
   // --- time-axis ticks ---
   g.fillStyle = C('var(--txt3)'); g.font = '8px var(--mono, monospace)'; g.textAlign = 'center';
+  // UTC, like the readout: hours under three days (the date where it changes), dates above.
   const span = R.tMax - R.tMin, ticks = 5;
+  let lastDay = null;
   for (let i = 0; i <= ticks; i++) {
     const t = R.tMin + span * i / ticks, px = X(t);
-    const d = new Date(t * 1000);
-    const lbl = span > 86400 ? (d.getMonth() + 1) + '/' + d.getDate() : String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-    g.fillText(lbl, Math.max(x0 + 12, Math.min(x0 + w - 12, px)), cssH - 6);
+    const iso = new Date(t * 1000).toISOString(), day = iso.slice(5, 10).replace('-', '/'), hm = iso.slice(11, span < 600 ? 19 : 16);
+    const lbl = span > 3 * 86400 ? day : (day !== lastDay && i > 0 ? day + ' ' : '') + hm;
+    lastDay = day;
+    g.fillText(lbl, Math.max(x0 + 22, Math.min(x0 + w - 22, px)), cssH - 6);
   }
 
   // --- playhead ---

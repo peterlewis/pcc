@@ -15,7 +15,7 @@
 // layer (skytrailstore.js) and the renderers (polar.js / globe.js) consume
 // them.
 
-import { CONSTELLATIONS } from './nmea.js?v=2';
+import { CONSTELLATIONS } from './nmea.js?v=3';
 
 // MARK: - Observation record -----------------------------------------------
 
