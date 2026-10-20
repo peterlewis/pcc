@@ -177,6 +177,9 @@ export class GSVBuffer {
         }
 
         if (msgNum === numMsg && this.onSatellites) {
+            // debounceMs < 0: the owner runs the debounce on its own clock (a replay keeps recorded
+            // time, not wall time) — mark the frame closed and let it call _flush().
+            if (this.debounceMs < 0) { this.closedFrame = true; return; }
             clearTimeout(this._debounceTimer);
             this._debounceTimer = setTimeout(() => this._flush(), this.debounceMs);
         }

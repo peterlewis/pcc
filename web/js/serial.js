@@ -154,6 +154,7 @@ export class Clock extends EventTarget {
         this._rawSend(sanitised + '\r\n').catch(err => {
             this.dispatchEvent(new CustomEvent('error', { detail: err }));
         });
+        this.dispatchEvent(new CustomEvent('tx', { detail: sanitised }));   // the record keeps commands too
     }
 
     async _rawSend(text) {
@@ -262,6 +263,17 @@ export class BridgeClock extends EventTarget {
             return o;
         });
     }
+
+    /// The daemon's full-stream record for [from, to] (epoch s, at most 24 h): the lines as kept,
+    /// `<epoch_ms> <line>` and `<epoch_ms> > <command>` (GET /history?series=stream). REVIEW's replay
+    /// source. Resolves the text; throws on HTTP failure.
+    static async fetchStream(from, to) {
+        const r = await fetch(`http://${BridgeClock.authority()}/history?series=stream&from=${from}&to=${to}`, { cache: 'no-store' });
+        if (!r.ok) throw new Error('stream HTTP ' + r.status);
+        return r.text();
+    }
+    /// An absolute URL on the daemon (for downloads the browser streams to disk).
+    static url(path) { return `http://${BridgeClock.authority()}${path}`; }
 
     /// Fetch the daemon's in-memory pre-gate raw offset ring (GET /raw). Returns [{t, raw}] (raw in
     /// microseconds) oldest->newest, the shape prefilter.runPrefilter consumes. Throws on HTTP failure.
@@ -431,7 +443,9 @@ export class BridgeClock extends EventTarget {
         }).join('');
         try { this.ws.send(sanitised); } catch (err) {
             this.dispatchEvent(new CustomEvent('error', { detail: err }));
+            return;
         }
+        this.dispatchEvent(new CustomEvent('tx', { detail: sanitised }));
     }
 
     requestNMEA() {

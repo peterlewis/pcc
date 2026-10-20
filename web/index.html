@@ -8,7 +8,7 @@
 <meta name="description" content="Precision Clock Mk IV companion — emulator, GNSS sky, and GPS timing analytics. Static, offline-capable.">
 <link rel="stylesheet" href="css/base.css?v=96">
 <link rel="stylesheet" href="css/pcc-tokens.css?v=5">
-<link rel="stylesheet" href="css/pcc-components.css?v=13">
+<link rel="stylesheet" href="css/pcc-components.css?v=14">
 </head>
 <body>
 <div id="root">
@@ -132,6 +132,7 @@
       <sc-if value="{{appStaleOn}}" hint-placeholder-val="{{false}}">
         <button onClick="{{onAppReload}}" title="New build served. Reload to run it." style="align-self:center;margin-right:12px;font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.08em;color:var(--amber,#e8a64a);background:transparent;border:1px solid var(--amber,#e8a64a);border-radius:var(--r-1);padding:6px 10px;cursor:pointer">APP UPDATED · RELOAD</button>
       </sc-if>
+      <button onClick="{{onRecLamp}}" class="reclamp" data-state="{{recLampState}}" title="Recorder"><span class="reclamp__dot"></span>{{recLamp}}</button>
       <button onClick="{{onToggleDrawer}}" title="Serial monitor" style="{{drawerBtnStyle}}"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 3.5L5 6 2 8.5M6.5 9h4"></path></svg>MONITOR</button>
       <div style="display:flex;align-items:center;padding:0 16px;border-left:1px solid var(--line-soft)">
         <div class="seg">
@@ -178,7 +179,7 @@
       <div style="flex:none;display:flex;align-items:center;gap:12px;padding:7px 16px;background:var(--beta-fill);border-bottom:1px solid var(--beta)">
         <span style="width:8px;height:8px;flex:none;border-radius:50%;background:var(--beta);box-shadow:0 0 8px var(--beta)"></span>
         <span style="font-family:var(--mono);font-size:var(--fs-label);font-weight:700;letter-spacing:.1em;color:var(--beta)">REVIEWING HISTORY</span>
-        <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.06em;color:var(--txt2)">{{reviewBannerTime}}</span>
+        <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.06em;color:var(--txt2)">{{reviewBannerTime}} · {{reviewBannerSrc}}</span>
         <span class="meta meta--wide">ALL ROOMS SHOW THIS TIME</span>
         <span class="spacer"></span>
         <button onClick="{{onExitReview}}" style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.08em;color:var(--beta);background:transparent;border:1px solid var(--beta);border-radius:var(--r-1);padding:5px 12px;cursor:pointer">EXIT TO LIVE</button>
@@ -1780,28 +1781,53 @@
 
         <sc-if value="{{sec_export}}" hint-placeholder-val="{{false}}">
           <div data-screen-label="Export" style="animation:pcc-in var(--t-room) var(--ease-ui) both;padding:14px;display:grid;grid-template-columns:minmax(320px,1fr) minmax(380px,1.4fr);gap:14px;align-items:start;max-width:1180px">
-            <section style="background:var(--panel);border:1px solid var(--line);grid-column:1/-1">
-              <div style="display:flex;align-items:center;gap:9px;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)">
-                <span class="lbl">TELEMETRY LOG — PERSISTENT</span>
-                <span class="badge">BETA</span>
-                <span style="margin-left:auto;font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.1em;color:var(--txt3)">INDEXEDDB · CONNECTED ONLY</span>
-              </div>
-              <div style="padding:14px var(--pad-panel-x) var(--pad-panel-x);display:flex;flex-direction:column;gap:12px">
-                <button onClick="{{onTelLog}}" style="display:flex;align-items:center;gap:10px;background:transparent;border:0;padding:0;cursor:pointer;align-self:flex-start;font-family:var(--sans);font-size:var(--fs-data);color:var(--txt)"><span style="{{cbTelLog}}"></span>LOG MY CLOCK'S DATA WHILE CONNECTED</button>
-                <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.04em;color:var(--txt3);line-height:1.6;max-width:640px">1 Hz FOR 24 H, 1-MIN SUMMARY FOR THE KEEP PERIOD. PAUSED WHILE pccd RECORDS. SIMULATION IS NOT LOGGED.</span>
-                <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding-top:2px;border-top:1px solid var(--line)">
-                  <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.04em;color:var(--txt2)">{{telStat}}</span>
-                  <span style="flex:1;min-width:20px"></span>
-                  <span style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.1em;color:var(--txt3)">KEEP</span>
-                  <select onChange="{{onTelRet}}" value="{{telRetVal}}" style="font-family:var(--mono);font-size:var(--fs-label);background:var(--well);border:1px solid var(--line2);color:var(--txt);padding:5px 7px">
-                    <option value="86400">1 DAY</option>
-                    <option value="604800">7 DAYS</option>
-                    <option value="2592000">30 DAYS</option>
-                    <option value="31536000">365 DAYS</option>
-                    <option value="315360000">FOREVER</option>
-                  </select>
-                  <button onClick="{{onTelExport}}" style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.06em;color:var(--txt);background:var(--well);border:1px solid var(--line2);padding:6px 12px;cursor:pointer" style-hover="border-color:var(--txt3)">EXPORT CSV</button>
-                  <button onClick="{{onTelClear}}" style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.06em;color:var(--none);background:transparent;border:1px solid var(--none);border-radius:var(--r-1);padding:6px 12px;cursor:pointer">CLEAR LOG</button>
+            <!-- RECORDER — one record of the clock: pccd's flight recorder when it runs (the full stream
+                 30 d + summaries), else this browser's log (the stream 24 h + 1-minute summaries). The
+                 header's REC lamp opens this panel. -->
+            <section class="mod" data-recorder="1" style="grid-column:1/-1">
+              <div class="mod__strip">RECORDER<span class="mod__stat mod__stat--case" data-state="{{recStatState}}">{{recStat}}</span></div>
+              <div class="mod__field mod__field--col">
+                <div class="well">
+                  <div class="kv"><span class="kv__k">SOURCE</span><span class="kv__v">{{recSource}}</span></div>
+                  <div class="kv"><span class="kv__k">STREAM</span><span class="kv__v">{{recStream}}</span></div>
+                  <div class="kv"><span class="kv__k">SUMMARY</span><span class="kv__v">{{recSummary}}</span></div>
+                  <sc-if value="{{recPccd}}" hint-placeholder-val="{{false}}">
+                    <div class="kv"><span class="kv__k">KEEP</span><span class="kv__v">{{recKeep}}</span></div>
+                  </sc-if>
+                </div>
+                <sc-if value="{{recBrowser}}" hint-placeholder-val="{{true}}">
+                  <div class="ctl">
+                    <button onClick="{{onTelLog}}" class="cbtn"><span style="{{cbTelLog}}"></span>LOG MY CLOCK'S DATA</button>
+                    <span class="spacer"></span>
+                    <span class="ctl__k">KEEP SUMMARY</span>
+                    <select class="inp" onChange="{{onTelRet}}" value="{{telRetVal}}">
+                      <option value="86400">1 DAY</option>
+                      <option value="604800">7 DAYS</option>
+                      <option value="2592000">30 DAYS</option>
+                      <option value="31536000">365 DAYS</option>
+                      <option value="315360000">FOREVER</option>
+                    </select>
+                  </div>
+                </sc-if>
+                <div class="ctl">
+                  <span class="ctl__k">EXPORT</span>
+                  <sc-if value="{{recPccd}}" hint-placeholder-val="{{false}}">
+                    <span class="ctl">
+                      <sc-if value="{{recHasStream}}" hint-placeholder-val="{{true}}"><button class="btn" onClick="{{onRecNmea}}" title="The stream as plain NMEA">NMEA</button></sc-if>
+                      <button class="btn" onClick="{{onRecCsv}}" title="pccd timing rows">CSV</button>
+                      <button class="btn" onClick="{{onRecStable32}}" title="Fractional frequency, 1 s">STABLE32</button>
+                      <button class="btn" onClick="{{onRecChrony}}" title="refclocks.log layout">CHRONY</button>
+                    </span>
+                  </sc-if>
+                  <sc-if value="{{recBrowser}}" hint-placeholder-val="{{true}}">
+                    <span class="ctl">
+                      <button class="btn" onClick="{{onRecNmeaBrowser}}" title="The stream as plain NMEA">NMEA</button>
+                      <button class="btn" onClick="{{onRecCsvBrowser}}" title="One row a minute">CSV</button>
+                      <button class="btn btn--danger" onClick="{{onTelClear}}">CLEAR LOG</button>
+                    </span>
+                  </sc-if>
+                  <span class="spacer"></span>
+                  <button class="btn btn--primary" aria-pressed="{{recReviewOn}}" onClick="{{onRecReview}}">{{recReviewLabel}}</button>
                 </div>
               </div>
             </section>
@@ -1809,7 +1835,8 @@
               <div style="display:flex;align-items:center;gap:9px;height:27px;padding:0 11px;background:var(--strip);border-bottom:1px solid var(--line)">
                 <span class="lbl">REWIND · SCRUB</span>
                 <span class="badge">BETA</span>
-                <span style="margin-left:auto;font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.04em;color:var(--face-led,#ff3b2e)">{{rvTime}}</span>
+                <span class="lbl lbl--nano" style="margin-left:auto">{{rvSrc}}</span>
+                <span style="font-family:var(--mono);font-size:var(--fs-label);letter-spacing:.04em;color:var(--face-led,#ff3b2e)">{{rvTime}}</span>
               </div>
               <div style="padding:14px var(--pad-panel-x) var(--pad-panel-x);display:flex;flex-direction:column;gap:11px">
                 <canvas ref="{{refReviewCanvas}}" style="width:100%;height:224px;display:block;cursor:crosshair;touch-action:none;background:var(--inset);border:1px solid var(--line)"></canvas>
@@ -1828,7 +1855,7 @@
                   <div style="background:var(--panel);padding:8px 11px"><div style="font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.12em;color:var(--txt3)">CLOCK SKEW</div><div style="font-family:var(--mono);font-size:var(--fs-data-sm);color:var(--txt);margin-top:3px">{{rvSkew}}</div></div>
                 </div>
                 <sc-if value="{{rvNoData}}" hint-placeholder-val="{{false}}">
-                  <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.04em;color:var(--txt3);line-height:1.6">No browser log yet. Connect the clock. With pccd, use SKY › ARCHIVE.</span>
+                  <span style="font-family:var(--mono);font-size:var(--fs-nano);letter-spacing:.04em;color:var(--txt3);line-height:1.6">No record yet. Connect the clock.</span>
                 </sc-if>
               </div>
             </section>
@@ -1919,6 +1946,6 @@
   </div>
 </div>
 </div>
-<script type="module" src="js/app-controller.js?v=296"></script>
+<script type="module" src="js/app-controller.js?v=297"></script>
 </body>
 </html>

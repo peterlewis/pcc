@@ -5,9 +5,10 @@
 import { DcLite } from './dc-lite.js?v=91';
 import * as ASTRO from './astro-fw.js?v=90';
 import * as DS from './datasources.js?v=90';
-import { TelemetryLog } from './telemetrylog.js?v=5';
-import { prepReview, drawReview, sampleAt, tAtX } from './review.js?v=2';
-import { subSatellitePoint } from './satpass.js?v=1';
+import { TelemetryLog } from './telemetrylog.js?v=6';
+import { prepReview, drawReview, tAtX } from './review.js?v=3';
+import { StreamReplay, FRAME_FIELDS, WINDOW_S as REPLAY_REACH_S } from './streamreplay.js?v=1';
+import { subSatellitePoint } from './satpass.js?v=2';
 import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=2';
 import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=8';
 import { REC as PF_REC, RANGE as PF_RANGE, modelStream, runPrefilter } from './prefilter.mjs?v=2';
@@ -127,11 +128,14 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=111'), import('./realdev.js?v=121'), import('./emu-driver.js?v=44'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=4')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=111'), import('./realdev.js?v=122'), import('./emu-driver.js?v=44'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=4')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.SB = SB;
       try { localStorage.removeItem('pccweb.cuckoo'); } catch (e) {}   // parked feature's persisted setting — clear the ghost
       this.session = SIM.createSession({ preroll: 1560 });
       this.realdev = RD.createRealDevice(this.session); // real Mk IV over Web Serial -> same session.S
+      // ONE RECORDER: with no pccd recorder behind this connection, the browser keeps the clock's stream
+      // (every line in, every command out, stamped as they happen) for REVIEW to replay.
+      this.realdev.setTrafficTap((ms, text, tx) => { if (this.browserRecords()) this.telemetryLog.recordLine(ms, text, tx); });
       // pccd bridge presence: probed at boot and refreshed every 15 s. Drives the Connection
       // room's live BRIDGE row and un-gates CONNECT DEVICE in browsers without Web Serial.
       const probeBridge = () => {
@@ -143,6 +147,8 @@ class Component extends DcLite {
         if (JSON.stringify(next) !== JSON.stringify(prev || null)) this.setState({ bridgeInfo: next });
         // A recorder came or went: the archive changes source (pccd's record, else the browser log).
         if (!!(next && next.history) !== !!(prev && prev.history)) this._arch = null;
+        // ...and REVIEW's: pccd's stream, else the browser's.
+        if (!!(next && next.history && next.history.stream) !== !!(prev && prev.history && prev.history.stream) && this.state.section === 'export') this.openReview();
         // The hosted page with a daemon on this machine: offer the local app, or go there if that is remembered.
         this.localHandoff(next);
         // The clock's drive appeared under a live bridge connection → config.txt reads itself, no click.
@@ -560,7 +566,7 @@ class Component extends DcLite {
   skyHistKey(kind) { return 'pccweb.skyHist.' + kind; }
   saveSkyHistory() {
     const S = this.session && this.session.S;
-    if (!S || !S.connected) return;
+    if (!S || !S.connected || this._reviewing) return;   // REVIEW's S is the replayed past, not this sky
     const kind = S.real ? 'real' : 'sim';
     const m2a = (m) => [...m.entries()];
     const payload = {
@@ -1936,7 +1942,7 @@ class Component extends DcLite {
     if (name === 'cont') { const H = this._hist || this.histSeries(); return CH.drawContinuity(el, T, H.fixHist, st.posWindow, nowS, S.ttff, S.t0, H.notePos); }
     // Standby draws the ABSENT state, never a leftover buffer — same rule (and reason) as rvTiming's
     // `standby` gate. adevData() already gates itself on appMode; these three read S.pps directly.
-    // REVIEW is the one legitimate "data with no live state": reconstructReview rebuilds S.pps from the
+    // REVIEW is the one legitimate "data with no live state": the stream replay rebuilds S.pps from the
     // recording for the scrubber, so it must NOT be blanked (appMode is 'standby' throughout playback).
     const sby = this.appMode() === 'standby' && !this._reviewing;
     if (name === 'phase') return CH.drawPhase(el, T, sby ? [] : S.pps.list, 1800, nowS, sby ? 0 : ((S.pps.flags & 2) ? 0 : (S.pps.lastEdge || 0)));
@@ -2102,9 +2108,9 @@ class Component extends DcLite {
   // null when there is none to trust: not connected, firmware without the key, or a stream that has
   // stopped (three missed seconds, the rack's own 'live' horizon).
   brightLive() {
-    if (this.appMode() !== 'connected') return null;
+    if (this.appMode() !== 'connected' && !this._reviewing) return null;
     const b = this.session && this.session.S && this.session.S.bright;
-    return b && Date.now() - b.at < 3000 ? b : null;
+    return b && this.viewNowMs() - b.at < 3000 ? b : null;
   }
   // Connected long enough that a first $PMBRIT is overdue (it follows the connect-time request within
   // a second), so its absence says something about the firmware rather than the link coming up.
@@ -2877,6 +2883,9 @@ class Component extends DcLite {
       // mistaken for live data. Carries the playhead time + a one-click exit back to live.
       reviewBannerOn: !!this._reviewing,
       reviewBannerTime: this._reviewing && this._review ? new Date(this._review.playT * 1000).toISOString().slice(0, 19).replace('T', ' ') + ' UTC' : '',
+      reviewBannerSrc: this._reviewing && this._review ? (this._review.source === 'pccd' ? 'pccd STREAM' : 'BROWSER LOG') : '',
+      // REC lamp: who keeps the clock's record right now. Opens the RECORDER panel.
+      ...(() => { const r = this.recorderState(); return { recLamp: r.lamp, recLampState: r.on ? 'live' : 'absent', onRecLamp: () => this.openRecorder() }; })(),
       onExitReview: () => this.exitReview(),
       entryVisible: st.entryVisible, docked: st.docked,
       // One clock, one home: it lives in the Display panel while you're on Display, and
@@ -2913,7 +2922,7 @@ class Component extends DcLite {
       portLabel: this.portName(S),
       fixTypeLabel: S ? (S.fix.type === 3 ? '3D' : S.fix.type >= 1 ? '2D' : 'NONE') : '—',
       satsLabel: S ? (S.fix.sats + '/' + S.sats.filter((x) => x.visible).length) : '—',
-      ageLabel: S && S.fix.valid && S.fixAgeT ? ((Date.now() - S.fixAgeT) / 1000).toFixed(1) + ' s' : '—',
+      ageLabel: S && S.fix.valid && S.fixAgeT ? ((this.viewNowMs() - S.fixAgeT) / 1000).toFixed(1) + ' s' : '—',
       ssThemeDark: this.seg(st.theme === 'dark', true), ssThemeLight: this.seg(st.theme === 'light', false),
       onThemeDark: () => this.setTheme('dark'), onThemeLight: () => this.setTheme('light'),
       appStaleOn: st.appStale, onAppReload: () => { try { location.reload(); } catch (e) {} },
@@ -3094,15 +3103,17 @@ class Component extends DcLite {
   // stream to be stale about and says so by saying nothing.
   rackFresh() {
     const mode = this.appMode();
-    if (mode === 'standby') return { rkFresh: 'na', rkAge: '' };
-    if (mode === 'simulation') return { rkFresh: 'live', rkAge: '' };
+    if (!this._reviewing) {   // REVIEW: the recorded stream's own age at the playhead
+      if (mode === 'standby') return { rkFresh: 'na', rkAge: '' };
+      if (mode === 'simulation') return { rkFresh: 'live', rkAge: '' };
+    }
     const S = this.session && this.session.S;
     const t = S && S.lastRxT;
     if (!t) return { rkFresh: 'dead', rkAge: 'NO DATA RECEIVED' };
-    const a = (Date.now() - t) / 1000;
+    const a = (this.viewNowMs() - t) / 1000;
     return {
       rkFresh: a < 3 ? 'live' : a < 15 ? 'stale' : 'dead',
-      rkAge: a < 2 ? 'LIVE'
+      rkAge: a < 2 ? (this._reviewing ? 'RECORDED' : 'LIVE')
         : a < 60 ? Math.round(a) + ' S AGO'
         : a < 3600 ? Math.round(a / 60) + ' MIN AGO'
         : 'LINK LOST',
@@ -3488,6 +3499,7 @@ class Component extends DcLite {
       return;
     }
     this._devCaps = null;   // unknown until this device's config.txt is read (assume full meanwhile)
+    if (this._reviewing) this.exitReview();   // a connect starts the live buffers afresh: give S back first
     try {
       await this.realdev.connect();
       try { localStorage.setItem('pcc.realDeviceSeen', '1'); } catch (e) { /* private mode */ }
@@ -3529,10 +3541,10 @@ class Component extends DcLite {
     return {
       cPort: this.portName(S),
       cDevice: conn ? (S.real ? 'Precision Clock Mk IV · STM32 CDC' : 'Emulated Mk IV · no hardware') : '—',
-      cSession: S ? this.fmtDur(Date.now() / 1000 - S.t0) : '—',
+      cSession: S ? this.fmtDur(this.viewNowMs() / 1000 - S.t0) : '—',
       cFix: S && S.fix.valid ? '3D · HDOP ' + S.fix.hdop.toFixed(2) : (conn ? (S.scenario === 'nofix' ? 'NO FIX' : 'ACQUIRING') : '—'),
       cSats: S && conn ? S.fix.sats + ' / ' + S.sats.filter((x) => x.visible).length : '—',
-      cAge: S && S.fix.valid && S.fixAgeT ? ((Date.now() - S.fixAgeT) / 1000).toFixed(1) + ' s' : '—',
+      cAge: S && S.fix.valid && S.fixAgeT ? ((this.viewNowMs() - S.fixAgeT) / 1000).toFixed(1) + ' s' : '—',
       // ---- THE RACK (Law 1) for DEVICE. What am I connected to, and is it healthy — stated before
       // the setup procedure rather than after it. Disconnected is the honest default: cells dash and
       // say what is missing, which is also the room's call to action.
@@ -3768,7 +3780,7 @@ class Component extends DcLite {
       // minutes-old fix looks exactly as confident as one drawn from a fresh one.
       ...(() => {
         const valid = !!(S.fix && S.fix.valid);
-        const ageS = (S.fix && S.fix.valid && S.fixAgeT) ? (Date.now() - S.fixAgeT) / 1000 : null;
+        const ageS = (S.fix && S.fix.valid && S.fixAgeT) ? (this.viewNowMs() - S.fixAgeT) / 1000 : null;
         const hd = valid ? S.fix.hdop : null;
         return {
           kRackSt: valid ? 'live' : 'absent',
@@ -3789,9 +3801,10 @@ class Component extends DcLite {
     // (realdev.js → S.star) when Connected; from the emulator's own predictor (S.simStar, refreshed
     // in onTick) when Simulating. The panel's source label (starSrc) marks which, so a SIMULATED
     // list is never mistaken for device data; Standby still synthesises nothing.
-    const star = S.real ? S.star : (this.appMode() === 'simulation' ? S.simStar : null);
-    const starSrc = S.real ? 'DEVICE' : (star ? 'SIMULATED' : '');
-    const nowS = Math.floor(Date.now() / 1000);
+    const devData = S.real || this._reviewing;   // REVIEW: the recorded clock's own list
+    const star = devData ? S.star : (this.appMode() === 'simulation' ? S.simStar : null);
+    const starSrc = this._reviewing ? 'RECORDED' : S.real ? 'DEVICE' : (star ? 'SIMULATED' : '');
+    const nowS = Math.floor(this.viewNowMs() / 1000);
     // Countdown formats: mm:ss under an hour, h:mm above (transit lists span hours).
     const eta = (s) => {
       s = Math.max(0, s);   // 0 = transiting now; holds there until the next $PMSTAR
@@ -3923,15 +3936,16 @@ class Component extends DcLite {
       // ("tc_dump = on" → $PMTXTC H/L + a state header, parsed in realdev.js → S.tc). Distinct from
       // the host fit above: this is what the CLOCK ITSELF has learned and steers holdover with.
       ...((() => {
-        const tc = S && S.real ? S.tc : null;
-        if (!S || !S.real) return { fwTcState: S && S.connected ? 'REAL HARDWARE ONLY' : 'CONNECT TO READ',
+        const dev = !!(S && (S.real || this._reviewing));   // REVIEW: the model the recorded clock reported
+        const tc = dev ? S.tc : null;
+        if (!dev) return { fwTcState: S && S.connected ? 'REAL HARDWARE ONLY' : 'CONNECT TO READ',
           fwTcStateC: 'var(--txt3)', fwTcHse: '—', fwTcLse: '—', fwTcRange: '—', fwTcMeta: '—' };
         if (!tc || (!tc.hse && !tc.lse)) return { fwTcState: 'AWAITING tc_dump REPLY…', fwTcStateC: 'var(--acq)',
           fwTcHse: '—', fwTcLse: '—', fwTcRange: '—', fwTcMeta: 'sent "tc_dump = on" at connect' };
         const stateName = { A: 'APPLYING · HOLDOVER STEERING', F: 'FROZEN BY config.txt',
           L: 'LEARNING', S: 'SEEDED · LEARNING FROM WARM START', '-': 'IDLE' }[tc.state] || ('STATE ' + (tc.state || '?'));
         const h = tc.hse, l = tc.lse;
-        const age = Math.max(0, Math.floor(Date.now() / 1000) - tc.at);
+        const age = Math.max(0, Math.floor(this.viewNowMs() / 1000) - tc.at);
         return {
           fwTcState: stateName,
           fwTcStateC: (h && h.valid) || (l && l.valid) ? 'var(--lock)' : 'var(--acq)',
@@ -3965,7 +3979,7 @@ class Component extends DcLite {
       globeClockOn: st.globeClock,
       gSub: sun ? sun.subLat.toFixed(1) + '° / ' + sun.subLon.toFixed(1) + '°' : '—',
       gVis: S ? 'G' + cnt('G') + ' · R' + cnt('R') + ' · E' + cnt('E') + ' · C' + cnt('C') : '—',
-      gClock: new Date().toISOString().slice(11, 19) + ' UTC',
+      gClock: new Date(this.viewNowMs()).toISOString().slice(11, 19) + ' UTC',   // the playhead while REVIEWING
       // (used to promise "production uses photographic earth" — a leftover from the macOS-app port
       // plan. This IS production; the cartographic render is the design, so say only what's true.)
       landNote: this.landTried && !this.land ? 'NO COASTLINE DATA · GRATICULE ONLY' : 'VECTOR COASTLINES + GRATICULE',
@@ -4246,12 +4260,19 @@ class Component extends DcLite {
   // come from /history?series=sats (one per bucket); this tab's live buffer is joined on for the newest
   // minutes. Refetched at most once a minute. null without a recorder, from a pccd older than the series,
   // or until the first reply lands (the live buffer draws meanwhile).
+  // REVIEW over pccd's stream: past the replay's 45 min, the same rows end at the playhead (refetched
+  // once it moves a twentieth of the window), and the replayed lines join on for the newest part.
   archTrails(winSec) {
     const S = this.session.S, hi = this.state.bridgeInfo && this.state.bridgeInfo.history;
-    if (!hi || !S.real || !this.realdev || this._archTrailNone || this._reviewing) return null;   // REVIEW: S.trails is the scrubbed window
+    if (!hi || !this.realdev || this._archTrailNone) return null;
+    const rv = this._reviewing;
+    if (rv ? !(this._replay && this._replay.kind === 'pccd' && winSec > REPLAY_REACH_S) : !S.real) return null;
+    const end = rv ? Math.floor(this._review.playT) : null;
     const c = this._archTrail, now = Date.now();
-    if (!this._archTrailBusy && now >= (this._archTrailRetryAt || 0) && (!c || c.win !== winSec || now - c.at >= 60000)) this.fetchArchTrails(winSec);
-    if (!c || c.win !== winSec) return null;
+    const fits = c && c.win === winSec && (rv ? c.end != null : c.end == null);
+    const stale = !fits || (rv ? Math.abs(c.end - end) >= Math.max(60, winSec / 20) : now - c.at >= 60000);
+    if (!this._archTrailBusy && now >= (this._archTrailRetryAt || 0) && stale) this.fetchArchTrails(winSec, end);
+    if (!fits) return null;
     // Ground points need the clock's position, which pccd's rows don't carry: take the observer the live
     // fix set, and redo them when it moves (right after connect it can still be the default).
     const obsKey = S.obs.lat.toFixed(3) + ',' + S.obs.lon.toFixed(3);
@@ -4259,9 +4280,9 @@ class Component extends DcLite {
     if (!c.merged || now - c.mergedAt >= 5000) { c.merged = this.joinLiveTrails(c); c.mergedAt = now; }
     return c.merged;
   }
-  fetchArchTrails(winSec) {
+  fetchArchTrails(winSec, end = null) {
     this._archTrailBusy = true;
-    const to = Math.floor(Date.now() / 1000);
+    const to = end != null ? end : Math.floor(Date.now() / 1000);
     this.realdev.fetchBridgeHistory({ series: 'sats', from: to - winSec, to, points: Math.min(720, Math.ceil(winSec / 60)) }).then((rows) => {
       this._archTrailBusy = false;
       if (rows.length && !('sats' in rows[0])) { this._archTrailNone = true; return; }   // pccd < 0.7 answers with the timing series
@@ -4277,7 +4298,8 @@ class Component extends DcLite {
           tr.push({ t: r.t, az: a, el: h, cn0: +cn0 });
         }
       }
-      this._archTrail = { win: winSec, at: Date.now(), trails, gtrails: null, obsKey: null, merged: null, mergedAt: 0 };
+      if ((end != null) !== !!this._reviewing) return;   // REVIEW began or ended while this was in flight
+      this._archTrail = { win: winSec, end, at: Date.now(), trails, gtrails: null, obsKey: null, merged: null, mergedAt: 0 };
       this.drawChart('sky'); this.drawChart('globe'); this.drawChart('map');
     }).catch(() => { this._archTrailBusy = false; this._archTrailRetryAt = Date.now() + 60000; });
   }
@@ -4753,7 +4775,7 @@ class Component extends DcLite {
     const rx = S ? S.nmeaLog.filter((l) => l.dir === 'rx').length : 0;
     return {
       eStarted: S ? new Date(S.t0 * 1000).toISOString().slice(0, 19).replace('T', ' ') + ' UTC' : '—',
-      eDur: S ? this.fmtDur(Date.now() / 1000 - S.t0) : '—',
+      eDur: S ? this.fmtDur(this.viewNowMs() / 1000 - S.t0) : '—',
       eFixes: String(fx),
       eObs: S ? String(S.obsCount) : '0',
       eLines: rx + ' (RING BUFFER 420)',
@@ -4771,97 +4793,240 @@ class Component extends DcLite {
       onDlGpx: () => this.session && this.dl('pcc-session.gpx', 'application/gpx+xml', this.session.toGPX()),
       onDlNmea: () => this.session && this.dl('pcc-session.nmea', 'text/plain', this.session.toNMEA()),
       onDlSat: () => this.session && this.dl('pcc-session-sats.csv', 'text/csv', this.session.toSatCSV()),
-      // Persistent telemetry log (IndexedDB) — the data-safety controls. Opt-in; never simulation.
-      cbTelLog: this.cb(!!(this.telemetryLog && this.telemetryLog.enabled)),
-      onTelLog: () => { if (!this.telemetryLog) return; this.telemetryLog.setEnabled(!this.telemetryLog.enabled); this.setState({}); },
-      telStat: (() => {
-        const s = this._telStats, ps = this.telemetryLog && this.telemetryLog.persistence;
-        return (this.pccdRecords() ? 'PAUSED · pccd RECORDS THIS CLOCK · ' : '') + (s ? (s.rows.toLocaleString() + ' SAMPLES · ' + s.sessions + ' SESSION' + (s.sessions === 1 ? '' : 'S') + (s.kb ? ' · ' + (s.kb > 1024 ? (s.kb / 1024).toFixed(1) + ' MB' : s.kb + ' KB') : '')) : '—') +
-          (ps === 'persistent' ? ' · PERSISTENT' : ps === 'evictable' ? ' · MAY BE EVICTED' : '');
-      })(),
-      telRetVal: String(this.telemetryLog ? this.telemetryLog.retention : 31536000),
-      onTelRet: (e) => { if (this.telemetryLog) this.telemetryLog.setRetention(+e.target.value).then(() => this.refreshTelStats()); },
-      onTelClear: () => {
-        if (!this.telemetryLog) return;
-        if (!confirm('Delete all persisted telemetry? Session history is kept; the recorded stream is erased. This cannot be undone.')) return;
-        this.telemetryLog.clear().then(() => {
-          // Drop the in-memory scrub model + repaint the (now empty) timeline STRAIGHT AWAY, rather
-          // than leaving stale charts until the user navigates away and back (which reloads openReview).
-          if (this._reviewing) this.exitReview();   // nothing left to drive the rooms from
-          this._review = null;
-          this.reviewPause();
-          this.renderReview();                       // wipes the canvas (no model) + refreshes the readout
-          if (this._arch && this._arch.src === 'browser') this._arch = null;   // the archive read the same log
-          this._archLog = null;
-          return this.refreshTelStats();
-        });
-      },
-      onTelExport: async () => {
-        if (!this.telemetryLog) return;
-        const sess = await this.telemetryLog.sessions();
-        if (!sess.length) { alert('No recorded sessions yet.'); return; }
-        const s = sess[0];   // newest session
-        const rows = await this.telemetryLog.range(s.sessionId, 0, 2 ** 31);
-        const head = 't,lat,lon,alt,hdop,pdop,sats,fixType,cn0avg,temp,ppm\n';
-        const body = rows.map((r) => {
-          const f = r.fix || {}, p = r.pps || {}; let c = 0, cn = 0;
-          for (const x of r.sats) { if (x.cn0 > 0) { c += x.cn0; cn++; } }
-          return [r.t, f.lat ?? '', f.lon ?? '', f.alt ?? '', f.hdop ?? '', f.pdop ?? '', f.sats ?? '', f.type ?? '', cn ? (c / cn).toFixed(1) : '', p.temp ?? '', p.ppm ?? ''].join(',');
-        }).join('\n');
-        this.dl('pcc-telemetry-' + s.sessionId + '.csv', 'text/csv', head + body);
-      },
-      // Rewind / scrub over the persisted log.
+      // RECORDER — one record of the clock: pccd's when its recorder runs, else this browser's.
+      ...this.rvRecorder(),
+      // Rewind / scrub: the playhead's moment, replayed from the recorder's stream.
       ...(() => { const r = this.reviewReadout(); return {
-        rvTime: r.time, rvPos: r.disconnected ? 'CLOCK DISCONNECTED' : r.pos, rvFix: r.disconnected ? '—' : r.fix,
+        rvTime: r.time, rvSrc: r.src, rvPos: r.disconnected ? 'CLOCK DISCONNECTED' : r.loading ? 'LOADING…' : r.pos, rvFix: r.disconnected ? '—' : r.fix,
         rvSats: r.disconnected ? '—' : r.sats, rvTemp: r.disconnected ? '—' : r.temp, rvSkew: r.disconnected ? '—' : r.skew,
         rvHasData: r.has, rvNoData: !r.has, rvPlayLabel: r.playing ? '❚❚ PAUSE' : '▶ PLAY',
       }; })(),
       onReviewPlayPause: () => { this._reviewPlaying ? this.reviewPause() : this.reviewPlay(); },
       onReviewReload: () => this.openReview(),
       // Drive the whole app (Sky / Signal / Position / Timing + the face) from the playhead.
-      reviewDriveLabel: this._reviewing ? '● REVIEWING — EXIT TO LIVE' : 'DRIVE ROOMS FROM SCRUB →',
+      reviewDriveLabel: this._reviewing ? '● REVIEWING · EXIT TO LIVE' : 'DRIVE ROOMS FROM SCRUB →',
       reviewDriveStyle: this._reviewing
         ? 'font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:#fff;background:var(--beta,#f5b53d);border:1px solid var(--beta,#f5b53d);border-radius:5px;padding:7px 15px;cursor:pointer'
         : 'font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--face-led,#ff4530);background:transparent;border:1px solid var(--face-led,#ff4530);border-radius:5px;padding:7px 15px;cursor:pointer',
       onReviewDrive: () => { this._reviewing ? this.exitReview() : this.enterReview(); },
     };
   }
-  // Refresh the persistent-log stats shown in the Export room (async IndexedDB counts).
+  // ---------- RECORDER: one record of the clock -----------------------------------------------------
+  // pccd's flight recorder when it runs (the full stream 30 d + summaries), else this browser's log
+  // (the stream 24 h + 1-minute summaries). The REC lamp in the header and the EXPORT room's RECORDER
+  // panel both read this.
+  // The browser keeps the record: its log is on and no pccd recorder sits behind this connection.
+  browserRecords() {
+    const tl = this.telemetryLog, bi = this.state.bridgeInfo;
+    if (!tl || !tl.enabled) return false;
+    return !(bi && bi.history && this.realdev && this.realdev.transport && this.realdev.transport() === 'bridge');
+  }
+  recorderState() {
+    const bi = this.state.bridgeInfo, tl = this.telemetryLog;
+    if (bi && bi.history) {
+      const on = !!bi.serial_open;
+      return { kind: 'pccd', on, lamp: on ? 'REC · pccd' : 'NOT RECORDING' };
+    }
+    const on = !!(tl && tl.recording);
+    return { kind: 'browser', on, lamp: on ? 'REC · BROWSER' : 'NOT RECORDING' };
+  }
+  openRecorder() {
+    if (this.state.section !== 'export') this.go('export');
+    else { this.refreshTelStats(); this.openReview(); }
+    setTimeout(() => { const el = document.querySelector('[data-recorder]'); if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: this.reduced ? 'auto' : 'smooth' }); }, 60);
+  }
+  fmtBytes(n) {
+    if (!(n > 0)) return '0 KB';
+    if (n >= 1e9) return (n / 1e9).toFixed(1) + ' GB';
+    if (n >= 1e6) return Math.round(n / 1e6) + ' MB';
+    return Math.max(1, Math.round(n / 1e3)) + ' KB';
+  }
+  fmtDepth(sec) {   // "40 MIN" under an hour, "18 H" under a day, "3.2 D" above
+    if (!(sec > 0)) return '0 MIN';
+    if (sec < 3600) return Math.max(1, Math.round(sec / 60)) + ' MIN';
+    return sec < 86400 ? (sec / 3600).toFixed(sec < 36000 ? 1 : 0).replace(/\.0$/, '') + ' H' : (sec / 86400).toFixed(1) + ' D';
+  }
+  // Download a pccd /history export straight to disk (an hour of stream is MBs, 30 days GBs: no Blob).
+  pccdDownload(q) {
+    const a = document.createElement('a');
+    a.href = this.realdev.bridgeUrl('/history?' + q);
+    a.download = '';
+    a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  rvRecorder() {
+    const r = this.recorderState(), bi = this.state.bridgeInfo, hi = bi && bi.history, tl = this.telemetryLog;
+    const s = this._telStats, ps = tl && tl.persistence;
+    const now = Math.floor(Date.now() / 1000);
+    const out = { recPccd: r.kind === 'pccd', recBrowser: r.kind === 'browser', recStat: r.lamp, recStatState: r.on ? 'live' : 'absent' };
+    if (r.kind === 'pccd') {
+      const st = hi.stream;
+      const stFrom = st && Date.parse(st.from + ':00:00Z') / 1000;
+      const sumFrom = Date.parse(hi.from + 'T00:00:00Z') / 1000;
+      Object.assign(out, {
+        recSource: 'pccd ' + (bi.version || '?') + ' · ' + (bi.device || '—'),
+        recStream: st ? this.fmtDepth(st.hours * 3600) + ' OF ' + st.retain + ' D · ' + this.fmtBytes(st.bytes) : 'NONE · UPDATE pccd TO 0.10',
+        recSummary: (hi.days || 0) + ' D OF ' + hi.retain + ' D · ' + this.fmtBytes(hi.bytes),
+        recKeep: (st ? 'STREAM ' + st.retain + ' D · ' : '') + 'SUMMARY ' + hi.retain + ' D · SET IN pccd',
+        recHasStream: !!st,
+        onRecNmea: () => st && this.pccdDownload('series=stream&format=nmea&from=' + stFrom + '&to=' + now),
+        onRecCsv: () => this.pccdDownload('series=timing&format=csv&from=' + sumFrom + '&to=' + now),
+        onRecStable32: () => this.pccdDownload('series=phase&format=stable32&from=' + sumFrom + '&to=' + now),
+        onRecChrony: () => this.pccdDownload('series=timing&format=chrony&from=' + sumFrom + '&to=' + now),
+      });
+    } else {
+      const si = s && s.stream, span = si ? (si.to - si.from) / 1000 : 0;
+      Object.assign(out, {
+        recSource: 'BROWSER · INDEXEDDB' + (s && s.bytes ? ' · ' + this.fmtBytes(s.bytes) : '') + (ps === 'persistent' ? ' · PERSISTENT' : ps === 'evictable' ? ' · MAY BE EVICTED' : ''),
+        recStream: si ? this.fmtDepth(span) + ' OF 24 H' : 'EMPTY',
+        recSummary: s && s.days ? s.days + ' D OF ' + Math.round((tl ? tl.retention : 31536000) / 86400) + ' D' : 'EMPTY',
+        recHasStream: !!si,
+        cbTelLog: this.cb(!!(tl && tl.enabled)),
+        onTelLog: () => { if (!tl) return; tl.setEnabled(!tl.enabled); this.setState({}); },
+        telRetVal: String(tl ? tl.retention : 31536000),
+        onTelRet: (e) => { if (tl) tl.setRetention(+e.target.value).then(() => this.refreshTelStats()); },
+        onRecNmeaBrowser: async () => { if (tl) this.dlBlob('pcc-stream-' + new Date().toISOString().slice(0, 13) + '.nmea', await tl.nmeaBlob()); },
+        onRecCsvBrowser: () => this.exportMinuteCsv(),
+        onTelClear: () => {
+          if (!tl) return;
+          if (!confirm('Delete the browser log? The stream and the summaries are erased.')) return;
+          tl.clear().then(() => {
+            // Drop the scrub model + the replay straight away, and repaint the (now empty) timeline.
+            if (this._reviewing) this.exitReview();
+            if (this._replay && this._replay.kind === 'browser') this._replay = null;
+            this._review = null;
+            this.reviewPause();
+            this.renderReview();
+            if (this._arch && this._arch.src === 'browser') this._arch = null;   // the archive read the same log
+            this._archLog = null;
+            return this.refreshTelStats();
+          });
+        },
+      });
+    }
+    out.onRecReview = () => { if (!this._review) { this.openRecorder(); return; } this._reviewing ? this.exitReview() : this.enterReview(); };
+    out.recReviewLabel = this._reviewing ? 'REVIEWING' : 'REVIEW';
+    out.recReviewOn = this._reviewing ? 'true' : 'false';
+    return out;
+  }
+  dlBlob(name, blob) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  }
+  // The browser's summary tier as CSV: one row a minute, every session.
+  async exportMinuteCsv() {
+    const tl = this.telemetryLog; if (!tl) return;
+    const rows = await tl.minuteRange(0, Math.floor(Date.now() / 1000));
+    if (!rows.length) { alert('No summary rows yet.'); return; }
+    const f = (v, d) => (v == null || !Number.isFinite(v) ? '' : v.toFixed(d));
+    const head = 't,lat,lon,hdop,sats,cn0,temp_min,temp_max,ppm_min,ppm_max,fix_pct\n';
+    const body = rows.map((r) => [r.m, f(r.lat, 6), f(r.lon, 6), f(r.hdop, 2), f(r.sats, 1), f(r.cn0, 1), f(r.tempMin, 1), f(r.tempMax, 1), f(r.ppmMin, 3), f(r.ppmMax, 3), f(r.fixPct * 100, 0)].join(',')).join('\n');
+    this.dl('pcc-summary.csv', 'text/csv', head + body + '\n');
+  }
+  // Refresh the browser log's stats for the RECORDER panel (async IndexedDB reads).
   async refreshTelStats() {
-    if (!this.telemetryLog) return;
+    const tl = this.telemetryLog;
+    if (!tl) return;
     try {
-      const [rows, sessions, bytes] = await Promise.all([this.telemetryLog.count(), this.telemetryLog.sessions(), this.telemetryLog.estimateBytes()]);
-      this._telStats = { rows, sessions: sessions.length, kb: Math.round(bytes / 1024) };
+      const [stream, spans, bytes] = await Promise.all([tl.streamInfo(), tl.minuteSpans(), tl.estimateBytes()]);
+      const days = new Set();
+      for (const x of spans) for (let d = Math.floor(x.m0 / 86400); d <= Math.floor(x.m1 / 86400); d++) days.add(d);
+      this._telStats = { stream, days: days.size, bytes };
       this.setState({});
     } catch (e) { /* ignore */ }
   }
 
-  // ---------- REWIND / SCRUB over the persisted telemetry log -----------------
+  // ---------- REVIEW: replay the recorder's stream --------------------------------------------------
   // The moment the rooms draw as "now": the playhead while REVIEWING (their windows, trails and the
   // sun/moon end there), else the wall clock.
   viewNowMs() { return this._reviewing && this._review ? this._review.playT * 1000 : Date.now(); }
-  // Load every session's samples into one scrub model, spanning the whole log,
-  // with connected/disconnected segments derived from the sample runs.
+  // Where REVIEW reads: pccd's stream when its recorder keeps one, else the browser's.
+  reviewSource() {
+    const bi = this.state.bridgeInfo;
+    if (bi && bi.history && bi.history.stream && this.realdev) return 'pccd';
+    return this.telemetryLog ? 'browser' : null;
+  }
+  // The timeline: the stream's span, when the clock was streaming, and overview tracks from the
+  // summary tier. The frame at the playhead comes from the replay, not from these.
+  async reviewModelPccd() {
+    const st = this.state.bridgeInfo.history.stream;
+    const tMin = Date.parse(st.from + ':00:00Z') / 1000, tMax = Math.floor(Date.now() / 1000);
+    if (!Number.isFinite(tMin) || !(tMax > tMin)) return null;
+    const N = 800, w = (tMax - tMin) / N;
+    const get = (series) => this.realdev.fetchBridgeHistory({ series, from: tMin, to: tMax, points: N }).catch(() => []);
+    const [sky, tim] = await Promise.all([get('sky'), get('timing')]);
+    // pccd writes a sky row a minute while the clock streams; a run of empty buckets is a gap.
+    const runs = [], gap = Math.max(150, 1.6 * w);
+    for (const r of sky) {
+      const last = runs[runs.length - 1];
+      if (last && r.t - last.t1 <= gap) last.t1 = r.t + w / 2; else runs.push({ t0: r.t - w / 2, t1: r.t + w / 2 });
+    }
+    const timed = tim.filter((r) => !(r.temp === 0 && r.ppm === 0));   // pccd writes 0 / 0 before the first $PMTXTS
+    return {
+      source: 'pccd', tMin, tMax, runs,
+      points: {
+        temp: timed.map((r) => ({ t: r.t, v: r.temp })),
+        ppm: timed.map((r) => ({ t: r.t, v: r.ppm })),
+        sats: sky.filter((r) => r.fix > 0).map((r) => ({ t: r.t, v: r.used })),
+      },
+    };
+  }
+  async reviewModelBrowser() {
+    const tl = this.telemetryLog;
+    const info = await tl.streamInfo();
+    if (!info) return null;
+    const tMin = Math.floor(info.from / 1000);
+    const tMax = Math.max(Math.ceil(info.to / 1000), tl.recording ? Math.floor(Date.now() / 1000) : 0);
+    const runs = (await tl.lineRuns()).map((r) => ({ t0: r.t0 / 1000, t1: r.t1 / 1000 }));
+    const mins = await tl.minuteRange(tMin - 60, tMax);
+    const mid = (a, b) => (a != null && b != null ? (a + b) / 2 : null);
+    return {
+      source: 'browser', tMin, tMax: Math.max(tMax, tMin + 1), runs,
+      points: {
+        temp: mins.map((r) => ({ t: r.m + 30, v: mid(r.tempMin, r.tempMax) })),
+        ppm: mins.map((r) => ({ t: r.m + 30, v: mid(r.ppmMin, r.ppmMax) })),
+        sats: mins.map((r) => ({ t: r.m + 30, v: r.sats })),
+      },
+    };
+  }
+  newReplay(kind) {
+    const fetchText = kind === 'pccd'
+      ? (a, b) => this.realdev.fetchBridgeStream(a, b)
+      : (a, b) => this.telemetryLog.linesText(a * 1000, b * 1000);
+    const S = this.session && this.session.S;
+    const base = (this._liveSnap && this._liveSnap.obs) || (S && S.obs) || {};
+    this._replay = new StreamReplay({ kind, fetchText, baseObs: { lat: base.lat, lon: base.lon } });
+    this._replay.onFrame = (t) => this.onReplayFrame(t);
+  }
   async openReview() {
-    if (!this.telemetryLog) return;
+    const kind = this.reviewSource();
+    if (!kind) return;
     const seq = this._rvSeq = (this._rvSeq || 0) + 1;    // a later open (RELOAD, a second mount) wins
     try {
-      const sessions = await this.telemetryLog.sessions();
-      let samples = [];
-      for (const s of sessions) {                      // newest-first; cap total for a sane first load
-        const rows = await this.telemetryLog.range(s.sessionId, 0, 2 ** 31);
-        samples = samples.concat(rows);
-        if (samples.length > 200000) break;            // safety cap; scrub still decimates to pixels
-      }
+      const m = kind === 'pccd' ? await this.reviewModelPccd() : await this.reviewModelBrowser();
       if (seq !== this._rvSeq) return;
-      const R = prepReview(sessions, samples);
-      // A reload while REVIEWING keeps the playhead where it was, if the new range still holds it.
+      if (this._replay && this._replay.kind !== kind) {   // the recorder changed (pccd came or went)
+        if (this._reviewing) this.exitReview();
+        this._replay = null;
+      }
+      if (!m) {
+        if (this._reviewing) this.exitReview();
+        this._review = null; this._replay = null;
+        this.reviewPause(); this.renderReview();
+        return;
+      }
+      const R = prepReview(m);
+      // A reload (or a return to EXPORT) keeps the playhead where it was, if the new span still holds it.
       const old = this._review;
-      if (this._reviewing && old && old.playT >= R.tMin && old.playT <= R.tMax) R.playT = old.playT;
+      if (old && old.source === R.source && old.playT >= R.tMin && old.playT <= R.tMax) R.playT = old.playT;
       this._review = R;
+      if (!this._replay) this.newReplay(kind);
       this.reviewPause();
       this.renderReview();
-      if (this._reviewing) this.applyReviewFrame(R.playT);
+      this.reviewSeek(R.playT);
     } catch (e) { console.warn('openReview failed', e); }
   }
   renderReview() {
@@ -4874,11 +5039,13 @@ class Component extends DcLite {
     }
     this.setState({});   // refresh the readout below the timeline
   }
+  // Move the playhead; the replay follows (latest seek wins) and repaints when its frame lands.
   reviewSeek(t) {
-    if (!this._review) return;
-    this._review.playT = Math.max(this._review.tMin, Math.min(this._review.tMax, t));
+    const R = this._review;
+    if (!R) return;
+    R.playT = Math.max(R.tMin, Math.min(R.tMax, t));
     this.renderReview();
-    if (this._reviewing) this.applyReviewFrame(this._review.playT);   // drive the rooms to the playhead
+    if (this._replay) { this._replay.seek(R.playT); this._replay.prefetch(R.playT); }
   }
   reviewPlay() {
     if (!this._review || this._reviewTimer) return;
@@ -4890,11 +5057,10 @@ class Component extends DcLite {
       const now = performance.now(), dt = (now - last) / 1000; last = now;
       let t = this._review.playT + dt * SPEED;
       if (t >= this._review.tMax) { t = this._review.tMax; this.reviewPause(); }
-      this._review.playT = t; this.renderReview();
-      if (this._reviewing) this.applyReviewFrame(t);   // playback drives the rooms too
+      this.reviewSeek(t);   // playback feeds the replay forward: only the new lines
       if (this._reviewPlaying) this._reviewTimer = requestAnimationFrame(step);
     };
-    if (this._review.playT >= this._review.tMax) this._review.playT = this._review.tMin;   // restart from the top
+    if (this._review.playT >= this._review.tMax - 1) this._review.playT = this._review.tMin;   // restart from the top
     this._reviewTimer = requestAnimationFrame(step);
     this.setState({});
   }
@@ -4910,138 +5076,75 @@ class Component extends DcLite {
     this.reviewPause();
     this.reviewSeek(tAtX(this._review, e.clientX - r.left));
   }
-  // Values at the playhead — the scrub read-out.
+  // The scrub read-out: the replayed frame at the playhead.
   reviewReadout() {
-    const off = { time: '—', pos: '—', fix: '—', sats: '—', temp: '—', skew: '—', has: false, playing: false };
-    const R = this._review; if (!R || !R.samples.length) return off;
-    const s = sampleAt(R, R.playT);
-    const d = new Date(R.playT * 1000);
-    const time = d.toISOString().slice(0, 19).replace('T', ' ') + ' UTC';
-    if (!s) return { ...off, time, has: true, disconnected: true, playing: !!this._reviewPlaying };
-    const f = s.fix, p = s.pps;
-    return {
-      time, has: true, disconnected: false, playing: !!this._reviewPlaying,
-      pos: f ? f.lat.toFixed(5) + ', ' + f.lon.toFixed(5) : 'no fix',
-      fix: f ? ((f.type === 3 ? '3D' : f.type >= 1 ? '2D' : 'NONE') + (f.hdop != null ? ' · HDOP ' + f.hdop.toFixed(2) : '')) : 'no fix',
-      sats: f && f.sats != null ? String(f.sats) : String(s.sats ? s.sats.length : 0),
-      temp: p && p.temp != null ? p.temp.toFixed(1) + ' °C' : '—',
-      skew: p && p.phaseUs != null ? p.phaseUs.toFixed(2) + ' µs' : '—',
+    const off = { time: '—', pos: '—', fix: '—', sats: '—', temp: '—', skew: '—', src: '', has: false, playing: false };
+    const R = this._review; if (!R) return off;
+    const P = this._replay, F = P && P.frame;
+    const base = { ...off, has: true, playing: !!this._reviewPlaying,
+      time: new Date(R.playT * 1000).toISOString().slice(0, 19).replace('T', ' ') + ' UTC',
+      src: R.source === 'pccd' ? 'pccd STREAM' : 'BROWSER LOG' };
+    if (!F || P.t == null) return { ...base, loading: true };
+    if (!P.live) return { ...base, disconnected: true };
+    const f = F.fix, p = F.pps, last = p.list.length ? p.list[p.list.length - 1] : null;
+    const inView = F.sats.filter((x) => x.visible).length;
+    return { ...base, loading: !!P.loading && Math.abs(P.t - R.playT) > 2,
+      pos: f.valid ? f.lat.toFixed(5) + ', ' + f.lon.toFixed(5) : 'NO FIX',
+      fix: f.valid ? '3D' + (f.hdop != null ? ' · HDOP ' + f.hdop.toFixed(2) : '') : 'NO FIX',
+      sats: (f.valid ? f.sats + ' USED · ' : '') + inView + ' IN VIEW',
+      temp: last ? p.temp.toFixed(0) + ' °C' : '—',
+      skew: last ? last.us.toFixed(2) + ' µs' : '—',
     };
+  }
+  // A replayed frame landed: while REVIEW drives the rooms, point session.S at it and repaint.
+  onReplayFrame() {
+    if (this._reviewing && this._replay) {
+      this._replay.projectInto(this.session.S);
+      this.onTickStats();                        // the rooms' KPI tiles read these: recompute before the render
+      if (this.drawCharts) this.drawCharts();   // repaint whichever room's charts are mounted
+    }
+    this.setState({});
   }
 
   // ---- REVIEW MODE — the scrub drives the whole app to the playhead time ----
-  // Reconstruct session.S (sats, fix, and every history buffer the rooms read) from the log
-  // window up to t, so Sky / Signal / Position / Timing render the PAST with no room changes.
-  // First index i where arr[i].t >= target (arr sorted ascending by .t). Standard lower-bound.
-  _lbT(arr, target) {
-    let lo = 0, hi = arr.length;
-    while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m].t < target) lo = m + 1; else hi = m; }
-    return lo;
-  }
-  reconstructReview(t, W = 1800) {
-    const R = this._review, S = this.session && this.session.S;
-    if (!R || !S) return;
-    // R.samples is time-sorted (prepReview); binary-search the [t-W, t] window instead of scanning
-    // the whole (up to 200k-row) array every scrub frame / playback tick.
-    const lo = this._lbT(R.samples, t - W), hi = this._lbT(R.samples, t + 1);
-    const win = R.samples.slice(lo, hi);
-    const D2R = Math.PI / 180;
-    let refLat = S.obs && S.obs.lat, refLon = S.obs && S.obs.lon;
-    const firstFix = win.find((r) => r.fix);
-    if ((refLat == null || refLon == null) && firstFix) { refLat = firstFix.fix.lat; refLon = firstFix.fix.lon; }
-    const cosRef = Math.cos((refLat || 0) * D2R);
-    const posHist = [], dopHist = [], fixHist = [], cn0Hist = new Map(), trails = new Map(), ppsList = [], ppsSamples = [];
-    let lastPpm = null;
-    for (const r of win) {
-      if (r.fix) {
-        posHist.push({ t: r.t, e: (r.fix.lon - refLon) * 111320 * cosRef, n: (r.fix.lat - refLat) * 111320, lat: r.fix.lat, lon: r.fix.lon, alt: r.fix.alt });
-        dopHist.push({ t: r.t, h: r.fix.hdop, p: r.fix.pdop, v: r.fix.vdop });
-        fixHist.push({ t: r.t, type: r.fix.type, sats: r.fix.sats });
-      }
-      for (const s of r.sats) {
-        const key = s.key || ('G' + String(s.prn).padStart(2, '0'));
-        let h = cn0Hist.get(key); if (!h) { h = []; cn0Hist.set(key, h); } h.push({ t: r.t, v: s.cn0 });
-        let tr = trails.get(key); if (!tr) { tr = []; trails.set(key, tr); } tr.push({ t: r.t, az: s.az, el: s.el, cn0: s.cn0 });
-      }
-      if (r.pps) {
-        if (r.pps.phaseUs != null) ppsList.push({ t: r.t, us: r.pps.phaseUs });
-        if (r.pps.temp != null && r.pps.ppm !== lastPpm) { ppsSamples.push({ t: r.t, temp: r.pps.temp, ppm: r.pps.ppm }); lastPpm = r.pps.ppm; }
-      }
-    }
-    // Sub-satellite point reconstruction (exactly what the live real-device path does): the log
-    // stores observer-relative az/el + constellation identity, so GLOBE and MAP can plot the past
-    // as faithfully as the polar plot instead of going empty (they skip any sat whose geo is NaN).
-    // The log doesn't carry the raw CONSTELLATIONS object, only its id, so map id → nominal orbit
-    // altitude (the only field subSatellitePoint reads).
-    const subPt = (az, el, constId) => {
-      if (!(el > 0) || az == null) return { lat: NaN, lon: NaN };
-      const sp = subSatellitePoint({ azDeg: az, elDeg: el, constellation: { altitudeKm: ORBIT_KM[constId] || 20200 }, observerLat: refLat, observerLon: refLon });
-      return sp ? { lat: sp.lat, lon: sp.lon } : { lat: NaN, lon: NaN };
-    };
-    const cur = win.length ? win[win.length - 1] : null;
-    S.sats = (cur ? cur.sats : []).map((s) => ({
-      key: s.key || ('G' + String(s.prn).padStart(2, '0')), prn: s.prn, constId: s.constId || 'G', tok: s.tok || 'gps',
-      talker: s.talker || 'GP', sysId: s.sysId || 1, az: s.az, el: s.el, cn0: s.cn0, used: s.used,
-      visible: s.el != null && s.el > 0, geo: subPt(s.az, s.el, s.constId || 'G'),
-    }));
-    // Rebuild windowed ground tracks from the same az/el trails, downsampled to the live ~45 s
-    // gtrail cadence so GLOBE/MAP show the scrubbed history's tracks (and the TRAIL-length gcut,
-    // which assumes 45 s/point, slices them correctly).
-    const gtrails = new Map();
-    for (const [key, tr] of trails) {
-      const constId = key[0];
-      const g = []; let lastT = -Infinity;
-      for (const p of tr) {
-        if (p.t - lastT < 45 || !(p.el > 0)) continue;
-        const geo = subPt(p.az, p.el, constId);
-        if (Number.isFinite(geo.lat)) { g.push({ lat: geo.lat, lon: geo.lon, t: p.t }); lastT = p.t; }
-      }
-      if (g.length) gtrails.set(key, g);
-    }
-    S.gtrails = gtrails;
-    if (cur && cur.fix) S.fix = { valid: true, lat: cur.fix.lat, lon: cur.fix.lon, alt: cur.fix.alt, hdop: cur.fix.hdop, pdop: cur.fix.pdop, vdop: cur.fix.vdop, type: cur.fix.type, sats: cur.fix.sats };
-    else S.fix = { ...S.fix, valid: false, type: 0, sats: 0 };
-    S.posHist = posHist; S.dopHist = dopHist; S.fixHist = fixHist; S.cn0Hist = cn0Hist; S.trails = trails;
-    S.pps = S.pps || {}; S.pps.list = ppsList; S.pps.samples = ppsSamples;
-    if (cur && cur.pps) { S.pps.temp = cur.pps.temp; S.pps.ppm = cur.pps.ppm; S.pps.calerr = cur.pps.calerr; }
-  }
   enterReview() {
-    if (this._reviewing || !this._review) return;
+    if (this._reviewing || !this._review || !this._replay) return;
     const S = this.session.S;
-    // Snapshot COPIES, not references: review reconstruction mutates the live buffers in place, so a
-    // reference snapshot let those edits leak — corrupting the live PPS/position stream on exit.
-    // Copying the arrays/Maps/pps.list means exitReview's Object.assign truly restores them untouched.
-    const cpArr = (a) => (Array.isArray(a) ? a.slice() : a);
-    this._liveSnap = {
-      sats: cpArr(S.sats), fix: { ...S.fix },
-      posHist: cpArr(S.posHist), dopHist: cpArr(S.dopHist), fixHist: cpArr(S.fixHist),
-      cn0Hist: S.cn0Hist instanceof Map ? new Map(S.cn0Hist) : S.cn0Hist,
-      trails: S.trails instanceof Map ? new Map(S.trails) : S.trails,
-      // reconstructReview now rebuilds S.gtrails too, so it must be snapshotted or the live ground
-      // tracks would be replaced by the scrubbed window on exit.
-      gtrails: S.gtrails instanceof Map ? new Map(S.gtrails) : S.gtrails,
-      pps: S.pps ? { ...S.pps, list: cpArr(S.pps.list), tempHist: cpArr(S.pps.tempHist) } : S.pps,
-    };
+    // Snapshot COPIES of every field the replay takes over: projectInto points them at the replay's
+    // frame, so exitReview's restore must put back the live buffers exactly as they were.
+    const cp = (v) => (v instanceof Map ? new Map(v) : v instanceof Set ? new Set(v) : Array.isArray(v) ? v.slice() : (v && typeof v === 'object') ? { ...v } : v);
+    const snap = {};
+    for (const k of FRAME_FIELDS) snap[k] = cp(S[k]);
+    if (S.pps) snap.pps = { ...S.pps, list: cp(S.pps.list), samples: cp(S.pps.samples), tempHist: cp(S.pps.tempHist) };
+    snap.obs = S.obs ? { lat: S.obs.lat, lon: S.obs.lon } : null;
+    snap.obsUserSet = S.obsUserSet;
+    this._liveSnap = snap;
     this._reviewing = true;
     if (this.realdev && this.realdev.setHold) this.realdev.setHold(true);   // a connected clock's lines stop writing into S
-    this.applyReviewFrame(this._review.playT);
+    this._archTrail = null;                                                // the recorded trails follow the playhead now
+    if (this._replay.frame && this._replay.t === this._review.playT) this.onReplayFrame();
+    else this._replay.seek(this._review.playT);
+    this.setState({});
   }
   exitReview() {
     if (!this._reviewing) return;
     this._reviewing = false;
-    if (this.realdev && this.realdev.setHold) this.realdev.setHold(false);
     const s = this._liveSnap, S = this.session.S;
-    if (s) Object.assign(S, s);   // restore the live buffers untouched
+    if (s) {   // restore the live buffers untouched
+      const { obs, obsUserSet, ...rest } = s;
+      Object.assign(S, rest);
+      if (obs && S.obs) { S.obs.lat = obs.lat; S.obs.lon = obs.lon; }
+      S.obsUserSet = obsUserSet;
+    }
     this._liveSnap = null;
+    // After the restore: traffic held during REVIEW joins the restored monitor (or, if the clock left
+    // meanwhile, its buffers go).
+    if (this.realdev && this.realdev.setHold) this.realdev.setHold(false);
+    // The emulator fed live lines up to REVIEW; the ones held meanwhile are past seconds, not a burst to replay.
+    if (this._fedNmea && S.nmeaLog) for (const it of S.nmeaLog) if (it && typeof it === 'object') this._fedNmea.add(it);
+    this._archTrail = null;
     this.reviewPause();
     if (this.drawCharts) this.drawCharts();
-    this.setState({});
-  }
-  applyReviewFrame(t) {
-    if (!this._reviewing || !this._review) return;
-    this.reconstructReview(t);
-    this.onTickStats();                        // the rooms' KPI tiles read these: recompute before the render
-    if (this.drawCharts) this.drawCharts();   // repaint whichever room's charts are mounted
     this.setState({});
   }
   // Paint the six emulator faces to a wall-clock time (STANDBY = now; REVIEW = the playhead).
