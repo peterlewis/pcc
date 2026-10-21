@@ -142,6 +142,25 @@ export class StreamReplay {
     this._pending.set(h, job);
     return job;
   }
+  // The recorded lines of the run that holds endMs, at most spanMs back, oldest first, in the frame's
+  // nmeaLog shape ({ t, dir, text }). A silence longer than GAP_MS starts a run, as in the feed; [] when
+  // the link was down at endMs. Synchronous, from the hour cache (a seek fetched the hours its window
+  // covers): null when an hour of the span is not cached.
+  runBefore(endMs, spanMs) {
+    const fromMs = endMs - spanMs;
+    let out = [], lastRx = 0;
+    for (let h = Math.floor(fromMs / 1000 / HOUR) * HOUR; h * 1000 <= endMs; h += HOUR) {
+      const c = this._hours.get(h);
+      if (!c) return null;
+      const { ms, tx, lines } = c.p;
+      for (let i = upperBound(ms, fromMs); i < ms.length && ms[i] <= endMs; i++) {
+        if (lastRx && ms[i] - lastRx > GAP_MS) { out = []; lastRx = 0; }
+        out.push({ t: ms[i], dir: tx[i] ? 'tx' : 'rx', text: lines[i] });
+        if (!tx[i]) lastRx = ms[i];
+      }
+    }
+    return lastRx && endMs - lastRx <= GAP_MS ? out : [];
+  }
   // Fetch the hour after t in the background once the playhead is within 15 min of it.
   prefetch(t) {
     const next = Math.floor(t / HOUR) * HOUR + HOUR;
