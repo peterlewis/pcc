@@ -56,6 +56,26 @@ jobs:
         with: { ref: '${{ github.event.inputs.tag || github.ref }}' }
       - uses: actions/download-artifact@v4
         with: { name: pcc-web, path: docs }
+      # A Developer ID certificate from repo secrets, into a throwaway keychain, when one is set. Optional:
+      # signing only matters to someone who gives pccd Full Disk Access (a signed binary keeps the grant
+      # across updates). Without the secrets the macOS binary ships ad-hoc signed, as before.
+      - name: Import the signing certificate
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_ID: ${{ secrets.MACOS_SIGN_ID }}
+        run: |
+          if [ -z "$MACOS_CERT_P12" ]; then echo "::notice::no signing certificate: the macOS binary is ad-hoc signed"; exit 0; fi
+          KC="$RUNNER_TEMP/sign.keychain-db"; KCPW=$(openssl rand -hex 24)
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KCPW" "$KC"
+          security set-keychain-settings -lut 3600 "$KC"
+          security unlock-keychain -p "$KCPW" "$KC"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KCPW" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          echo "PCCD_SIGN_ID=${MACOS_SIGN_ID:-Developer ID Application}" >> "$GITHUB_ENV"
       - run: bash host/pccd/dist.sh macos
       - uses: actions/upload-artifact@v4
         with: { name: tar-macos, path: host/pccd/dist/*.tar.gz, retention-days: 1 }

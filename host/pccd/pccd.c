@@ -1047,7 +1047,7 @@ static void drive_scan(void){
         char self[4096]="pccd"; exe_realpath(self,sizeof self);
         fprintf(stderr,"[pccd] /Volumes/CLOCK is mounted but this process cannot read it: %s\n",err);
         if (en==EPERM || en==EACCES)
-          fprintf(stderr,"[pccd]   macOS privacy control. System Settings > Privacy & Security > Full Disk Access: add %s, then restart pccd. Until then the app's READ CLOCK DRIVE reads the volume itself.\n",self);
+          fprintf(stderr,"[pccd]   macOS privacy control. The app's READ CLOCK DRIVE reads it. Optional: to have pccd serve it, give %s Full Disk Access and restart pccd.\n",self);
         else
           fprintf(stderr,"[pccd]   the volume may be visible only to the login session that mounted it. The app's READ CLOCK DRIVE reads it itself.\n");
       }

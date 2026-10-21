@@ -47,6 +47,18 @@ build_macos () {
   clang -O2 -Wall -Wextra -DPCCD_GIT=\"$GIT_HASH\" -DPCCD_PLATFORM=\"macos-universal\" -arch arm64 -arch x86_64 \
     -o "$OUT/pccd-macos" pccd.c -framework IOKit -framework CoreFoundation
   "$OUT/pccd-macos" -t
+  # Sign with a Developer ID when PCCD_SIGN_ID names one (the release workflow sets it). A stable identity
+  # matters beyond trust: macOS ties a Full Disk Access grant to the binary's designated requirement, and
+  # an ad-hoc binary's requirement is its own hash, so every self-update would void the grant the daemon
+  # needs to read the clock's drive. Hardened runtime + secure timestamp; the identifier stays fixed.
+  if [ -n "${PCCD_SIGN_ID:-}" ]; then
+    codesign --force --options runtime --timestamp --identifier ws.ptrl.pccd --sign "$PCCD_SIGN_ID" "$OUT/pccd-macos"
+    codesign --verify --strict --verbose=2 "$OUT/pccd-macos"
+    codesign -d -r- "$OUT/pccd-macos" 2>&1 | grep designated
+    "$OUT/pccd-macos" -t                                  # still runs under the hardened runtime
+  else
+    echo "[dist] macOS binary NOT signed (set PCCD_SIGN_ID to a Developer ID Application identity)"
+  fi
   pack pccd-macos-universal "$OUT/pccd-macos"; rm -f "$OUT/pccd-macos"
 }
 

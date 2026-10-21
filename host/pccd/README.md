@@ -423,6 +423,12 @@ the sky. Same-origin pages and non-browser clients (curl) need no grant.
   and only from an allowed `Origin` (the same list as the WebSocket). `OPTIONS`
   answers CORS preflights. The volume is rescanned every 5 s: `/Volumes/CLOCK` on
   macOS, any mount whose basename is `CLOCK` in `/proc/mounts` on Linux.
+  **macOS:** macOS does not let a LaunchDaemon read a removable volume, so `/health`
+  reports `"drive":null,"drive_error":"Operation not permitted"` and the app reads the
+  drive itself (READ CLOCK DRIVE; Chromium remembers the drive). Optional, if you want
+  pccd to serve it: System Settings > Privacy & Security > Full Disk Access > add
+  `/usr/local/pcc/pccd`, then `sudo launchctl kickstart -k system/ws.ptrl.pcc.d`. The grant
+  lasts across updates only when the release is signed with a Developer ID.
 
 ## Protocol (WebSocket, text frames)
 
