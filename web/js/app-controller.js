@@ -7,7 +7,7 @@ import * as ASTRO from './astro-fw.js?v=90';
 import * as DS from './datasources.js?v=90';
 import { TelemetryLog } from './telemetrylog.js?v=6';
 import { prepReview, drawReview, tAtX } from './review.js?v=3';
-import { StreamReplay, FRAME_FIELDS, WINDOW_S as REPLAY_REACH_S } from './streamreplay.js?v=1';
+import { StreamReplay, FRAME_FIELDS, WINDOW_S as REPLAY_REACH_S } from './streamreplay.js?v=2';
 import { subSatellitePoint } from './satpass.js?v=2';
 import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=2';
 import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=8';
@@ -5203,11 +5203,24 @@ class Component extends DcLite {
   // through the CONNECTED path's feedLine/pulsePps: one PPS pulse per GPS second, at that second's edge
   // (the $PMTXTS epoch, else the RMC second) so the shown milliseconds are the playhead's, not the
   // line's arrival. It locks in about a second, like a connect. False = no RMC there to lock to.
+  // A no-fix RMC (status V) in those seconds: a clock that locked earlier in the run is in holdover
+  // and keeps its milliseconds for Tolerance_time_1ms (1000 s), also in the second the fix returns.
+  // The seed then starts a few seconds before the last valid RMC ahead of that no-fix span, at most
+  // HOLD_MS back (the replay's hour cache), so the firmware counts the same holdover age. That is up
+  // to 17 min of 1 ms ticks, about 16 ms.
   seedReviewEmu(emu, log, endMs) {
-    const SEED_MS = 5000;
-    const lines = (log || []).filter((it) => it && it.dir === 'rx' && !it.err && typeof it.text === 'string' &&
-      it.text[0] === '$' && it.t > endMs - SEED_MS && it.t <= endMs);
-    if (!lines.some((it) => /^\$G.RMC,/.test(it.text))) return false;
+    const SEED_MS = 5000, HOLD_MS = 1020e3, FIX = /^\$G.RMC,[^,]*,A,/;
+    const rx = (it) => it && it.dir === 'rx' && !it.err && typeof it.text === 'string' && it.text[0] === '$';
+    const rmc = (it) => rx(it) && /^\$G.RMC,/.test(it.text);
+    let lines = (log || []).filter((it) => rx(it) && it.t > endMs - SEED_MS && it.t <= endMs);
+    if (!lines.some(rmc)) return false;
+    if (lines.some((it) => rmc(it) && !FIX.test(it.text))) {
+      const run = this._replay && this._replay.runBefore(endMs, HOLD_MS);
+      let k = run ? run.length - 1 : -1;
+      while (k >= 0 && !(rmc(run[k]) && !FIX.test(run[k].text))) k--;   // the last no-fix RMC
+      while (k >= 0 && !(rmc(run[k]) && FIX.test(run[k].text))) k--;    // the last fix before it
+      if (k >= 0) { const from = run[k].t - SEED_MS; lines = run.filter((it) => rx(it) && it.t > from); }
+    }
     const live = this.emu;   // the same config, zone setting and display mode as the live face
     if (emu.getConfig() !== live.getConfig()) emu.applyConfig(live.getConfig());
     emu.setUtc(live.tz().utc);
