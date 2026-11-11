@@ -538,6 +538,20 @@ void emu_force_holdover2(unsigned pps_secs, unsigned cal_secs){
   if (significance_fade) computeHoldoverFade();   /* refresh digit_bright[] at the forced age */
 #endif
 }
+/* Regression hooks (holdover_fade_check / menu_undo_check).
+ * emu_set_lse_cal puts the LSE side in the state a learning clock reaches: a valid LSE model, and the
+ * raw LSE cycle error of the last RTC calibration (debug_rtc_val: 39 counts over 63 s = 18.9 ppm, a
+ * typical 32 kHz crystal). It also captures the SysTick period the way tc_housekeeping does, so
+ * tc_tpp() is 80 and the HSE residual reads in ppm. emu_count_mode is the COUNT_* the time row runs. */
+#if EMU_HAS_TEMPCOMP
+void emu_set_lse_cal(int valid, int rtc_val){
+  tc_lse_valid = valid ? 1 : 0; debug_rtc_val = rtc_val;
+  if (!tc_nom_load) tc_nom_load = SysTick->LOAD ? SysTick->LOAD : 79999u;
+}
+#else
+void emu_set_lse_cal(int valid, int rtc_val){ (void)valid; (void)rtc_val; }
+#endif
+int emu_count_mode(void){ return countMode; }
 /* Active colon animation + the civil/alt references. LST/SOLAR install colonModeAlt so the alt
  * timebases read as "not civil time" at a glance (an intentional honesty feature). */
 int emu_colon_mode(void){ return colonMode; }
