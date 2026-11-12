@@ -37,9 +37,9 @@ async function clock() {
   return c;
 }
 
-// 1. Off without tc_persist: nothing is written, nothing is restored.
+// 1. tc_persist = off (it is on by default): nothing is written, nothing is restored.
 {
-  const c = await clock();
+  const c = await clock(); c.cfg('tc_persist = off');
   c.learn(0.4, 20);
   check('tc_persist off: a learned wander is not written', c.gen() === 0 && c.storedCount() === 0);
   c.powerCycle();

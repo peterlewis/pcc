@@ -107,7 +107,10 @@ function upsert(lines, items) {
 {
   const c = await clock();
   c.usb(1);
-  c.save(['MODE_ISO8601_STD = enabled', 'MODE_UNIX = enabled', 'page_ms = 2000', '# a comment', 'brightness = 2000', 'seg_balance = 150']);
+  // freq_hold, the tempcomp trio and colon_balance are on by default: the file switches them off, so
+  // that each menu tap below switches one on, as the export's expected lines say.
+  c.save(['MODE_ISO8601_STD = enabled', 'MODE_UNIX = enabled', 'page_ms = 2000', '# a comment', 'brightness = 2000', 'seg_balance = 150',
+    'colon_balance = off', 'freq_hold = off', 'tc_learn = off', 'tc_apply = off', 'tc_persist = off']);
   c.drain();
   c.exStart();
   let set = parseSet(c.drain());

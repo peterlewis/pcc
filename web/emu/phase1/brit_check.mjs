@@ -111,7 +111,9 @@ if (!line().startsWith('$PMBRIT')) {
 check('off by default: no $PMBRIT in 3 s', drive(3000).length === 0);
 check('boot: the dimmer is in AUTO (src A)', read().src === 'A', JSON.stringify(read()));
 
-// 2. Framing: the exact bytes, NMEA checksum, CRLF, and the app's parser takes it.
+// 2. Framing: the exact bytes, NMEA checksum, CRLF, and the app's parser takes it. The exact line is
+//    the stock-balance one, so both balance keys are switched off for it (they are on by default).
+E.configLine('seg_balance = off'); E.configLine('colon_balance = off');
 E.setAdc(400); settle();
 {
   const s = line(), m = s.match(FRAME);

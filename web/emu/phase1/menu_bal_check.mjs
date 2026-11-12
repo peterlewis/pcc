@@ -91,11 +91,16 @@ eeApply();
 check(`armed BALANCE SURVIVES reboot (seg=${segBal()} col=${colBal()})`, segBal() === 1 && colBal() === 1);
 
 // precedence: config defines seg/colon_balance (KID_BALANCE) with a MISMATCHED mtime -> config wins,
-// override skipped; scribble off first, and it stays off.
-setBal(0, 0);
+// override skipped. BALANCE is on by default, so the stored choice must be OFF to be told apart from
+// it: store OFF, give the keys what the file says (on), and the menu's OFF must not come back.
+eeReset(); setMtime(0x5AA5, 0x1234);
+setBal(1, 1); gotoBalance(); ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL);  // enter, tap OFF, DONE
+check(`stored a BALANCE=off override (commit ${eeCommit()})`, ovrValid() === 1 && segBal() === 0);
+backToL0();
+setBal(1, 1);                                                  // the file's value
 cfgDef(1 << KID_BALANCE, 0); setMtime(0x1111, 0x2222);
 eeApply();
-check(`defined-in-config + mtime mismatch -> override skipped`, segBal() === 0 && colBal() === 0);
+check(`defined-in-config + mtime mismatch -> override skipped (seg=${segBal()} col=${colBal()})`, segBal() === 1 && colBal() === 1);
 
 // (review fix #3) a stored BALANCE=on override must NOT collapse a config-provided MANUAL strength to
 // AUTO(1) on boot. config parse sets the manual values first; menu_apply_overrides sees them already

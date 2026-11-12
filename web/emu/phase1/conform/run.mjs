@@ -6,7 +6,7 @@ import * as T from './truth.mjs';
 const anchors = T.selfTest();
 if (anchors.length){ console.error('GROUND-TRUTH ANCHORS FAILED — aborting:\n'+anchors.join('\n')); process.exit(2); }
 
-const emu = await loadEmu();
+const emu = await loadEmu({ stockPrecision: true });   // the dp/precision truth is the stock ladder: fade off
 const results = { pass:0, fail:0, cases:0, byKind:{}, fails:[] };
 function record(kind, ok, detail){
   results.cases++; results.byKind[kind] ??= {pass:0,fail:0};
