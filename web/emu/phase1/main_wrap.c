@@ -34,6 +34,9 @@
 #ifndef EMU_HAS_STAR
 #  define EMU_HAS_STAR 0
 #endif
+#ifndef EMU_HAS_WDT
+#  define EMU_HAS_WDT 0
+#endif
 #ifndef EMU_HAS_EE_RDFAULT
 #  define EMU_HAS_EE_RDFAULT 0
 #endif
@@ -694,6 +697,42 @@ const char* emu_menu_dump_line(void){
   menu_dump_step();
   return emu_pmtxts_buf;
 }
+/* Watchdog harness (wdt_check). The emulator has no IWDG, so the firmware counts its own start and
+ * refresh calls here; everything else is the firmware's real accounting. A "reset" is emu_wdt_boot:
+ * 1 = the watchdog fired, 0 = any other reset. emu_wdt_power_on fills the retained struct with
+ * noise, as RAM2 holds after a power cycle. get: 0 armed, 1 stood down, 2 resets, 3 consecutive,
+ * 4 last tag, 5 IWDG starts, 6 IWDG refreshes, 7 the config flag. */
+#if EMU_HAS_WDT
+void emu_wdt_power_on(void){ memset(&wdt_keep, 0xA5, sizeof wdt_keep); wdt_emu_starts = wdt_emu_kicks = 0; watchdog = 0; wdt_boot(0); }
+void emu_wdt_boot(int was_wdt_reset){ wdt_boot(was_wdt_reset ? 1 : 0); }
+void emu_wdt_poll(void){ wdt_poll(); }
+void emu_wdt_tag(int n){ wdt_keep.tag = (uint8_t)n; }
+void emu_wdt_advance(unsigned ms){ uwTick += ms; }
+int  emu_wdt_get(int f){
+  switch (f){
+    case 0: return wdt_armed;          case 1: return wdt_stood_down;
+    case 2: return wdt_keep.resets;    case 3: return wdt_keep.consecutive;
+    case 4: return wdt_keep.last_tag;  case 5: return (int)wdt_emu_starts;
+    case 6: return (int)wdt_emu_kicks; case 7: return watchdog;
+  }
+  return -1;
+}
+const char* emu_wdt_dump_line(void){
+  emu_pmtxts_buf[0] = 0;
+  hUsbDeviceFS.dev_state = USBD_STATE_CONFIGURED;
+  wdt_dump_pending = 1;
+  wdt_dump_step();
+  return emu_pmtxts_buf;
+}
+#else
+void emu_wdt_power_on(void){}
+void emu_wdt_boot(int w){ (void)w; }
+void emu_wdt_poll(void){}
+void emu_wdt_tag(int n){ (void)n; }
+void emu_wdt_advance(unsigned ms){ (void)ms; }
+int  emu_wdt_get(int f){ (void)f; return -1; }
+const char* emu_wdt_dump_line(void){ return ""; }
+#endif
 /* Read-and-clear the last CDC submit, so a check can let emu_poll pace a sentence and count what
  * actually went out. */
 static char emu_take_buf[sizeof emu_pmtxts_buf];
