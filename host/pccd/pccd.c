@@ -36,6 +36,7 @@
 //           -r  raw: bypass the sample prefilter (outlier gate + trimmed-mean aggregation)
 //           -t  self-test (SHA-1 / handshake / prefilter vectors) and exit
 //           -T  frame probe: burst-read the USB frame clock and report bracket widths (macOS)
+//           --no-config-sync  do not write the clock's menu choices into config.txt on its drive
 //           -h  print usage and exit
 //
 // chrony.conf:   refclock SOCK /var/run/chrony.pcc.sock refid PCC precision 1e-4
@@ -1017,6 +1018,7 @@ static int hist_migrate(const char *from, const char *to){
 // with the clock. macOS mounts it at /Volumes/CLOCK; Linux wherever udisks puts it (/media/<you>/CLOCK,
 // /run/media/<you>/CLOCK) — found by its basename in /proc/mounts.
 static char g_drive[1024] = "";              // mount point; "" = not mounted
+static int  g_cfg_ask = 1;                   // ask the clock for its menu choices at the next chance (config sync, below)
 static char g_drive_err[160] = "";           // the volume is mounted but this process can't read it: why (macOS)
 static int exe_realpath(char *out, size_t cap);   // defined with the self-update helpers; the hint names the binary
 static int drive_has_config(const char *dir){
@@ -1075,6 +1077,7 @@ static void drive_scan(void){
   if (found[0]) g_drive_err[0]=0;
   if (strcmp(found,g_drive)){
     snprintf(g_drive,sizeof g_drive,"%s",found);
+    if (found[0]) g_cfg_ask = 1;                             // the drive is here: ask the clock for its menu choices
     if (found[0]) fprintf(stderr,"[pccd] clock drive mounted at %s — config.txt served on /drive\n",found);
     else fprintf(stderr,"[pccd] clock drive unmounted\n");
   }
@@ -1162,6 +1165,156 @@ static void sha1(const unsigned char *msg, size_t len, unsigned char out[20]){
 
 // ---- WebSocket / HTTP server (RFC 6455, text frames, localhost only) ------------------------------
 #define MAXCLI 8
+// ---- config.txt follows the clock's menu ($PMCFG) --------------------------------------------------
+// A setting changed with the clock's own buttons is kept in SETTINGS.BIN, where config.txt cannot show
+// it: the file says one thing and the clock runs another. Firmware from 2026-11 sends its menu choices
+// as config.txt lines, after every saved change and when asked ("menu_export = on"):
+//   $PMCFG,<gen>,<n>,<key>,<value>*CC   n counts from 1; an empty value means "no line for this key"
+//   $PMCFG,<gen>,0,END,<count>*CC
+// The daemon gives each key that value in config.txt on the clock's drive. The clock then reads the
+// file, finds the line new or changed, and drops its stored choice: the file becomes the one record.
+// A set that would leave the file as it is writes nothing. The write happens in a detached child (a
+// FAT write with fsync takes tens of milliseconds, and the timing loop must not wait for it), the old
+// file is kept under <history>/config-backups, and a comment line records the sync:
+//   # synced 2026-11-12 08:45: 2 settings from the clock's menu (pccd)
+// --no-config-sync turns it off. Older firmware never sends $PMCFG and ignores the request.
+#define CFGS_MAX 96
+#define CFG_MARK "# synced"
+typedef struct { char key[40]; char val[24]; } CfgItem;
+static int opt_cfgsync = 1;
+static struct { long gen; int n, open; CfgItem it[CFGS_MAX]; } g_cfgset;
+
+// A config.txt line's key as the clock reads it: spaces dropped, lower case. "" for a comment, a
+// blank line, or a line with no '='. (The clock takes '#' or ';' as a comment where the line starts.)
+static void cfg_line_key(const char *l, size_t n, char *out, size_t cap){
+  size_t i=0, o=0; out[0]=0;
+  while (i<n && l[i]==' ') i++;
+  if (i<n && (l[i]=='#' || l[i]==';')) return;
+  const char *eq=memchr(l,'=',n); if (!eq) return;
+  for (const char *p=l; p<eq && o+1<cap; p++) if (*p!=' ') out[o++]=(char)tolower((unsigned char)*p);
+  out[o]=0;
+}
+static void cfg_line_val(const char *l, size_t n, char *out, size_t cap){
+  size_t o=0; out[0]=0;
+  const char *eq=memchr(l,'=',n); if (!eq) return;
+  for (const char *p=eq+1; p<l+n && o+1<cap; p++) if (*p!=' ' && *p!='\r' && *p!='\n') out[o++]=*p;
+  out[o]=0;
+}
+// Give each item's key its value in a config.txt. The first line for a key is rewritten in place and
+// keeps its position; later lines for the same key go; a key with no line gets one at the end; an
+// empty value removes the key's lines. Comments, blank lines and every other key are left byte for
+// byte. Returns 1 with the new text in *out (malloc'd) when anything changed, and then the old sync
+// comment is replaced by `marker`; returns 0, *out NULL, when the file already says all of it.
+static int cfg_upsert(const char *in, size_t n, const CfgItem *it, int ni, const char *marker, char **out, size_t *outn){
+  *out=NULL; *outn=0;
+  if (ni<=0 || ni>CFGS_MAX) return 0;
+  const char *eol = (n>=2 && memmem(in,n,"\r\n",2)) ? "\r\n" : "\n";
+  size_t cap = n + (size_t)ni*80 + strlen(marker) + 16, o=0;
+  char *b=malloc(cap); if (!b) return 0;
+  char used[CFGS_MAX]; memset(used,0,sizeof used);
+  int changed=0;
+  for (size_t i=0;i<n;){
+    const char *nl=memchr(in+i,'\n',n-i);
+    size_t ll = nl ? (size_t)(nl-(in+i))+1 : n-i;          // the line with its line ending
+    const char *l=in+i; i+=ll;
+    if (ll>=strlen(CFG_MARK) && !strncmp(l,CFG_MARK,strlen(CFG_MARK))) continue;   // the old sync comment
+    char key[64]; cfg_line_key(l,ll,key,sizeof key);
+    int j=-1;
+    if (key[0]) for (int k=0;k<ni;k++) if (!strcasecmp(it[k].key,key)){ j=k; break; }
+    if (j<0){ memcpy(b+o,l,ll); o+=ll; continue; }
+    if (!it[j].val[0] || used[j]){ changed=1; continue; }  // "no line for this key", or a second line for it
+    used[j]=1;
+    char val[64]; cfg_line_val(l,ll,val,sizeof val);
+    if (!strcmp(val,it[j].val)){ memcpy(b+o,l,ll); o+=ll; continue; }   // already says it
+    o += (size_t)snprintf(b+o,cap-o,"%s = %s%s",it[j].key,it[j].val,eol); changed=1;
+  }
+  for (int k=0;k<ni;k++) if (!used[k] && it[k].val[0]){
+    if (o && b[o-1]!='\n') o += (size_t)snprintf(b+o,cap-o,"%s",eol);
+    o += (size_t)snprintf(b+o,cap-o,"%s = %s%s",it[k].key,it[k].val,eol); changed=1;
+  }
+  if (!changed){ free(b); return 0; }
+  if (o && b[o-1]!='\n') o += (size_t)snprintf(b+o,cap-o,"%s",eol);
+  o += (size_t)snprintf(b+o,cap-o,"%s%s",marker,eol);
+  *out=b; *outn=o; return 1;
+}
+static int drive_resolve(const char *want, char *out, size_t cap);
+// A complete set has arrived: bring config.txt on the clock's drive into line with it.
+static void cfg_sync_apply(void){
+  if (!opt_cfgsync || g_cfgset.n<=0 || !g_drive[0]) return;
+  char full[1400];
+  if (drive_resolve("config.txt",full,sizeof full)!=0) return;
+  pid_t k=fork();
+  if (k<0) return;
+  if (k>0){ waitpid(k,NULL,0); return; }
+  if (fork()!=0) _exit(0);                                    // detached: the timing loop does not wait
+  for (int fd=3; fd<1024; fd++) close(fd);
+  int fd=open(full,O_RDONLY); struct stat st;
+  if (fd<0 || fstat(fd,&st)!=0 || st.st_size>64*1024){ fprintf(stderr,"[pccd] config sync: cannot read %s\n",full); _exit(0); }
+  char *old=malloc((size_t)st.st_size+1); size_t got=0;
+  if (old) while (got<(size_t)st.st_size){ ssize_t r=read(fd,old+got,(size_t)st.st_size-got); if (r<=0) break; got+=(size_t)r; }
+  close(fd);
+  if (!old || got!=(size_t)st.st_size){ fprintf(stderr,"[pccd] config sync: short read of %s\n",full); _exit(0); }
+  char mark[160], when[32]; time_t now=time(NULL); struct tm tmv; localtime_r(&now,&tmv);
+  strftime(when,sizeof when,"%Y-%m-%d %H:%M",&tmv);
+  snprintf(mark,sizeof mark,CFG_MARK " %s: %d setting%s from the clock's menu (pccd)",when,g_cfgset.n,g_cfgset.n==1?"":"s");
+  char *neu; size_t nn;
+  if (!cfg_upsert(old,got,g_cfgset.it,g_cfgset.n,mark,&neu,&nn)) _exit(0);        // the file already says all of it
+  if (opt_hist && strcmp(opt_hist,"off")){                    // keep the file as it was
+    char bd[1100], bp[1200], stamp[32]; strftime(stamp,sizeof stamp,"%Y%m%d-%H%M%S",&tmv);
+    snprintf(bd,sizeof bd,"%s/config-backups",opt_hist); mkdir(bd,0755);
+    snprintf(bp,sizeof bp,"%s/config-%s.txt",bd,stamp);
+    FILE *bf=fopen(bp,"wb"); if (bf){ fwrite(old,1,got,bf); fclose(bf); }
+  }
+  char tmp[1400]; snprintf(tmp,sizeof tmp,"%s/config.txt.pccd-new",g_drive);
+  int ok=0;
+  FILE *f=fopen(tmp,"wb");
+  if (f){ ok = fwrite(neu,1,nn,f)==nn && fflush(f)==0 && fsync(fileno(f))==0; fclose(f); }
+  if (ok && rename(tmp,full)!=0) ok=0;
+  if (!ok){                                                   // the FAT driver refused the swap: write in place
+    unlink(tmp);
+    f=fopen(full,"wb");
+    if (f){ ok = fwrite(neu,1,nn,f)==nn && fflush(f)==0 && fsync(fileno(f))==0; fclose(f); }
+  }
+  fprintf(stderr, ok ? "[pccd] config sync: wrote %d menu setting%s into %s\n" : "[pccd] config sync: could not write %d setting%s to %s\n",
+          g_cfgset.n, g_cfgset.n==1?"":"s", full);
+  _exit(0);
+}
+// One $PMCFG line from the clock. A set is used only if it arrives whole and in order.
+static void cfg_sync_line(const char *line){
+  const char *st=strrchr(line,'*');
+  if (!st || strlen(st)<3) return;
+  unsigned cs=0; for (const char *p=line+1;p<st;p++) cs^=(unsigned char)*p;
+  if (cs!=(unsigned)strtoul(st+1,NULL,16)) return;
+  char b[160]; size_t bl=(size_t)(st-line);
+  if (bl<8 || bl>=sizeof b) return;
+  memcpy(b,line,bl); b[bl]=0;
+  char *f[4]; int nf=0; char *s=b+7; f[nf++]=s;                // gen, n, key, value
+  for (; *s && nf<4; s++) if (*s==','){ *s=0; f[nf++]=s+1; }
+  if (nf!=4) return;
+  long gen=atol(f[0]); int idx=atoi(f[1]);
+  if (idx==0){
+    if (g_cfgset.open && gen==g_cfgset.gen && !strcmp(f[2],"END") && atoi(f[3])==g_cfgset.n) cfg_sync_apply();
+    g_cfgset.open=0; g_cfgset.n=0; return;
+  }
+  if (idx==1){ g_cfgset.open=1; g_cfgset.gen=gen; g_cfgset.n=0; }
+  if (!g_cfgset.open || gen!=g_cfgset.gen || idx!=g_cfgset.n+1 || g_cfgset.n>=CFGS_MAX ||
+      !f[2][0] || strlen(f[2])>=sizeof g_cfgset.it[0].key || strlen(f[3])>=sizeof g_cfgset.it[0].val){ g_cfgset.open=0; g_cfgset.n=0; return; }
+  // These go into a file on the user's drive: a key is letters, digits and '_'; a value adds '.', '+', '-'.
+  for (const char *p=f[2]; *p; p++) if (!isalnum((unsigned char)*p) && *p!='_'){ g_cfgset.open=0; g_cfgset.n=0; return; }
+  for (const char *p=f[3]; *p; p++) if (!isalnum((unsigned char)*p) && !strchr("_.+-",*p)){ g_cfgset.open=0; g_cfgset.n=0; return; }
+  snprintf(g_cfgset.it[g_cfgset.n].key,sizeof g_cfgset.it[0].key,"%s",f[2]);
+  snprintf(g_cfgset.it[g_cfgset.n].val,sizeof g_cfgset.it[0].val,"%s",f[3]);
+  g_cfgset.n++;
+}
+// Ask the clock for its menu choices: when the port opens, and when its drive appears.
+static void cfg_ask(int sfd){
+  if (sfd<0 || !opt_cfgsync) return;
+  static const char cmd[] = "menu_export = on\r\n";
+  ssize_t w = write(sfd, cmd, sizeof cmd - 1); (void)w;
+  raw_line("menu_export = on",1);
+  g_cfg_ask = 0;
+}
+
 // buf holds one HTTP request INCLUDING a POST /drive body (config.txt is a few KB; 64 KB is the cap).
 typedef struct { int fd; int ws; char buf[65536]; int len; char lb[256]; int li; double t0; } Client;
 static Client g_cli[MAXCLI];
@@ -1373,6 +1526,41 @@ static int self_test(void){
       snprintf(t.buf,sizeof t.buf,"%s",C[i].req); cors_allow(&t,h,sizeof h);
       int has=strstr(h,"Allow-Origin")!=NULL;
       if (C[i].want ? !strstr(h,C[i].want) : has){ fprintf(stderr,"cors FAIL %u: %s\n",i,h); fail=1; } } }
+  // config sync: the upsert that puts the clock's menu choices into config.txt, and the set reader.
+  { static const CfgItem it[] = { {"page_ms","2250"}, {"freq_hold","on"}, {"MODE_UNIX","disabled"}, {"brightness",""}, {"nmea","rmc"} };
+    const char *mk = CFG_MARK " T";
+    static const struct { const char *in, *want; } U[] = {
+      // rewritten in place, comment kept, a duplicate dropped, "no line" removes, a missing key appended, CRLF kept
+      { "# top\r\nPage_MS = 2000\r\nbrightness = 2000\r\nMODE_UNIX=enabled\r\npage_ms = 9\r\nnmea = rmc\r\n",
+        "# top\r\npage_ms = 2250\r\nMODE_UNIX = disabled\r\nnmea = rmc\r\nfreq_hold = on\r\n# synced T\r\n" },
+      // a commented-out line is not the key's line; LF file; no final newline; the old sync comment is replaced
+      { "#page_ms = 1\n# synced old\n; freq_hold = off\nnmea=rmc",
+        "#page_ms = 1\n; freq_hold = off\nnmea=rmc\npage_ms = 2250\nfreq_hold = on\nMODE_UNIX = disabled\n# synced T\n" },
+      // already says all of it: no change, and so no write
+      { "page_ms=2250\nfreq_hold = on\nMODE_UNIX = disabled\n# synced old\nnmea = rmc\n", NULL },
+    };
+    for (unsigned i=0;i<sizeof U/sizeof *U;i++){
+      char *o; size_t on; int ch=cfg_upsert(U[i].in,strlen(U[i].in),it,5,mk,&o,&on);
+      if (U[i].want ? (!ch || on!=strlen(U[i].want) || memcmp(o,U[i].want,on)) : ch){
+        fprintf(stderr,"cfg_upsert FAIL %u: %.*s\n",i,ch?(int)on:0,ch?o:""); fail=1; }
+      free(o); }
+    // the set reader: whole and in order is taken; a bad checksum, a gap or a strange value is not
+    int save=opt_cfgsync; opt_cfgsync=0;                       // parse only: never touch a drive from the self-test
+    static const struct { const char *l[4]; int n; } S[] = {
+      { { "$PMCFG,7,1,page_ms,2250*4C", "$PMCFG,7,2,freq_hold,on*33", NULL }, 2 },
+      { { "$PMCFG,7,1,page_ms,2250*4D", NULL }, 0 },           // checksum
+      { { "$PMCFG,7,2,freq_hold,on*33", NULL }, 0 },           // starts at 2
+      { { "$PMCFG,7,1,text,a/b*00", NULL }, 0 },               // a value with a '/' (and a wrong checksum)
+    };
+    for (unsigned i=0;i<sizeof S/sizeof *S;i++){
+      g_cfgset.open=0; g_cfgset.n=0;
+      for (int k=0;k<4 && S[i].l[k];k++){
+        char b[96]; snprintf(b,sizeof b,"%s",S[i].l[k]);
+        const char *st=strrchr(b,'*'); unsigned cs=0; for (const char *q=b+1;q<st;q++) cs^=(unsigned char)*q;
+        if (i==0 || i==2) snprintf((char*)st,8,"*%02X",cs);   // the good sets carry a computed checksum
+        cfg_sync_line(b); }
+      if (g_cfgset.n!=S[i].n){ fprintf(stderr,"cfg set FAIL %u: %d lines taken\n",i,g_cfgset.n); fail=1; } }
+    g_cfgset.open=0; g_cfgset.n=0; opt_cfgsync=save; }
   fprintf(stderr,"[pccd] self-test %s\n",fail?"FAILED":"OK");
   return fail;
 }
@@ -2222,6 +2410,7 @@ int main(int argc, char **argv){
     if (!strcmp(a,"-h") || !strcmp(a,"--help")){ fputs(USAGE,stdout); return 0; }
     else if (!strcmp(a,"--version")){ puts(PCCD_VERSTR); return 0; }
     else if (!strcmp(a,"--update")) opt_do_update=1;
+    else if (!strcmp(a,"--no-config-sync")) opt_cfgsync=0;                     // never write the menu's choices into config.txt
     else if (!strcmp(a,"--self-update-dry")) opt_do_update=opt_update_dry=1;   // fetch+verify, but don't swap
     else if (!strcmp(a,"--web-refresh")) opt_do_webref=1;                      // pull the latest app from Pages, then exit
     else if (!strcmp(a,"--web-refresh-dry")) opt_do_webref=opt_webref_dry=1;   // fetch+verify, but don't swap
@@ -2343,6 +2532,7 @@ int main(int argc, char **argv){
     // it off behind our back. Costs one 10-byte write a minute in the worst case (no GPS lock).
     if (sfd>=0 && t_iter - g_last_ppson > 60e9 &&
         (g_last_sample_mono==0 || t_iter - g_last_sample_mono > 60e9)) pps_assert(sfd);
+    if (sfd>=0 && g_cfg_ask && g_drive[0]) cfg_ask(sfd);  // port and drive both here: what has the menu changed?
     // (re)open serial + USB interface — the clock re-enumerates on config edits and firmware flashes,
     // so treat disconnection as routine and retry quietly.
     if (sfd<0 && now_mono_ns()>next_retry){
@@ -2352,6 +2542,7 @@ int main(int argc, char **argv){
         if (g_nodev_warned){ fprintf(stderr,"[pccd] clock reappeared: %s\n",dev); g_nodev_warned=0; }
         g_serial_open=1;
         pps_assert(sfd);                               // our feed, our switch — the clock boots with pps=off
+        g_cfg_ask = 1;                                 // a (re)connected clock may hold menu choices config.txt lacks
         usb_close(); usb_open(0x0483,-1);               // STM32 VID; frame clock rides the same bus
 #ifdef __APPLE__
         fprintf(stderr,"[pccd] serial open: %s%s\n",dev,g_usb?"":"  (no USB frame clock — arrival timestamps, ~ms accuracy)");
@@ -2429,6 +2620,7 @@ int main(int argc, char **argv){
           raw_line(line,0);                              // ...and into the full-stream record
           if (len>10 && (line[0]=='$') && strncmp(line,"$PMTXTS,",8))
             hist_feed_nmea(line,(double)time(NULL));     // GGA/GSV update the recorder's sat table
+          if (len>12 && !strncmp(line,"$PMCFG,",7)) cfg_sync_line(line);   // the menu's choices, for config.txt
           if (len>8 && !strncmp(line,"$PMTXTS,",8)){
             uint64_t hf; double hmono; int gotF=(usb_frame(&hf,&hmono)==0);
             Pmtxts x;

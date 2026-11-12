@@ -35,8 +35,9 @@ PCC works with a stock clock: the face, SKY and config editing need nothing but 
 | `$PMSTAR` | SKY: the next star transits |
 | `$PMBRIT` | FACE: the brightness the clock's own dimmer has chosen |
 | `SETTINGS.BIN`, the menu's saved choices | DEVICE: read with `config.txt`, so the editor shows the settings the clock is actually using |
+| `$PMCFG`, the menu's choices as `config.txt` lines | `pccd` writes them into `config.txt` on the clock's drive, so the file shows what the clock is doing |
 
-**Where the firmware is tested.** The emulator test suites for the firmware live here, in [`web/emu/phase1`](web/emu/phase1): 34 suites that drive the real firmware code. A firmware change comes with a test in this repository.
+**Where the firmware is tested.** The emulator test suites for the firmware live here, in [`web/emu/phase1`](web/emu/phase1): 36 suites that drive the real firmware code. A firmware change comes with a test in this repository.
 
 **Where it is tuned.** `pccd` records everything a connected clock reports. The firmware's holdover behaviour was designed from those recordings and not from estimates: the frequency hold, the bound behind the fading digits, and the discovery that the millisecond count ran one ahead of GPS all came from them.
 
