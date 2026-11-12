@@ -34,6 +34,9 @@
 #ifndef EMU_HAS_STAR
 #  define EMU_HAS_STAR 0
 #endif
+#ifndef EMU_HAS_FREQ_HOLD
+#  define EMU_HAS_FREQ_HOLD 0
+#endif
 #ifndef EMU_HAS_WDT
 #  define EMU_HAS_WDT 0
 #endif
@@ -697,6 +700,49 @@ const char* emu_menu_dump_line(void){
   menu_dump_step();
   return emu_pmtxts_buf;
 }
+/* Frequency-hold harness (freq_hold_check). An "edge" is one PPS: the DWT count advances by the
+ * nominal 80,000,000 plus d ticks, and the firmware's own gate (freq_hold) and learner run, exactly
+ * as tc_housekeeping does. A "second" advances the clock one second, locked (a PPS arrived) or in
+ * holdover, runs the real governor, and returns the extra ticks the tick ISR would add across that
+ * second: (LOAD - nominal) * 1000 + remainder. */
+#if EMU_HAS_FREQ_HOLD
+void emu_fh_reset(void){
+  if (!tc_nom_load) tc_nom_load = 79999u;
+  fh_count = fh_head = fh_n = 0; fh_sum = 0; fh_have_prev = 0; fh_warm = 0;
+  for (unsigned i = 0; i < FH_BLOCKS; i++) fh_ring[i] = 0;
+}
+void emu_fh_edge(int d, int valid){
+  pps_cap.seq++; pps_cap.dwt_pps += (tc_nom_load + 1u) * 1000u + (uint32_t)d;
+  pps_cap.flags = valid ? 3 : 0;
+  if (freq_hold) fh_learn();
+}
+void emu_fh_missed_edge(void){ pps_cap.seq++; pps_cap.dwt_pps += (tc_nom_load + 1u) * 1000u; }   /* the main loop never saw it */
+int  emu_fh_estimate(void){ int32_t e = 0; return fh_estimate(&e) ? (int)e : -2000000000; }
+int  emu_fh_blocks(void){ return fh_count; }
+void emu_fh_temp(int t){ die_temp_c = (int16_t)t; }
+int  emu_fh_second(int locked){
+  currentTime++; had_pps = 1;
+  if (locked) last_pps_time = (uint32_t)currentTime;
+  tc_governor();
+  return tc_steer_on ? (int)((tc_load_base - (int32_t)tc_nom_load) * 1000 + tc_rem) : 0;
+}
+int  emu_fh_steering(void){ return tc_steer_on; }
+double emu_fh_disp_ppm(void){ return tc_disp_hse_ok ? (double)tc_disp_hse : -999.0; }
+void emu_tc_dump_start(void){ hUsbDeviceFS.dev_state = USBD_STATE_CONFIGURED; tc_dump_pending = 1; }
+const char* emu_tc_dump_next(void){ emu_pmtxts_buf[0] = 0; tc_dump_step(); return emu_pmtxts_buf; }
+#else
+void emu_fh_reset(void){}
+void emu_fh_edge(int d, int valid){ (void)d; (void)valid; }
+void emu_fh_missed_edge(void){}
+int  emu_fh_estimate(void){ return -2000000000; }
+int  emu_fh_blocks(void){ return 0; }
+void emu_fh_temp(int t){ (void)t; }
+int  emu_fh_second(int locked){ (void)locked; return 0; }
+int  emu_fh_steering(void){ return 0; }
+double emu_fh_disp_ppm(void){ return -999.0; }
+void emu_tc_dump_start(void){}
+const char* emu_tc_dump_next(void){ return ""; }
+#endif
 /* Watchdog harness (wdt_check). The emulator has no IWDG, so the firmware counts its own start and
  * refresh calls here; everything else is the firmware's real accounting. A "reset" is emu_wdt_boot:
  * 1 = the watchdog fired, 0 = any other reset. emu_wdt_power_on fills the retained struct with

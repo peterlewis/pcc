@@ -175,6 +175,9 @@ pps = off
 # Watchdog: reset the clock if its firmware hangs for 8 seconds. It restarts from the RTC in about
 # a second. Not armed during a firmware update. Once armed, "off" takes effect at the next reset.
 #watchdog = on
+# Frequency hold: without GPS, keep the oscillator frequency that was measured against GPS. The
+# clock needs 48 seconds of lock first. Works alone or with tc_apply.
+#freq_hold = on
 `;
 
 // --- config.txt grammar (mirrors the firmware): `key = value`, `#`/`;` comments, case-insensitive
