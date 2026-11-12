@@ -34,6 +34,9 @@
 #ifndef EMU_HAS_STAR
 #  define EMU_HAS_STAR 0
 #endif
+#ifndef EMU_HAS_EE_RDFAULT
+#  define EMU_HAS_EE_RDFAULT 0
+#endif
 #ifndef EMU_HAS_BRIT
 #  define EMU_HAS_BRIT 0
 #endif
@@ -130,6 +133,7 @@ double emu_tc_probe(int field){ (void)field; return 0; }
 #endif
 unsigned int   emu_now(void){ return (unsigned int)currentTime; }
 
+static int emu_disp_on = 1;   /* display power model: see HAL_TIM_PWM_Start/Stop below */
 /* --- boot a GPS-locked civil clock + 1 kHz tick dispatched through the real vector table --- */
 void emu_boot(unsigned int t){
   huart2.Instance = USART2;   /* sendLatch() writes huart2.Instance->TDR (the date-board latch); MX
@@ -141,6 +145,7 @@ void emu_boot(unsigned int t){
   config.tolerance_1ms = 1000; config.tolerance_10ms = 10000; config.tolerance_100ms = 100000;
   config.brightness_override = -1.0f;   /* AUTO: readConfigFile's reset, before any config line */
   config.modes_enabled[MODE_ISO8601_STD] = 1;
+  emu_disp_on = 1;                      /* main() ends its init with displayOn() */
   setNextTimestamp(currentTime);
   setPrecision();
 }
@@ -162,6 +167,12 @@ HAL_StatusTypeDef HAL_DMA_Start(DMA_HandleTypeDef *hdma, uint32_t src, uint32_t 
   return HAL_OK;
 }
 HAL_StatusTypeDef HAL_DMA_Abort(DMA_HandleTypeDef *hdma){ (void)hdma; return HAL_OK; }
+/* Display power model. displayOff() stops the colon PWM (TIM2) and displayOn() restarts it; nothing
+ * else in the emulator records which ran last, so a clock left dark by a missed displayOn() looked
+ * exactly like a lit one. Track it the same way as the colon DMA above (native wins over the stub). */
+HAL_StatusTypeDef HAL_TIM_PWM_Start(TIM_HandleTypeDef *htim, uint32_t ch){ (void)ch; if (htim == &htim2) emu_disp_on = 1; return HAL_OK; }
+HAL_StatusTypeDef HAL_TIM_PWM_Stop(TIM_HandleTypeDef *htim, uint32_t ch){ (void)ch; if (htim == &htim2) emu_disp_on = 0; return HAL_OK; }
+int emu_display_on(void){ return emu_disp_on; }
 
 void emu_tick(void){
   colon_dma_ms++;               /* the colon DMA free-runs in the SysTick (1 ms) domain */
@@ -272,6 +283,13 @@ void   emu_settings_host_write(unsigned off, unsigned len, int val){
 int    emu_ee_backing(void){ return (int)ee_backing; }        /* 0 NONE / 1 QSPI */
 int    emu_ee_sfile_state(void){ return (int)ee_sfile_state; }/* 0 no file / 1 ok / 2 fragmented */
 int    emu_ee_next(void){ return (int)ee_next; }              /* append cursor (skip-to-blank checks) */
+/* QSPI read-fault injection (settings_rdfault_check): while on, every store read fails the way a HAL
+ * QSPI error does on the clock - zeros come back. Firmware older than the fix has no injector. */
+#if EMU_HAS_EE_RDFAULT
+void   emu_settings_rdfault(int on){ ee_sfile_rdfault = on ? 1 : 0; }
+#else
+void   emu_settings_rdfault(int on){ (void)on; }
+#endif
 int    emu_menu_dirty(void){ return menu_dirty; }
 int    emu_menu_val(void){ return (int)menu_val; }   /* raw editor value (display renders unit forms) */
 void   emu_factory_reset(void){ factory_reset_pending = 1; factory_reset_step(); }   /* factory-reset the menu store */
@@ -460,6 +478,7 @@ void emu_boot_cold(unsigned int t){
   config.brightness_override = -1.0f;   /* AUTO: readConfigFile's reset, before any config line */
   config.modes_enabled[MODE_ISO8601_STD] = 1;
   latitude = 0.0f; longitude = 0.0f;
+  emu_disp_on = 1;
   /* ZONE 2 globals are .data on silicon — power-on restores their initialisers. Mirror that. */
   loadedZone2[0] = 0; offset2 = 0; zone2_fixed = 0; delayedLoadZone2 = 0; preloadZone2[0] = 0;
   delayedLoadRules = 0;   /* likewise a ZONE_OVERRIDE that emu_poll held back: power-on drops it */
@@ -664,6 +683,15 @@ const char* emu_pmbrit_line(void){
   hUsbDeviceFS.dev_state = USBD_STATE_CONFIGURED;  /* satisfy the host-present gate */
   emitBrightnessReport();
 #endif
+  return emu_pmtxts_buf;
+}
+/* "menu_dump = on": one emit through the firmware's own menu_dump_step(), so a check can read the
+ * store diagnostic for each SETTINGS.BIN state. Empty string = the firmware dropped the line. */
+const char* emu_menu_dump_line(void){
+  emu_pmtxts_buf[0] = 0;
+  hUsbDeviceFS.dev_state = USBD_STATE_CONFIGURED;
+  menu_dump_pending = 1;
+  menu_dump_step();
   return emu_pmtxts_buf;
 }
 /* Read-and-clear the last CDC submit, so a check can let emu_poll pace a sentence and count what

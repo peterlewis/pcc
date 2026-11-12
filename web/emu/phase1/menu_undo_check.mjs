@@ -60,6 +60,26 @@ boot(1718971200); setPos(51.48, 0); en(MODE.LST); sec(2);
 ev(EVT.BTN1); poll(); menuTick(3000); ev(EVT.S1); ev(EVT.REL);
 check(`a deliberate tap 3 s before the chord is kept (mode ${mode()})`, layer() === 1 && mode() === MODE.LST && countMode() === COUNT_ALT);
 
+// The same leak into STANDBY. Standby turns the display off from the DAC callback once the rail has
+// ramped down (about 0.6 s), and only nextMode's exit path turns it back on. The old bare-write undo
+// put the mode back to ISO and left the display dark: a clock that is "showing" time on nothing.
+{
+  const dacStep = w('emu_dac_step'), displayOn = w('emu_display_on', 'number');
+  const STANDBY = w('emu_mode_id', 'number', ['string'])('MODE_STANDBY');
+  for (let i = 0; i < 6 && layer() !== 0; i++) { ev(EVT.S2); ev(EVT.REL); }   // the case above ends inside the menu: leave it
+  boot(1718971200); en(STANDBY); sec(2);
+  check('standby leak: starts lit on the ISO face', mode() === MODE.ISO && displayOn() === 1);
+  ev(EVT.BTN1); poll();                                // the leaked tap: ISO -> STANDBY
+  for (let i = 0; i < 10; i++) dacStep();              // 1 s of 10 Hz DAC callbacks: the rail ramps down, displayOff() runs
+  check('standby leak: the leaked tap put the clock in standby and the display went off', mode() === STANDBY && displayOn() === 0);
+  menuTick(300); ev(EVT.S1); ev(EVT.REL);              // the chord lands: SETUP, released on it
+  check('standby leak: the menu opened and the mode is back to ISO', layer() === 1 && mode() === MODE.ISO);
+  check('standby leak: the display is back on', displayOn() === 1);
+  for (let i = 0; i < 10; i++) dacStep();
+  sec(2);
+  check(`standby leak: still lit and civil 2 s later (row ${row()})`, displayOn() === 1 && countMode() === COUNT_NORMAL && civilNow());
+}
+
 let fail = 0;
 for (const r of results) { if (!r.pass) fail++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}`); }
 console.log(fail ? `\n${fail} FAIL` : `\nALL PASS`);
