@@ -1,0 +1,24 @@
+# PPS edges, then a holdover: the per-second engine. Both builds must give the same trace.
+bootcold 1783200000
+enable 0
+tick 300
+snap cold
+setpos 51.4779 0.0
+nmea $GNRMC,230353.00,A,5128.67400,N,00000.00000,E,0.004,,050726,,,A,V*00
+tick 900
+pps
+tick 100
+snap pps1
+tick 900
+pps
+tick 100
+snap pps2
+tick 900
+pps
+tick 100
+pendsv
+snap pps3
+tick 5000
+snap hold5
+tick 60000
+snap hold65

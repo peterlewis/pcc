@@ -10,16 +10,23 @@
 //     12 ftime u16 | 14 simple_mask u16 | 16 modes_mask_lo u32 | 20 modes_val_lo u32 | 24 brightness i16 |
 //     26 colon u8 | 27 alt_colon u8 | 28 page_ms u16 | 30 sig_fade u8 | 31 pps u8 | 32 nmea u8 |
 //     33 matrix_freq u32 | 37 tc u8 | 38 bal u8 | 39 cuckoo u8 | 40 modes_mask_hi u32 |
-//     44 modes_val_hi u32 | 48 brit u8 | 49..61 rsvd | 62 crc16.
+//     44 modes_val_hi u32 | 48 brit u8 | 49 freq_hold u8 | 50 watchdog u8 | 51..61 rsvd | 62 crc16.
 //   · CRC-16-CCITT (poly 0x1021, init 0xFFFF) over bytes 0..61; the winner is the highest-generation
 //     record that passes magic + schema + CRC (a torn write self-rejects, exactly like ee_scan).
-//   · MERGE RULE (menu_apply_overrides): an override applies iff the key was menu-set AND
-//     (config.txt does not define that key, OR the stored config.txt-mtime stamp equals config.txt's
-//     current mtime — i.e. the file has not been re-saved since the menu edit). A zero stamp never
-//     matches. Re-saving config.txt therefore re-asserts config for the keys it defines.
+//   · MERGE RULE. Firmware from 2026-11 (menu_reconcile) works one setting at a time: a stored choice
+//     applies unless config.txt's line for that setting is new or has changed since the last merge,
+//     and a choice the file beats is DELETED from the store. It also writes a "file record" (magic
+//     "MK4X", same generation) in the slot after each menu record, holding what config.txt said at
+//     that merge. So when the winning record has its file record, the store already holds only the
+//     choices that stand, and every one of them applies.
+//     A store without a file record is from earlier firmware, which used the whole file's stamp: an
+//     override applies iff config.txt does not define that key, OR the stored config.txt-mtime stamp
+//     equals config.txt's current mtime. A zero stamp never matches.
 
 export const EE_MAGIC = 0x4d4b3445;         // "MK4E" read as u32-LE
 export const EE_SCHEMA = 1;
+export const EE_XMAGIC = 0x4d4b3458;        // "MK4X": the file record that follows a menu record
+export const EE_XSCHEMA = 0x5801;
 const REC_SZ = 64, PAGE_SZ = 4096, PAGES = [0x0000, 0x1000], SLOTS = PAGE_SZ / REC_SZ;
 
 // KID numbering (main.h) + the config.txt keys that mark each KID "defined by config this load"
@@ -38,6 +45,8 @@ export const KIDS = [
   { kid: 10, id: 'balance', label: 'LED BALANCE', cfgKeys: ['seg_balance', 'colon_balance'] },
   { kid: 12, id: 'cuckoo', label: 'CUCKOO', cfgKeys: ['cuckoo'] },
   { kid: 13, id: 'brit', label: 'DIMMER REPORT', cfgKeys: ['brightness_report'] },
+  { kid: 14, id: 'freqHold', label: 'FREQ HOLD', cfgKeys: ['freq_hold'] },
+  { kid: 15, id: 'watchdog', label: 'WATCHDOG', cfgKeys: ['watchdog'] },
 ];
 
 // Display-name tables (enum order from main.h — used to render values, and to synthesize the
@@ -82,7 +91,7 @@ export function parseSettingsBin(buf) {
       if (crc16ccitt(u8.subarray(off, off + 62), 62) !== dv.getUint16(off + 62, true)) continue;   // torn write → reject
       out.validRecords++;
       const gen = dv.getUint32(off + 4, true);
-      if (!best || gen > best.gen) best = { gen, off };
+      if (!best || gen > best.gen) best = { gen, off, base, slot: s };
     }
   }
   if (!best) return out;
@@ -102,7 +111,15 @@ export function parseSettingsBin(buf) {
     sigFade: u8[o + 30], pps: u8[o + 31], nmea: u8[o + 32],
     matrixFreq: dv.getUint32(o + 33, true) >>> 0,   // unaligned — DataView handles it
     tempcomp: u8[o + 37], balance: u8[o + 38], cuckoo: u8[o + 39], brit: u8[o + 48],
+    freqHold: u8[o + 49], watchdog: u8[o + 50],
   };
+  // The file record, if this store has one: the slot after the winner, same generation, CRC-valid.
+  out.fileRecord = false;
+  if (best.slot + 1 < SLOTS) {
+    const x = best.base + (best.slot + 1) * REC_SZ;
+    out.fileRecord = dv.getUint32(x, true) === EE_XMAGIC && dv.getUint16(x + 8, true) === EE_XSCHEMA &&
+      dv.getUint32(x + 4, true) === best.gen && crc16ccitt(u8.subarray(x, x + 62), 62) === dv.getUint16(x + 62, true);
+  }
   return out;
 }
 
@@ -160,12 +177,15 @@ export function winningOverrides(parsed, cfgText, cfgMtimeMs, modeName) {
     balance: () => (f.balance ? 'AUTO (SEG+COLON)' : 'OFF'),
     cuckoo: () => (CUCKOO_NAMES[f.cuckoo] || `#${f.cuckoo}`).toUpperCase(),
     brit: () => (f.brit ? 'ON ($PMBRIT)' : 'OFF'),
+    freqHold: () => (f.freqHold ? 'ON' : 'OFF'),
+    watchdog: () => (f.watchdog ? 'ON' : 'OFF'),
   };
+  const perSetting = !!parsed.fileRecord;   // the store holds only the choices that stand (see MERGE RULE)
   const entries = [];
   for (const k of KIDS) {
     if (!(parsed.simpleMask & (1 << k.kid))) continue;
     const cfgHasIt = !!(def.simple & (1 << k.kid));
-    entries.push({ id: k.id, label: k.label, value: fmt[k.id](), wins: !cfgHasIt || stampOk, cfgHasIt });
+    entries.push({ id: k.id, label: k.label, value: fmt[k.id](), wins: perSetting || !cfgHasIt || stampOk, cfgHasIt });
   }
   const modes = [];
   for (let m = 0; m < 64; m++) {
@@ -177,9 +197,9 @@ export function winningOverrides(parsed, cfgText, cfgMtimeMs, modeName) {
     const known = !modeName || !!fwName;
     const name = fwName || `MODE #${m}`;
     const cfgHasIt = def.modeKeys.has(name);
-    modes.push({ ordinal: m, name, known, on: !!((parsed.modesVal >> BigInt(m)) & 1n), wins: known && (!cfgHasIt || stampOk), cfgHasIt });
+    modes.push({ ordinal: m, name, known, on: !!((parsed.modesVal >> BigInt(m)) & 1n), wins: known && (perSetting || !cfgHasIt || stampOk), cfgHasIt });
   }
-  return { stampOk, stamp: parsed.stamp, gen: parsed.gen, entries, modes };
+  return { perSetting, stampOk, stamp: parsed.stamp, gen: parsed.gen, entries, modes };
 }
 
 /// The menu's stored values as config.txt `key = value` pairs, for transposing into the editor: one
@@ -205,6 +225,8 @@ export function menuToConfigLines(parsed, ovr) {
   if (has('balance')) { const v = f.balance ? 'on' : 'off'; kv.push(['seg_balance', v], ['colon_balance', v]); }
   if (has('cuckoo')) kv.push(['cuckoo', CUCKOO_NAMES[f.cuckoo] || 'off']);
   if (has('brit')) kv.push(['brightness_report', f.brit ? 'on' : 'off']);
+  if (has('freqHold')) kv.push(['freq_hold', f.freqHold ? 'on' : 'off']);
+  if (has('watchdog')) kv.push(['watchdog', f.watchdog ? 'on' : 'off']);
   for (const m of (ovr ? ovr.modes : [])) if (m.known && m.name.startsWith('MODE_')) kv.push([m.name, m.on ? 'on' : 'off']);   // never a `MODE #34` line
   return kv;
 }

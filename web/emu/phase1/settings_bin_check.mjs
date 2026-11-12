@@ -209,6 +209,40 @@ check('round trip: MODE_ZONE2 enabled', modeEnabled(zone2) === 1);
   check('the firmware enables the same modes with the stray bit stored', withBit === without);
 }
 
+// ---- firmware with the per-setting rule: the two newest rows, and a store that has its file record ----
+{
+  const cfgDefined = w('emu_cfg_defined', 'void', ['number', 'number']);
+  const apply = w('emu_ee_apply', 'void'), load = w('emu_ee_load', 'void');
+  const rowText = () => { const p0 = rowPtr(); let t = ''; for (let i = 1; i <= 10; i++) { const c = M.HEAPU8[p0 + i]; if (c < 32 || c > 126) break; t += String.fromCharCode(c); } return t.trimEnd(); };
+  const backOut = () => { for (let i = 0; i < 6 && layer() !== 0; i++) { ev(EVT.S2); ev(EVT.REL); } };
+  const toggle = (sec, label) => {
+    backOut(); ev(EVT.S1); ev(EVT.REL);
+    for (let g = 0; secOf() !== sec && g < 8; g++) ev(EVT.BTN1);
+    ev(EVT.S1); ev(EVT.REL);
+    for (let h = 0; !rowText().startsWith(label) && h < 40; h++) ev(EVT.BTN1);
+    ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL); backOut();
+  };
+  bootCold(1783627200); eeReset(); load();
+  configLine('freq_hold = off'); configLine('watchdog = off');
+  cfgDefined(1 << 14, 0); setMtime(0x5aa5, 0x1234); apply();     // a load: config.txt mentions freq_hold
+  toggle(3, 'F HOLD'); toggle(4, 'WATCHD');
+  eeCommit();
+  const p9 = parseSettingsBin(snapshot());
+  check('F HOLD and WATCHDOG decode from the record', p9.found && p9.fields.freqHold === 1 && p9.fields.watchdog === 1 && (p9.simpleMask & (3 << 14)) === (3 << 14));
+  check('the record has its file record beside it', p9.fileRecord === true);
+  const v9 = winningOverrides(p9, 'freq_hold = off\n', Date.now(), nameFor);
+  const fh = v9.entries.find((x) => x.id === 'freqHold'), wd = v9.entries.find((x) => x.id === 'watchdog');
+  check('per-setting store: a stored choice applies though config.txt names the key and the stamp is stale', v9.perSetting === true && fh && fh.cfgHasIt === true && fh.wins === true && wd && wd.wins === true);
+  const kv9 = menuToConfigLines(p9, v9);
+  check('MERGE writes freq_hold and watchdog lines', kv9.some(([k, x]) => k === 'freq_hold' && x === 'on') && kv9.some(([k, x]) => k === 'watchdog' && x === 'on'));
+  // Spoil the file record: the same store reads as an earlier build's, and the stamp decides again.
+  const img9 = snapshot();
+  let xo = -1; for (let o = 0; o < 8192; o += 64) if (img9[o] === 0x58 && img9[o + 1] === 0x34 && img9[o + 2] === 0x4b && img9[o + 3] === 0x4d) xo = o;
+  img9[xo + 62] ^= 0xff;
+  const p10 = parseSettingsBin(img9), v10 = winningOverrides(p10, 'freq_hold = off\n', Date.now(), nameFor);
+  check('without its file record the stamp rule applies: config.txt wins the key it names', xo >= 0 && p10.fileRecord === false && v10.perSetting === false && v10.entries.find((x) => x.id === 'freqHold').wins === false);
+}
+
 const pass = results.filter((r) => r.pass).length;
 console.log(`${pass}/${results.length} ${pass === results.length ? 'ALL PASS' : 'FAILURES ABOVE'}`);
 process.exit(pass === results.length ? 0 : 1);

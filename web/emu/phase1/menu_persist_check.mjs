@@ -2,8 +2,9 @@
 // against the firmware's OWN ee_load/ee_commit/menu_apply_overrides (flash shimmed to a RAM buffer).
 //
 // Covers: commit a menu edit -> "reboot" (clear RAM ovr, re-scan) -> value survives; the precedence
-// merge (override wins iff config.txt doesn't define the key OR the mtime stamp matches, and a ZERO
-// mtime never matches); and power-loss recovery (a torn last record fails CRC -> falls back to the
+// merge (a stored choice applies unless config.txt's line for that setting is new or has changed since
+// the previous load; at boot the store's mtime stamp says whether the file is the one it was last
+// merged with, and a ZERO mtime never matches); and power-loss recovery (a torn last record fails CRC -> falls back to the
 // prior generation). Run: node menu_persist_check.mjs   (from phase1/, after build.sh)
 import factory from '../clock-fw.mjs';
 
@@ -61,28 +62,54 @@ check(`after RAM wipe the store is empty`, ovrValid() === 0);
 eeLoad();                            // re-scan flash
 check(`reboot re-scan finds the record`, ovrValid() === 1);
 
-// (2) precedence — config.txt does NOT define brightness -> override applies.
+// (2) boot — config.txt does not mention brightness -> the stored choice applies.
 setBright(-9); cfgDef(0, 0); setMtime(0x9999, 0x9999);
 eeApply();
 check(`undefined-in-config -> override applies (${bright()})`, bright() === 256);
 
-// (3) precedence — config.txt DEFINES brightness, mtime DIFFERS -> config wins (override skipped).
-setBright(-9); cfgDef(1 << KID_BRIGHTNESS, 0); setMtime(0x1111, 0x2222);   // != stamp 0x5AA5/0x1234
+// (3) a reload — config.txt has gained a brightness line -> the file wins.
+setBright(-9); cfgDef(1 << KID_BRIGHTNESS, 0); setMtime(0x1111, 0x2222);
 eeApply();
-check(`defined-in-config + mtime mismatch -> config wins (${bright()})`, bright() === -9);
+check(`a new brightness line -> config wins (${bright()})`, bright() === -9);
 
-// (4) precedence — config.txt defines brightness, mtime MATCHES the stamp -> override applies.
-setBright(-9); cfgDef(1 << KID_BRIGHTNESS, 0); setMtime(0x5AA5, 0x1234);   // == stamp
+// (4) and the menu's choice was deleted, not kept: nothing brings it back, not even the file it was
+//     made against.
+setBright(-9); cfgDef(1 << KID_BRIGHTNESS, 0); setMtime(0x5AA5, 0x1234);
 eeApply();
-check(`defined-in-config + mtime match -> override applies (${bright()})`, bright() === 256);
+check(`the beaten choice is gone for good (${bright()})`, bright() === -9);
+setBright(-9); cfgDef(0, 0); setMtime(0x3333, 0x4444);
+eeApply();
+check(`removing the line does not bring it back either (${bright()})`, bright() === -9);
 
-// (5) zero mtime never matches (an RTC-less host's config.txt edit always wins). Stamp a zero-mtime
-//     override, then a defined key with mtime 0/0 must NOT be overridden.
-eeReset();
+// (4b) a choice made while config.txt already had a brightness line. At boot, a file that still
+//      carries the store's stamp is the file the store was last merged with: the choice applies.
+eeReset(); cfgDef(1 << KID_BRIGHTNESS, 0); setMtime(0x5AA5, 0x1234); eeApply();
+setBrightViaMenu(); eeCommit();
+setBright(-9); ovrClear(); eeLoad();
+cfgDef(1 << KID_BRIGHTNESS, 0); setMtime(0x5AA5, 0x1234); eeApply();
+check(`boot, same file as the last merge -> the stored choice applies (${bright()})`, bright() === 256);
+//      A file with another stamp, but the same brightness line: the store kept what the file said
+//      (its file record, in the slot after the menu record), so the choice still applies.
+setBright(-9); ovrClear(); eeLoad();
+cfgDef(1 << KID_BRIGHTNESS, 0); setMtime(0x7777, 0x8888); eeApply();
+check(`boot, another stamp but the same line -> the stored choice applies (${bright()})`, bright() === 256);
+//      Without a file record (an older build's store, or a write cut short) the stamp decides: a
+//      file with another stamp wins every setting it mentions.
+eeReset(); cfgDef(1 << KID_BRIGHTNESS, 0); setMtime(0x5AA5, 0x1234); eeApply();
+setBrightViaMenu(); eeCommit();
+eePoke(64 + 62, eePeek(64 + 62) ^ 0xFF);     // slot 1 is the file record: spoil its CRC
+setBright(-9); ovrClear(); eeLoad();
+cfgDef(1 << KID_BRIGHTNESS, 0); setMtime(0x7777, 0x8888); eeApply();
+check(`boot, no file record and another stamp -> config wins (${bright()})`, bright() === -9);
+
+// (5) zero mtime never matches (a host that writes no timestamps): at boot the file wins what it
+//     mentions. Stamp a zero-mtime choice, then boot with a defined key and mtime 0/0.
+eeReset(); cfgDef(1 << KID_BRIGHTNESS, 0);
 setMtime(0, 0);                      // zero mtime at edit time -> stamp 0/0
 setBrightViaMenu();
 eeCommit();
-setBright(-9); cfgDef(1 << KID_BRIGHTNESS, 0); setMtime(0, 0);   // "matches" numerically, but zero
+setBright(-9); ovrClear(); eeLoad();
+cfgDef(1 << KID_BRIGHTNESS, 0); setMtime(0, 0);   // "matches" numerically, but zero
 eeApply();
 check(`zero mtime never matches -> config wins (${bright()})`, bright() === -9);
 

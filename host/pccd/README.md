@@ -322,6 +322,24 @@ Firefox, everything. Web Serial is unaffected: in a Chromium browser the app
 still offers it as the fallback when no daemon is running. The LaunchDaemon plist
 ships with a `-w` line (adjust the path to your checkout).
 
+## config.txt follows the clock's menu
+
+A setting changed with the clock's own buttons is kept in `SETTINGS.BIN`, where `config.txt` cannot
+show it. Firmware from November 2026 sends those choices as `config.txt` lines (`$PMCFG`), after
+every saved change and whenever `pccd` asks, which it does when the port opens and when the clock's
+drive appears. `pccd` then gives each key that value in `config.txt` on the drive:
+
+- a line for the key is rewritten where it stands; a key with no line gets one at the end;
+- comments, blank lines and every other key are left exactly as they were;
+- a set the file already satisfies writes nothing;
+- the file as it was is kept in `<history>/config-backups/`;
+- a comment records it: `# synced 2026-11-12 08:45: 2 settings from the clock's menu (pccd)`.
+
+The clock reads the new file, finds those lines new or changed, and drops its stored choices, so the
+file is the one record again. Nothing is written for a set that arrives damaged or out of order.
+
+`--no-config-sync` turns this off. Earlier firmware never sends `$PMCFG` and ignores the request.
+
 ## The flight recorder
 
 The daemon is the always-on component, so it keeps the record — whether or not a PCC

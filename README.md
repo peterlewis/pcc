@@ -11,14 +11,35 @@ A browser app for the [Precision Clock Mk IV](https://mitxela.com/projects/preci
 
 ## The clock face is the real firmware
 
-The C source that flashes to the physical clock is compiled to WASM at build time (from the [`clock4`](https://github.com/mitxela/clock4) submodule) and runs in the page — real NMEA parsing, real PPS discipline, real display latching. The build is the [`rollup`](https://github.com/peterlewis/clock4/tree/rollup) branch (0.0.5+): mitxela's released 0.0.4 plus a nine-PR draft stack, each opened against upstream —
+The C source that flashes to the physical clock is compiled to WASM at build time and runs in the page — real NMEA parsing, real PPS discipline, real display latching. The source is the [`rollup`](https://github.com/peterlewis/clock4/tree/rollup) branch of my fork of mitxela's [`clock4`](https://github.com/mitxela/clock4): his released 0.0.4, plus new display modes, a settings menu on the clock, better behaviour when GPS is lost, timing telemetry, and fixes.
 
-- [#5 $PMTXTS timing telemetry](https://github.com/mitxela/clock4/pull/5) · [#6 astro display modes](https://github.com/mitxela/clock4/pull/6) · [#7 hardening fixes](https://github.com/mitxela/clock4/pull/7) · [#8 sidereal & solar time](https://github.com/mitxela/clock4/pull/8) · [#9 self-learning temperature compensation](https://github.com/mitxela/clock4/pull/9)
-- [#10 per-segment brightness equalisation](https://github.com/mitxela/clock4/pull/10) · [#11 live Allan deviation](https://github.com/mitxela/clock4/pull/11) · [#12 bright-star transit predictor](https://github.com/mitxela/clock4/pull/12) · [#13 on-device two-button menu](https://github.com/mitxela/clock4/pull/13)
+**[How that firmware differs from stock →](https://github.com/peterlewis/clock4/tree/rollup#how-this-firmware-differs-from-stock)**
 
-Draft firmware: it runs happily on my own clock, but it isn't upstream yet.
+It is draft firmware. I run it on my own clock, and it is not part of mitxela's releases.
 
 It's verified rather than assumed: 4,511 display checks against independently computed astronomical truth, plus a replay anchor against a physical Mk IV on real GPS data. The DEVICE → UPDATES panel shows the exact commit the running WASM was built from and can check it against GitHub.
+
+## PCC and the extended firmware
+
+PCC works with a stock clock: the face, SKY and config editing need nothing but the GPS sentences every Mk IV sends. The extended firmware adds things for PCC to read, and PCC is where that firmware is tried, tested and tuned.
+
+**Try it before you flash it.** The on-screen clock is the extended firmware, so every new mode, the two-button menu and each `config.txt` key can be used in the browser first.
+
+**What the firmware reports, and where PCC shows it:**
+
+| From the firmware | In PCC |
+| --- | --- |
+| `$PMTXTS`, one line per GPS pulse | TIMING: phase against GPS, jitter, oscillator drift |
+| The learned temperature model (`tc_dump`) | TIMING: fits the same model from live data and writes the `tc_*` lines for `config.txt` |
+| `$PMADEV` | TIMING: the Allan deviation curve |
+| `$PMSTAR` | SKY: the next star transits |
+| `$PMBRIT` | FACE: the brightness the clock's own dimmer has chosen |
+| `SETTINGS.BIN`, the menu's saved choices | DEVICE: read with `config.txt`, so the editor shows the settings the clock is actually using |
+| `$PMCFG`, the menu's choices as `config.txt` lines | `pccd` writes them into `config.txt` on the clock's drive, so the file shows what the clock is doing |
+
+**Where the firmware is tested.** The emulator test suites for the firmware live here, in [`web/emu/phase1`](web/emu/phase1): 36 suites that drive the real firmware code. A firmware change comes with a test in this repository.
+
+**Where it is tuned.** `pccd` records everything a connected clock reports. The firmware's holdover behaviour was designed from those recordings and not from estimates: the frequency hold, the bound behind the fading digits, and the discovery that the millisecond count ran one ahead of GPS all came from them.
 
 ## Three states, no fake data
 
@@ -30,7 +51,7 @@ It's verified rather than assumed: 4,511 display checks against independently co
 
 - **FACE** — every display mode (including live sidereal and apparent-solar time), text with marquee scrolling, countdowns, brightness / gamma / DAC curve editing, colon animations, the significance-fade precision display, observer location, and a timezone engine using the clock's own IANA rules database. Edit and apply `config.txt` through the firmware's real parser.
 - **SKY** — polar az/el plot with signal heatmap, horizon mask and age-faded trails; a flat world map and an orthographic globe with satellites at their true sub-points and a day/night terminator; C/N₀ and position/DOP analysis; a GPS fix panel. Sky history persists across reloads and exports as CSV / JSON / GPX / NMEA, including a per-satellite history CSV. Behind `pccd`, the trails, C/N₀ over time and the position scatter read the daemon's flight recorder, so a 24 h window reaches back through the night whether or not a tab was open.
-- **TIMING** — with the draft firmware streaming `$PMTXTS`: PPS phase with robust (median/MAD) jitter stats, the oscillator drift staircase, and a temperature-compensation fit that emits the firmware's own `tc_*` warm-start config block.
+- **TIMING** — with the extended firmware streaming `$PMTXTS`: PPS phase with robust (median/MAD) jitter stats, the oscillator drift staircase, and a temperature-compensation fit that emits the firmware's own `tc_*` warm-start config block.
 - **DEVICE** — Web Serial connect, config editing (config.txt arrives by itself off the clock's CLOCK drive through `pccd`, or from a drive the browser remembers), REST data sources that poll and push values onto the date row, recorded-data downloads, firmware provenance and update check, and a raw NMEA serial monitor.
 
 ## Run it
@@ -79,6 +100,7 @@ cd macos && swift build && swift run PCC
 
 - [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs) — official documentation
 - [clock4](https://github.com/mitxela/clock4) — hardware design & firmware source (mitxela)
+- [clock4, `rollup` branch](https://github.com/peterlewis/clock4/tree/rollup) — the extended firmware PCC runs, and [how it differs from stock](https://github.com/peterlewis/clock4/tree/rollup#how-this-firmware-differs-from-stock)
 - [Forum thread](https://mitxela.com/forum/topic/pcc-precision-clock-companion-macos-menu-bar-app) — discussion on the mitxela forum
 
 ## License

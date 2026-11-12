@@ -5,7 +5,12 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 P1=..                       # phase1/
-FW=../../../../clock4-megabuild/mk4-time
+# Firmware source: the same choice build.sh makes. An explicit FW= (a .../mk4-time directory) wins;
+# otherwise the pinned submodule, web/emu/firmware.
+if   [ -n "${FW:-}" ] && [ -d "$FW" ];     then :
+elif [ -d "$P1/../firmware/mk4-time" ];    then FW="$P1/../firmware/mk4-time"
+else echo "ERROR: firmware source not found — run: git submodule update --init web/emu/firmware" >&2; exit 1; fi
+echo "firmware source: $FW"
 INCS=(
   -Inative-shim             # shadows stm32l4xx_hal_conf.h (drops FLASH module) — before Core/Inc
   -I"$P1"                   # shim_redirect.h, stubs live here
@@ -20,12 +25,23 @@ INCS=(
   -I"$FW/Middlewares/ST/STM32_USB_Device_Library/Core/Inc"
   -I"$FW/Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc"
 )
-DEFS=(-DSTM32L476xx -DUSE_HAL_DRIVER -DUSE_FULL_LL_DRIVER -DEMU_NATIVE64)
+# __EMSCRIPTEN__: the firmware keys its emulator branches on this macro (settings store modelled in
+# RAM, no RAM2 section, no watchdog hardware, no calibration words in system flash). The native twin
+# is the emulator too, so it takes the same branches; without it this is not the same source.
+DEFS=(-DSTM32L476xx -DUSE_HAL_DRIVER -DUSE_FULL_LL_DRIVER -DEMU_NATIVE64 -D__EMSCRIPTEN__=1)
 CFLAGS=(-O2 -Wno-implicit-function-declaration -Wno-format -std=gnu11)
+
+# The same optional-feature flags the WASM build gets, probed from the same source.
+. "$P1/fw_features.sh"
+DEFS+=(${FW_FEATURES[@]+"${FW_FEATURES[@]}"})
 
 echo "[native] compiling firmware + shim"
 clang -c "$P1/main_wrap.c"    -o main_native.o   "${INCS[@]}" "${DEFS[@]}" "${CFLAGS[@]}"
-clang -c "$FW/Core/Src/astro.c"      -o astro_native.o "${INCS[@]}" "${DEFS[@]}" "${CFLAGS[@]}"
+ASTRO_O=""                  # astro.c is absent on a lean branch, as in build.sh
+if [ -f "$FW/Core/Src/astro.c" ]; then
+  clang -c "$FW/Core/Src/astro.c"    -o astro_native.o "${INCS[@]}" "${DEFS[@]}" "${CFLAGS[@]}"
+  ASTRO_O=astro_native.o
+fi
 clang -c "$FW/Core/Src/zonedetect.c" -o zone_native.o  "${INCS[@]}" "${DEFS[@]}" "${CFLAGS[@]}"
 clang -c "$P1/stm32_shim.c"   -o shim_native.o    "${INCS[@]}" "${DEFS[@]}" "${CFLAGS[@]}"
 clang -c "$P1/emu_data.c"     -o data_native.o    "${INCS[@]}" "${DEFS[@]}" "${CFLAGS[@]}"
@@ -36,7 +52,7 @@ clang -c runner_native.c      -o runner_native.o  "${INCS[@]}" "${DEFS[@]}" "${C
 echo "[native] linking -> conform_native"
 # native_stubs.o mirrors the WASM JS no-op set; dynamic_lookup is the safety net for anything
 # reachable that isn't in either (a fault then names exactly what to add).
-clang main_native.o astro_native.o zone_native.o shim_native.o data_native.o hal_native.o \
+clang main_native.o $ASTRO_O zone_native.o shim_native.o data_native.o hal_native.o \
       stubs_native.o runner_native.o -o conform_native -Wl,-undefined,dynamic_lookup
 
 echo "OK -> conform_native"
