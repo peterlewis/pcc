@@ -34,6 +34,9 @@
 #ifndef EMU_HAS_STAR
 #  define EMU_HAS_STAR 0
 #endif
+#ifndef EMU_HAS_TEMP_F
+#  define EMU_HAS_TEMP_F 0
+#endif
 #ifndef EMU_HAS_FW_PERSIST
 #  define EMU_HAS_FW_PERSIST 0
 #endif
@@ -827,6 +830,22 @@ void emu_fh_missed_edge(void){ pps_cap.seq++; pps_cap.dwt_pps += (tc_nom_load + 
 int  emu_fh_estimate(void){ int32_t e = 0; return fh_estimate(&e) ? (int)e : -2000000000; }
 int  emu_fh_blocks(void){ return fh_count; }
 void emu_fh_temp(int t){ die_temp_c = (int16_t)t; }
+/* Sub-degree temperature harness (tc_temp_check). The emulator has no ADC, so a check feeds the
+ * firmware's own conversion and filter: raw counts with the factory calibration, or a temperature
+ * directly. emu_temp_reset returns to "no reading yet", where the steering uses die_temp_c. */
+#if EMU_HAS_TEMP_F
+double emu_temp_convert(unsigned raw, int cal1, int cal2){ return (double)die_temp_convert(raw, cal1, cal2, 3300.0f); }
+void   emu_temp_feed(double t){ die_temp_filter((float)t); }
+void   emu_temp_set(double t){ die_temp_f = (float)t; die_temp_f_ok = 1; }
+double emu_temp_f(void){ return die_temp_f_ok ? (double)die_temp_f : -999.0; }
+void   emu_temp_reset(void){ die_temp_f = 0; die_temp_f_ok = 0; }
+#else
+double emu_temp_convert(unsigned raw, int cal1, int cal2){ (void)raw; (void)cal1; (void)cal2; return -999.0; }
+void   emu_temp_feed(double t){ (void)t; }
+void   emu_temp_set(double t){ (void)t; }
+double emu_temp_f(void){ return -999.0; }
+void   emu_temp_reset(void){}
+#endif
 int  emu_fh_second(int locked){
   currentTime++; had_pps = 1;
   if (locked) last_pps_time = (uint32_t)currentTime;
