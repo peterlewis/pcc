@@ -1,6 +1,6 @@
 // defaults_check.mjs — the switches this fork turns on by default, and the ones it leaves off.
 // On by default: significance_fade, freq_hold, tc_learn, tc_apply, tc_persist, seg_balance and
-// colon_balance (AUTO, 1), pps and watchdog. Each must be on at power-on with no config.txt and with a
+// colon_balance (AUTO, 1), pps, watchdog and config_write. Each must be on at power-on with no config.txt and with a
 // config.txt that does not mention it; `key = off` must switch it off; and removing that line must
 // put it back on. The rest stay off unless asked for. Runs the firmware's REAL loader against an
 // in-memory /CONFIG.TXT, in a fresh emulator per key. Run: node defaults_check.mjs
@@ -29,8 +29,8 @@ async function clock() {
 }
 
 const BASE = ['# a config.txt that does not mention the key', 'MODE_ISO8601_STD = enabled'];
-const ON = ['significance_fade', 'freq_hold', 'tc_learn', 'tc_apply', 'tc_persist', 'seg_balance', 'colon_balance', 'pps', 'watchdog'];
-const OFF = ['tc_rtc', 'cuckoo', 'config_write', 'brightness_report', 'loop_diag'];
+const ON = ['significance_fade', 'freq_hold', 'tc_learn', 'tc_apply', 'tc_persist', 'seg_balance', 'colon_balance', 'pps', 'watchdog', 'config_write'];
+const OFF = ['tc_rtc', 'cuckoo', 'brightness_report', 'loop_diag'];
 
 for (const key of ON) {
   const c = await clock();

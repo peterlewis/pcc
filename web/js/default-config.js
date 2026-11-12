@@ -238,11 +238,12 @@ watchdog = on
 # A setting you change with the clock's buttons stays until you change that
 # setting's line in this file. Changing a different line does not undo it.
 #
-# on: the clock writes its menu changes into this file, so the file shows what
-# the clock is doing. It only does this when no computer has been connected
-# since power-on. It then adds a line that starts "# synced". With PCC's pccd
-# running on a connected computer, pccd writes the changes whatever this says.
-config_write = off
+# on (the default): the clock writes its menu changes into this file, so the
+# file shows what the clock is doing. It only does this when no computer has
+# been connected since power-on. It then adds a line that starts "# synced".
+# With PCC's pccd running on a connected computer, pccd writes the changes
+# whatever this says.
+config_write = on
 
 # To erase every menu change and everything the clock has learned, choose
 # SYS > RESET in the menu, or send "factory_reset = on" over USB serial. The

@@ -97,7 +97,7 @@ const L = laid.text.split('\n');
 check('an old-style file: its settings land on the template\'s lines, switched on, modes respelled', L.includes('MODE_UNIX        = enabled') && L.includes('MODE_TEMPCOMP = enabled') && L.includes('tc_hse_b = 0.00669') && L.includes('zone2 = Etc/GMT+5') && L.includes('cuckoo = trust') && L.includes('page_ms = 4000'));
 check('old key names land on the current keys', L.includes('MODE_SOLAR = enabled') && L.includes('colon_alt_mode = toggle') && !/MODE_SUNDIAL|alt_colon_mode/.test(laid.text));
 check(`a key the template has no line for is kept at the end and reported (${laid.unknown.join(', ')})`, laid.unknown.join() === 'frobnicate' && L.includes('frobnicate = 7'));
-check('everything the file did not set is the template\'s line, untouched', L.includes('MODE_MOON     = disabled') && L.includes('#brightness = 0.5') && L.includes('config_write = off'));
+check('everything the file did not set is the template\'s line, untouched', L.includes('MODE_MOON     = disabled') && L.includes('#brightness = 0.5') && L.includes('config_write = on'));
 // The proof that nothing was lost or changed: the firmware, loading each, ends in the same state.
 // (The old names are spelled the current way in the original first: this firmware does not read them.)
 d = differ(await load(laid.text), await load(old.replace('MODE_SUNDIAL', 'MODE_SOLAR').replace('alt_colon_mode', 'colon_alt_mode')));

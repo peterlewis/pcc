@@ -1,5 +1,5 @@
 // config_write_check.mjs — the clock writes its menu choices into config.txt itself.
-// With "config_write = on", and only if no computer has enumerated since power-on, the firmware edits
+// With config_write on (the default), and only if no computer has enumerated since power-on, the firmware edits
 // config.txt's own flash sectors: a value that fits is written where the old one stands, anything else
 // becomes a new line at the end and the old line is blanked. The file may grow once, into the unused
 // part of its last cluster, which is the one write to the directory. Every rewrite goes through a
@@ -180,7 +180,16 @@ for (const frag of [0, 1]) {
   makeChoices(c);
   const before = c.text();
   c.run(600);
-  check('without "config_write = on" nothing is written', c.text() === before && menuHolds(c).length === 0);
+  check('a config.txt that does not mention config_write: the clock writes (on is the default)', c.text() !== before && c.text().includes('# synced ') && c.stored() === 0);
+}
+{
+  const c = await clock();
+  c.attach(FILE.map((l) => (l === 'config_write = on' ? 'config_write = off' : l)), 3);
+  makeChoices(c);
+  const before = c.text();
+  c.run(600);
+  check('"config_write = off": nothing is written', c.text() === before && menuHolds(c).length === 0);
+  check('...and the store keeps the choices', c.stored() === 6);
 }
 {
   // No room to grow: the file ends exactly at the end of its last cluster.
