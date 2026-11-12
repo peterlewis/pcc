@@ -74,6 +74,13 @@ static void (*emu_vec_pps)(void) = 0;
 #define SetPPS(x)     (emu_vec_pps     = (void(*)(void))(x))
 #endif
 
+/* ICSR's pending bits are write-one-to-set on the CPU: writing PENDSVSET leaves a pending SysTick
+ * pending. The emulator's ICSR is plain memory, where the firmware's plain assignment would wipe every
+ * other bit, so set the bit instead. (pps_edge_check.mjs depends on it: a SysTick left pending across
+ * the PPS handler, which requests PendSV on the way.) */
+#undef triggerPendSV
+#define triggerPendSV() SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
+
 #define main fw_main_unused
 #include "main.c"
 #undef main
@@ -1075,6 +1082,22 @@ const char* emu_zone_from_pos(float lat, float lon){
  * the emulator's own $PMTXTS carries a realistic sub-second phase (systick) instead of 0 — the
  * "injectable jitter" that grounds the emitted timing. Set it right before emu_pps(). */
 void emu_set_systick(unsigned v){ SysTick->VAL = v; }
+/* The PPS edge against a SysTick wrap. Both run at one priority on the clock, so a wrap that lands
+ * inside the PPS handler stays pending until it returns. The emulator's handlers are atomic: a test
+ * sets the counter and the pending flag as the handler would find them, runs the edge, then runs the
+ * tick itself if it is still pending, as the CPU would. emu_subms is the count the digits show. */
+void     emu_systick_pend(int on){ if (on) SCB->ICSR |= SCB_ICSR_PENDSTSET_Msk; else SCB->ICSR &= ~SCB_ICSR_PENDSTSET_Msk; }
+int      emu_systick_pending(void){ return (SCB->ICSR & SCB_ICSR_PENDSTSET_Msk) ? 1 : 0; }
+int      emu_freq_hold(void){
+#if EMU_HAS_FREQ_HOLD
+  return freq_hold ? 1 : 0;
+#else
+  return -1;
+#endif
+}
+int      emu_subms(void){ return (int)decisec*100 + (int)centisec*10 + (int)millisec; }
+int      emu_pps_subms(void){ return (int)pps_cap.subms; }
+unsigned emu_uwtick(void){ return uwTick; }
 
 /* Feed one NUL-terminated NMEA sentence. Mirrors the $Gx dispatch in USART1_IRQHandler. */
 void emu_feed_nmea(const char* s){
