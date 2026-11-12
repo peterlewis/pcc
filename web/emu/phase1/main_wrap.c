@@ -34,6 +34,9 @@
 #ifndef EMU_HAS_STAR
 #  define EMU_HAS_STAR 0
 #endif
+#ifndef EMU_HAS_CFG_REDERIVE
+#  define EMU_HAS_CFG_REDERIVE 0
+#endif
 #ifndef EMU_HAS_FREQ_HOLD
 #  define EMU_HAS_FREQ_HOLD 0
 #endif
@@ -700,6 +703,57 @@ const char* emu_menu_dump_line(void){
   menu_dump_step();
   return emu_pmtxts_buf;
 }
+/* config.txt reload harness (config_reload_check). emu_read_config runs the firmware's real
+ * readConfigFile against a registered /CONFIG.TXT. emu_cfg_peek reads one piece of config-owned
+ * state by name, so a check can compare "this key was removed" with "this key was never set".
+ * (emu_read_config itself sits with the file shim, further down.) */
+void emu_zone_looked_up(double lat, double lon){ zone_lat = lat; zone_lon = lon; new_position = 0; }   /* as the main loop leaves it after a timezone lookup */
+#if EMU_HAS_CFG_REDERIVE
+int emu_cfg_rows(void){ return (int)CFG_ROWS; }
+const char* emu_cfg_row_key(int i){ return (i >= 0 && i < (int)CFG_ROWS) ? cfg_defaults[i].key : ""; }
+#else
+int emu_cfg_rows(void){ return 0; }
+const char* emu_cfg_row_key(int i){ (void)i; return ""; }
+#endif
+double emu_cfg_peek(const char* n){
+  #define P(name, expr) if (!strcmp(n, name)) return (double)(expr);
+  P("pps", pps_ts_enabled) P("nmea", nmea_cdc_level) P("page_ms", config.page_ms) P("text_len", strlen(textDisplay))
+  P("fake_longitude", config.fake_long) P("fake_latitude", config.fake_lat) P("countdown_to", (double)config.countdown_to)
+  P("brightness", config.brightness_override) P("tolerance_1ms", config.tolerance_1ms)
+  P("colon_mode", colonModeCivil) P("zone_lat", zone_lat) P("new_position", new_position)
+  P("zone2_set", loadedZone2[0] != 0) P("matrix", matrix_freq_hz)
+  P("BS2_in", brightnessCurve[1].in) P("BS2_out", brightnessCurve[1].out)
+#if EMU_HAS_SEGBAL
+  P("seg_balance", seg_balance) P("colon_balance", colon_balance) P("colon_full_at", colon_full_at) P("colon_floor", colon_floor)
+#endif
+#if EMU_HAS_CUCKOO
+  P("cuckoo", cuckoo)
+#endif
+#if EMU_HAS_TEMPCOMP
+  P("tc_learn", tc_learn) P("tc_apply", tc_apply) P("tc_rtc", tc_rtc) P("significance_fade", significance_fade)
+  P("tc_t0", tc_t0) P("tc_engage_s", tc_engage_s) P("tc_max_ppm", tc_max_ppm)
+  P("tc_hse_b", tc_cfg_hse[1]) P("tc_lse_a", tc_cfg_lse[0]) P("tc_seed", tc_seed) P("tc_seed_lo", tc_seed_lo)
+#endif
+#if EMU_HAS_TC_PERSIST
+  P("tc_persist", tc_persist)
+#endif
+#if EMU_HAS_STAR
+  P("star_max_mag", star_max_mag)
+#endif
+#if EMU_HAS_BRIT
+  P("brightness_report", brightness_report)
+#endif
+#if EMU_HAS_WDT
+  P("watchdog", watchdog)
+#endif
+#if EMU_HAS_FREQ_HOLD
+  P("freq_hold", freq_hold)
+#endif
+  P("loop_diag", loop_diag)
+  #undef P
+  if (!strncmp(n, "MODE:", 5)) { int m = emu_mode_id(n + 5); return (m >= 0 && m < NUM_DISPLAY_MODES) ? (double)config.modes_enabled[m] : -1.0; }
+  return -12345.0;   /* unknown name: a check must notice */
+}
 /* Frequency-hold harness (freq_hold_check). An "edge" is one PPS: the DWT count advances by the
  * nominal 80,000,000 plus d ticks, and the firmware's own gate (freq_hold) and learner run, exactly
  * as tc_housekeeping does. A "second" advances the clock one second, locked (a PPS arrived) or in
@@ -880,6 +934,22 @@ FRESULT f_lseek(FIL* fp, FSIZE_t ofs){
   for (int j = 0; j < EMU_VFS_MAX; j++) if (emu_vopen[j].fp == fp){ emu_vopen[j].pos = (uint32_t)ofs; return FR_OK; }
   return FR_DISK_ERR;
 }
+/* f_stat for the registered files, so the firmware's own readConfigFile runs here: its mtime test
+ * decides whether a load happens at all. emu_file_mtime sets the stamp every file reports. */
+static uint16_t emu_vfs_fdate = 0, emu_vfs_ftime = 0;
+void emu_file_mtime(int fdate, int ftime){ emu_vfs_fdate = (uint16_t)fdate; emu_vfs_ftime = (uint16_t)ftime; }
+void emu_file_remove(const char* name){
+  for (int i = 0; i < emu_vfs_n; i++) if (emu_streq(emu_vfs[i].name, name)){ emu_vfs[i] = emu_vfs[--emu_vfs_n]; return; }
+}
+FRESULT f_stat(const TCHAR* path, FILINFO* fno){
+  for (int i = 0; i < emu_vfs_n; i++) if (emu_streq(emu_vfs[i].name, (const char*)path)){
+    if (fno){ fno->fsize = emu_vfs[i].size; fno->fdate = emu_vfs_fdate; fno->ftime = emu_vfs_ftime; }
+    return FR_OK;
+  }
+  return FR_NO_FILE;
+}
+/* The firmware's real config loader, against a registered /CONFIG.TXT (it never closes the file). */
+void emu_read_config(void){ for (int j = 0; j < EMU_VFS_MAX; j++) emu_vopen[j].fp = 0; readConfigFile(); }
 FRESULT f_close(FIL* fp){
   for (int j = 0; j < EMU_VFS_MAX; j++) if (emu_vopen[j].fp == fp) emu_vopen[j].fp = 0;
   return FR_OK;
