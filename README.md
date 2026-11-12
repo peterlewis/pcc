@@ -1,31 +1,58 @@
 # Precision Clock Companion
 
-A browser app for the [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs) by [mitxela](https://mitxela.com). It drives a real clock over Web Serial — display modes, text and countdowns, brightness curves, satellite views, timing analysis — and with no clock attached it *is* one: the on-screen clock is the actual `clock4` firmware compiled to WebAssembly, not an imitation of it.
+A browser app for the [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs) by [mitxela](https://mitxela.com). It drives a real clock over Web Serial, and with no clock attached it *is* one: the on-screen clock is the actual `clock4` firmware compiled to WebAssembly, not an imitation of it.
 
-### **[▶ Open Precision Clock Companion (Beta) →](https://pcc.ptrl.ws/)**
+### **[▶ Open Precision Clock Companion (beta) →](https://pcc.ptrl.ws/)**
 
 > [!NOTE]
 > Independent, community-built. Not affiliated with mitxela.
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Deploys from CI](https://img.shields.io/badge/deploy-GitHub%20Pages%20(CI)-blue) ![Web Serial](https://img.shields.io/badge/Web%20Serial-Chromium-orange)
 
+## What's in it
+
+| | |
+|---|---|
+| **FACE** | Every display mode, text and countdowns, brightness curves, and `config.txt` through the firmware's own parser |
+| **SKY** | Polar plot with signal heatmap, world map and globe, signal and position analysis, history that persists and exports |
+| **TIMING** | PPS phase and jitter, oscillator drift, and a temperature-compensation fit, from the [extended firmware](#pcc-and-the-extended-firmware) |
+| **DEVICE** | Connect, `config.txt` editing, REST data onto the date row, firmware provenance, serial monitor |
+
+<details>
+<summary><b>Everything in each tab</b></summary>
+
+- **FACE**: every display mode (including live sidereal and apparent-solar time), text with marquee scrolling, countdowns, brightness / gamma / DAC curve editing, colon animations, the significance-fade precision display, observer location, and a timezone engine using the clock's own IANA rules database. Edit and apply `config.txt` through the firmware's real parser.
+- **SKY**: polar az/el plot with signal heatmap, horizon mask and age-faded trails; a flat world map and an orthographic globe with satellites at their true sub-points and a day/night terminator; C/N₀ and position/DOP analysis; a GPS fix panel. History persists across reloads and exports as CSV / JSON / GPX / NMEA, including a per-satellite CSV. With `pccd` running, the trails, C/N₀ over time and the position scatter read its recordings, so a 24 h window reaches back through the night whether or not a tab was open.
+- **TIMING**: from the extended firmware's `$PMTXTS` sentence: PPS phase with robust (median/MAD) jitter stats, the oscillator drift staircase, the Allan deviation curve, and a temperature-compensation fit that writes the firmware's own `tc_*` lines for `config.txt`.
+- **DEVICE**: Web Serial connect, `config.txt` editing (read straight off the clock's drive through `pccd`, or from a drive the browser remembers), REST data sources that push values onto the date row, recorded-data downloads, firmware provenance and update check, and a raw serial monitor.
+
+</details>
+
 ## The clock face is the real firmware
 
-The C source that flashes to the physical clock is compiled to WASM at build time and runs in the page — real NMEA parsing, real PPS discipline, real display latching. The source is the [`rollup`](https://github.com/peterlewis/clock4/tree/rollup) branch of my fork of mitxela's [`clock4`](https://github.com/mitxela/clock4): his released 0.0.4, plus new display modes, a settings menu on the clock, better behaviour when GPS is lost, timing telemetry, and fixes.
+The C source that flashes to the physical clock is compiled to WebAssembly and runs in the page: real NMEA parsing, real PPS discipline, real display latching. Feed it a simulated GPS and watch it acquire, lock and hold over, or plug in a clock and the same code draws what yours is doing.
 
-**[How that firmware differs from stock →](https://github.com/peterlewis/clock4/tree/rollup#how-this-firmware-differs-from-stock)**
+- **Standby**: no clock, no simulation. The face shows your system time and the telemetry stays empty.
+- **Simulation**: opt-in and labelled. A virtual GPS, with real satellite positions from live TLEs, feeds the firmware's own reception path.
+- **Connected**: a real Mk IV. Its data drives the same renderer and every chart; simulated data is never mixed in.
 
-It is draft firmware. I run it on my own clock, and it is not part of mitxela's releases.
+<details>
+<summary><b>How it is verified</b></summary>
 
-It's verified rather than assumed: 4,511 display checks against independently computed astronomical truth, plus a replay anchor against a physical Mk IV on real GPS data. The DEVICE → UPDATES panel shows the exact commit the running WASM was built from and can check it against GitHub.
+4,511 display checks against independently computed astronomical truth, plus a replay against a physical Mk IV on real GPS data. DEVICE ▸ UPDATES shows the exact firmware commit the page was built from, and checks it against GitHub.
+
+</details>
 
 ## PCC and the extended firmware
 
-PCC works with a stock clock: the face, SKY and config editing need nothing but the GPS sentences every Mk IV sends. The extended firmware adds things for PCC to read, and PCC is where that firmware is tried, tested and tuned.
+PCC works with a stock clock: the face, SKY and `config.txt` editing need nothing but the GPS sentences every Mk IV sends.
 
-**Try it before you flash it.** The on-screen clock is the extended firmware, so every new mode, the two-button menu and each `config.txt` key can be used in the browser first.
+The face itself runs my [extended firmware](https://github.com/peterlewis/clock4/tree/rollup): mitxela's 0.0.4 with new display modes, a settings menu on the clock, better holdover, timing telemetry and fixes. So every new mode, the menu and each `config.txt` key can be tried here before you flash anything. It is draft firmware, run on my own clock, and not part of mitxela's releases.
 
-**What the firmware reports, and where PCC shows it:**
+**[How that firmware differs from stock →](https://github.com/peterlewis/clock4/tree/rollup#how-this-firmware-differs-from-stock)** · **[Latest release](https://github.com/peterlewis/clock4/releases/latest)**
+
+<details>
+<summary><b>What the firmware reports, and where PCC shows it</b></summary>
 
 | From the firmware | In PCC |
 | --- | --- |
@@ -37,72 +64,72 @@ PCC works with a stock clock: the face, SKY and config editing need nothing but 
 | `SETTINGS.BIN`, the menu's saved choices | DEVICE: read with `config.txt`, so the editor shows the settings the clock is actually using |
 | `$PMCFG`, the menu's choices as `config.txt` lines | `pccd` writes them into `config.txt` on the clock's drive, so the file shows what the clock is doing |
 
-**Where the firmware is tested.** The emulator test suites for the firmware live here, in [`web/emu/phase1`](web/emu/phase1): 37 suites that drive the real firmware code. A firmware change comes with a test in this repository.
+</details>
 
-**Where it is tuned.** `pccd` records everything a connected clock reports. The firmware's holdover behaviour was designed from those recordings and not from estimates: the frequency hold, the bound behind the fading digits, and the discovery that the millisecond count ran one ahead of GPS all came from them.
+<details>
+<summary><b>Where the firmware is tested and tuned</b></summary>
 
-## Three states, no fake data
+**Tested here.** The firmware's emulator test suites live in [`web/emu/phase1`](web/emu/phase1): 37 suites that drive the real firmware code. A firmware change comes with a test in this repository.
 
-- **Standby** — no clock, no simulation: the face shows your system time and the telemetry stays empty.
-- **Simulation** — opt-in and labelled: a virtual GPS (with real satellite positions from live TLEs) feeds the firmware's own reception path, so lock, discipline and holdover all happen in real firmware code.
-- **Connected** — a real Mk IV over Web Serial. Its NMEA drives the same firmware renderer and every chart; simulated data is never mixed in.
+**Tuned here.** `pccd` records everything a connected clock reports. The firmware's holdover was designed from those recordings, not from estimates: the frequency hold, the bound behind the fading digits, and the discovery that the millisecond count ran one ahead of GPS all came from them.
 
-## What's in it
-
-- **FACE** — every display mode (including live sidereal and apparent-solar time), text with marquee scrolling, countdowns, brightness / gamma / DAC curve editing, colon animations, the significance-fade precision display, observer location, and a timezone engine using the clock's own IANA rules database. Edit and apply `config.txt` through the firmware's real parser.
-- **SKY** — polar az/el plot with signal heatmap, horizon mask and age-faded trails; a flat world map and an orthographic globe with satellites at their true sub-points and a day/night terminator; C/N₀ and position/DOP analysis; a GPS fix panel. Sky history persists across reloads and exports as CSV / JSON / GPX / NMEA, including a per-satellite history CSV. Behind `pccd`, the trails, C/N₀ over time and the position scatter read the daemon's flight recorder, so a 24 h window reaches back through the night whether or not a tab was open.
-- **TIMING** — with the extended firmware streaming `$PMTXTS`: PPS phase with robust (median/MAD) jitter stats, the oscillator drift staircase, and a temperature-compensation fit that emits the firmware's own `tc_*` warm-start config block.
-- **DEVICE** — Web Serial connect, config editing (config.txt arrives by itself off the clock's CLOCK drive through `pccd`, or from a drive the browser remembers), REST data sources that poll and push values onto the date row, recorded-data downloads, firmware provenance and update check, and a raw NMEA serial monitor.
-
-## Run it
-
-- **Hosted:** <https://pcc.ptrl.ws/> — open it in any browser. Everything but a live hardware connection works everywhere; to drive a real clock, see [**Connect a real clock**](#connect-a-real-clock).
-- **Local dev** — live source, no build step:
-  ```bash
-  git clone https://github.com/peterlewis/pcc.git
-  cd pcc && bash web/serve.sh        # http://localhost:8765
-  ```
-- **Build the static site** (what CI deploys; needs [emscripten](https://emscripten.org) to compile the firmware from source):
-  ```bash
-  cd web && npm install && node build.mjs   # → ../docs/
-  ```
+</details>
 
 ## Connect a real clock
 
-Two ways — pick one:
+1. **Web Serial**: in Chrome, Edge, Arc or Brave, open the app, click **CONNECT DEVICE** and choose the port. Nothing to install.
+2. **`pccd`**: a small background program for any browser, Safari and Firefox included. It also records the clock while no tab is open, reads and writes the clock's drive, and can feed the clock's GPS pulse to chrony as a time source.
 
-1. **Web Serial** — a Chromium browser (Chrome / Edge / Arc / Brave). Open the hosted app, click **CONNECT DEVICE**, choose the port. No install.
-2. **PCC Bridge (`pccd`)** — works in **any** browser (Safari and Firefox included), and shares the port so the clock can simultaneously feed **chrony** as a stratum-1 source. One line:
    ```bash
    curl -L https://github.com/peterlewis/pcc/releases/latest/download/pccd-macos-universal.tar.gz | tar xz && cd pcc && ./pccd
-   # Linux: swap in pccd-linux-$(uname -m).tar.gz
    ```
-   Then open <http://localhost:4192> and click **CONNECT DEVICE**. `pccd` serves its own copy of the app, so the bridge WebSocket is same-origin and works in every browser. Full guide: [`host/pccd/README.md`](host/pccd/README.md).
 
-**Which address?** If you run `pccd`, use **<http://localhost:4192>** — the same app, served by your daemon, with the archive and the clock's drive behind it. The hosted page tells you so when it can see a daemon on your machine (and **ALWAYS OPEN LOCAL** makes it go straight there next time); <https://pcc.ptrl.ws/local> bounces there directly. Everyone else: <https://pcc.ptrl.ws>.
+   On Linux, use `pccd-linux-$(uname -m).tar.gz`. Then open <http://localhost:4192> and click **CONNECT DEVICE**.
 
-## Repository layout
+<details>
+<summary><b>Which address to use</b></summary>
+
+With `pccd` running, use **<http://localhost:4192>**: the same app, served by `pccd`, with its recordings and the clock's drive behind it. The hosted page tells you when it can see `pccd` on your machine, and **ALWAYS OPEN LOCAL** sends you straight there next time; <https://pcc.ptrl.ws/local> does the same. Everyone else: <https://pcc.ptrl.ws>.
+
+Full guide: [`host/pccd/README.md`](host/pccd/README.md).
+
+</details>
+
+<details>
+<summary><b>Run or build it yourself</b></summary>
+
+Local dev, live source, no build step:
+
+```bash
+git clone https://github.com/peterlewis/pcc.git
+cd pcc && bash web/serve.sh        # http://localhost:8765
+```
+
+Build the static site that CI deploys (needs the firmware submodule, and [emscripten](https://emscripten.org) to compile it):
+
+```bash
+git submodule update --init
+cd web && npm install && node build.mjs   # → ../docs/
+```
 
 | Path | What |
 | --- | --- |
-| [`web/`](web/) | **The app** — source. Built to `docs/` by CI and served on Pages. See [`web/README.md`](web/README.md). |
-| [`web/emu/`](web/emu/) | The firmware emulator: `clock4` submodule, emscripten shim, and the conformance suite. |
-| [`.github/workflows/pages.yml`](.github/workflows/pages.yml) | Compiles the firmware WASM + builds `web/`, deploys to GitHub Pages on every push to `main`. |
+| [`web/`](web/) | The app. Built to `docs/` by CI and served on Pages. See [`web/README.md`](web/README.md). |
+| [`web/emu/`](web/emu/) | The firmware emulator: the `clock4` submodule, the emscripten shim and the test suites. |
+| [`host/pccd/`](host/pccd/) | `pccd`, the background program. |
+| [`.github/workflows/pages.yml`](.github/workflows/pages.yml) | Compiles the firmware, builds `web/` and deploys on every push to `main`. |
 
-`main` is **web-only**. The original native macOS menu-bar app is paused and preserved on the [`macos-app`](https://github.com/peterlewis/pcc/tree/macos-app) branch:
+The original macOS menu-bar app is paused and preserved on the [`macos-app`](https://github.com/peterlewis/pcc/tree/macos-app) branch.
 
-```bash
-git fetch && git switch macos-app
-cd macos && swift build && swift run PCC
-```
+</details>
 
 ## Related
 
-- [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs) — official documentation
-- [clock4](https://github.com/mitxela/clock4) — hardware design & firmware source (mitxela)
-- [clock4, `rollup` branch](https://github.com/peterlewis/clock4/tree/rollup) — the extended firmware PCC runs, and [how it differs from stock](https://github.com/peterlewis/clock4/tree/rollup#how-this-firmware-differs-from-stock)
-- [Forum thread](https://mitxela.com/forum/topic/pcc-precision-clock-companion-macos-menu-bar-app) — discussion on the mitxela forum
+- [Precision Clock Mk IV](https://mitxela.com/projects/precision_clock_mk_iv/docs): official documentation
+- [mitxela/clock4](https://github.com/mitxela/clock4): hardware design and firmware source
+- [peterlewis/clock4](https://github.com/peterlewis/clock4/tree/rollup): the extended firmware PCC runs
+- [Forum thread](https://mitxela.com/forum/topic/pcc-precision-clock-companion-macos-menu-bar-app) on the mitxela forum
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Bundled third-party assets (fonts, map data, libraries) keep their own licenses; see [THIRD_PARTY.md](THIRD_PARTY.md).
+MIT; see [LICENSE](LICENSE). Bundled third-party assets (fonts, map data, libraries) keep their own licenses; see [THIRD_PARTY.md](THIRD_PARTY.md).
