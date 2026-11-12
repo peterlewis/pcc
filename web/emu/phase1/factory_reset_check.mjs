@@ -62,6 +62,29 @@ check(`SAVE arms the factory reset (pending=${resetPending()})`, resetPending() 
 resetStep();                                                    // the main loop services it
 check(`factory reset wiped the stored overrides`, ovrValid() === 0);
 
+// (4) Through the real loader: what the menu changed goes back to config.txt's value, or to the built-in
+//     value where the file has no line, at once (not at the next power-on). F HOLD is not in the file
+//     and is on by default; the menu switches it off. PAGE's line is in the file; the menu changes it.
+{
+  const reg = w('emu_register_file', 'void', ['string', 'number', 'number']);
+  const mtime = w('emu_file_mtime', 'void', ['number', 'number']), readConfig = w('emu_read_config');
+  const peek = w('emu_cfg_peek', 'number', ['string']), poll = w('emu_poll');
+  const load = (lines, t) => { const b = new TextEncoder().encode(lines.join('\r\n') + '\r\n'); const p = M._malloc(b.length); M.HEAPU8.set(b, p); reg('/CONFIG.TXT', p, b.length); mtime(t, t); readConfig(); };
+  bootCold(1783627200); eeReset();
+  load(['MODE_ISO8601_STD = enabled', 'page_ms = 2000'], 40);
+  backToL0();
+  gotoSection(3, 'F HOLD'); ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL); backToL0();   // DIAG > F HOLD: off
+  gotoSection(SEC_DISP, 'PAGE'); ev(EVT.S1); ev(EVT.REL); ev(EVT.BTN1); ev(EVT.S1); ev(EVT.REL); backToL0();  // DISP > PAGE: changed
+  check(`real loader: the menu's choices are in force (freq_hold ${peek('freq_hold')}, page_ms ${peek('page_ms')})`, peek('freq_hold') === 0 && peek('page_ms') !== 2000);
+  w('emu_config_line', 'void', ['string'])('factory_reset = on'); resetStep();
+  const reread = w('emu_cw_take_reload', 'number')();                // the main loop's delayed config.txt read
+  if (reread) readConfig();
+  for (let i = 0; i < 3; i++) poll();
+  check('factory reset: config.txt is read again', reread === 1);
+  check(`factory reset: a setting the file does not mention returns to its default (freq_hold ${peek('freq_hold')})`, peek('freq_hold') === 1);
+  check(`factory reset: a setting the file does mention returns to the file's value (page_ms ${peek('page_ms')})`, peek('page_ms') === 2000);
+}
+
 let fail = 0;
 for (const r of results) { if (!r.pass) fail++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}`); }
 console.log(fail ? `\n${fail} FAIL` : `\nALL PASS`);

@@ -1,6 +1,6 @@
-// wdt_check.mjs — the opt-in independent watchdog (watchdog = on).
-// The emulator has no IWDG, so this checks everything around the hardware: that nothing starts
-// unless asked, that the one refresh point keeps refreshing once armed (the hardware cannot be
+// wdt_check.mjs — the independent watchdog (on by default; watchdog = off in config.txt stops it).
+// The emulator has no IWDG, so this checks everything around the hardware: that it arms by default
+// on the first main-loop pass, that nothing starts when config.txt switches it off, that the one refresh point keeps refreshing once armed (the hardware cannot be
 // stopped, so a missed refresh is a reset), and the boot-loop guard: watchdog resets are counted in
 // memory that survives a reset, three in a row stand the watchdog down for that boot, and a
 // healthy run clears the count and re-arms. Run: node wdt_check.mjs
@@ -19,11 +19,18 @@ const results = [];
 const check = (n, pass) => results.push({ n, pass: !!pass });
 const passes = (n) => { for (let i = 0; i < n; i++) poll(); };
 
-// 1. Off by default: the IWDG is never started and never refreshed.
+// 1. On by default: nothing before the main loop, then armed on its first pass.
 bootCold(1718971200); powerOn();
+check('default: the key is on, nothing starts before the main loop runs', g('cfg') === 1 && g('armed') === 0 && g('starts') === 0);
+poll();
+check('default: the first pass starts it once and refreshes it', g('armed') === 1 && g('starts') === 1 && g('kicks') === 1);
+
+// 1b. config.txt is read before the main loop: watchdog = off there means it never starts.
+bootCold(1718971200); powerOn();
+cfg('watchdog = off');
 passes(50);
-check('default: not armed, the IWDG is never started or refreshed', g('armed') === 0 && g('starts') === 0 && g('kicks') === 0);
-check(`default: the report says OFF ("${dump().trim()}")`, /cfg=0 armed=0 .*resets=0 consecutive=0 last_tag=- -- OFF/.test(dump()));
+check('watchdog = off: not armed, the IWDG is never started or refreshed', g('armed') === 0 && g('starts') === 0 && g('kicks') === 0);
+check(`watchdog = off: the report says OFF ("${dump().trim()}")`, /cfg=0 armed=0 .*resets=0 consecutive=0 last_tag=- -- OFF/.test(dump()));
 
 // 2. watchdog = on arms on the next pass, once, and every pass refreshes.
 cfg('watchdog = on');
@@ -75,7 +82,7 @@ check('a non-watchdog reset clears the run, keeps the lifetime count, and arms',
 
 // 8. A power cycle forgets everything (RAM2 holds noise).
 powerOn();
-check('power-on: counts are zero, no section, key back to its default', g('resets') === 0 && g('consecutive') === 0 && g('lastTag') === 0xFF && g('cfg') === 0 && g('armed') === 0);
+check('power-on: counts are zero, no section, key back to its default (on), not armed yet', g('resets') === 0 && g('consecutive') === 0 && g('lastTag') === 0xFF && g('cfg') === 1 && g('armed') === 0);
 
 // 9. The report always fits the 192-byte CDC transmit buffer.
 cfg('watchdog = on');

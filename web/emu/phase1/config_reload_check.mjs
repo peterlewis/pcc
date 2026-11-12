@@ -41,18 +41,19 @@ async function clock() {
 }
 
 const MINIMAL = ['# a config.txt that sets one thing', 'MODE_ISO8601_STD = enabled'];
-// One line for every kind of key. [the line, the name emu_cfg_peek reads it back by]
+// One line for every kind of key, each away from its default (the keys that are on by default are
+// switched off). [the line, the name emu_cfg_peek reads it back by]
 const LINES = [
   ['MODE_UNIX = enabled', 'MODE:MODE_UNIX'], ['MODE_MOON = enabled', 'MODE:MODE_MOON'], ['MODE_ZONE2 = enabled', 'MODE:MODE_ZONE2'],
   ['MODE_FIRMWARE_CRC = enabled', 'MODE:MODE_FIRMWARE_CRC_T'],
-  ['cuckoo = trust', 'cuckoo'], ['seg_balance = on', 'seg_balance'], ['colon_balance = on', 'colon_balance'],
+  ['cuckoo = trust', 'cuckoo'], ['seg_balance = off', 'seg_balance'], ['colon_balance = off', 'colon_balance'],
   ['colon_full_at = 1500', 'colon_full_at'], ['colon_floor = 40', 'colon_floor'], ['page_ms = 2000', 'page_ms'],
-  ['pps = on', 'pps'], ['nmea = rmc', 'nmea'], ['significance_fade = on', 'significance_fade'],
-  ['tc_learn = on', 'tc_learn'], ['tc_apply = on', 'tc_apply'], ['tc_rtc = on', 'tc_rtc'], ['tc_persist = on', 'tc_persist'],
-  ['freq_hold = on', 'freq_hold'], ['tc_t0 = 33', 'tc_t0'], ['tc_engage_s = 5', 'tc_engage_s'], ['tc_max_ppm = 50', 'tc_max_ppm'],
+  ['pps = off', 'pps'], ['nmea = rmc', 'nmea'], ['significance_fade = off', 'significance_fade'],
+  ['tc_learn = off', 'tc_learn'], ['tc_apply = off', 'tc_apply'], ['tc_rtc = on', 'tc_rtc'], ['tc_persist = off', 'tc_persist'],
+  ['freq_hold = off', 'freq_hold'], ['tc_t0 = 33', 'tc_t0'], ['tc_engage_s = 5', 'tc_engage_s'], ['tc_max_ppm = 50', 'tc_max_ppm'],
   ['tc_hse_b = 0.002', 'tc_hse_b'], ['tc_lse_a = 15.3', 'tc_lse_a'], ['tc_seed_lo = 26', 'tc_seed_lo'],
   ['star_max_mag = 2.5', 'star_max_mag'], ['loop_diag = on', 'loop_diag'], ['brightness_report = on', 'brightness_report'],
-  ['watchdog = on', 'watchdog'], ['text = HELLO', 'text_len'], ['fake_longitude = -2.36', 'fake_longitude'],
+  ['watchdog = off', 'watchdog'], ['text = HELLO', 'text_len'], ['fake_longitude = -2.36', 'fake_longitude'],
   ['fake_latitude = 51.38', 'fake_latitude'], ['countdown_to = 2030-01-01T00:00:00Z', 'countdown_to'],
   ['zone2 = +05:30', 'zone2_set'], ['BS2 = 200,500', 'BS2_in'],
   // the seven that were always reset on a load: they must keep working
@@ -124,21 +125,21 @@ const NAMES = LINES.map((l) => l[1]);
 // 3. What was set over serial, for a key the file does not mention, survives a reload.
 {
   const c = await clock(); c.load(MINIMAL);
-  c.serial('brightness_report = on'); c.serial('seg_balance = 150'); c.serial('pps = on');
+  c.serial('brightness_report = on'); c.serial('seg_balance = 150'); c.serial('pps = off');
   c.load([...MINIMAL, 'page_ms = 3000']);                // the host saves an unrelated change
-  check('serial-set keys survive a reload that does not mention them', c.peek('brightness_report') === 1 && c.peek('seg_balance') === 150 && c.peek('pps') === 1);
+  check('serial-set keys survive a reload that does not mention them', c.peek('brightness_report') === 1 && c.peek('seg_balance') === 150 && c.peek('pps') === 0);
 }
 
 // 4. A key the host sets over serial stops being the file's to take back; the file wins when it says so.
 {
-  const c = await clock(); c.load([...MINIMAL, 'seg_balance = on']);
+  const c = await clock(); c.load([...MINIMAL, 'seg_balance = off']);
   c.serial('seg_balance = 150');
   c.load(MINIMAL);
   check('file sets it, serial changes it, file drops the line: the serial value stays', c.peek('seg_balance') === 150);
-  c.load([...MINIMAL, 'seg_balance = on']);
-  check('the file sets it again: the file wins', c.peek('seg_balance') === 1);
+  c.load([...MINIMAL, 'seg_balance = off']);
+  check('the file sets it again: the file wins', c.peek('seg_balance') === 0);
   c.load(MINIMAL);
-  check('... and now dropping the line reverts it', c.peek('seg_balance') === 0);
+  check('... and now dropping the line reverts it to the default (AUTO)', c.peek('seg_balance') === 1);
 }
 
 // 5. A menu setting survives the file dropping the same key.

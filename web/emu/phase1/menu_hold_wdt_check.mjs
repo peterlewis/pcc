@@ -102,16 +102,16 @@ for (const it of ITEMS) {
   check(`${n}: a stored record that never touched this row leaves the setting alone`, it.get() === 1);
 
   // The same precedence through the real loader, so the parser's own marking of the key is covered.
+  // Both keys are on by default, so the menu's choice here is OFF, to be told apart from the default.
   bootCold(1783627200); wdtPowerOn(); eeReset(); ovrClear();
-  cfg(`${it.key} = off`);                                      // the emulator keeps the setting across its boots: start from off
   hostSaves(['MODE_ISO8601_STD = enabled'], 10);
-  check(`${n}: real config.txt without the key: the setting starts off`, it.get() === 0);
+  check(`${n}: real config.txt without the key: the setting starts on, its default`, it.get() === 1);
   goto(it); toggleAndSave(); eeCommit(); backToL0();
-  check(`${n}: real config.txt without the key: the menu switches it on`, it.get() === 1);
-  hostSaves(['MODE_ISO8601_STD = enabled', `${it.key} = off`], 11);
-  check(`${n}: the host then saves "${it.key} = off": the file wins`, it.get() === 0);
+  check(`${n}: real config.txt without the key: the menu switches it off`, it.get() === 0);
+  hostSaves(['MODE_ISO8601_STD = enabled', `${it.key} = on`], 11);
+  check(`${n}: the host then saves "${it.key} = on": the file wins`, it.get() === 1);
   hostSaves(['MODE_ISO8601_STD = enabled'], 12);
-  check(`${n}: the host removes the line again: off, the menu's choice does not come back`, it.get() === 0);
+  check(`${n}: the host removes the line again: back to on, the menu's off does not come back`, it.get() === 1);
 }
 
 // The watchdog's own rule.

@@ -14,7 +14,7 @@ export function decodeSeg(b){
   return d < 0 ? '?' : d;           // '?' = unrecognised pattern (a real failure)
 }
 
-export async function loadEmu(){
+export async function loadEmu({ stockPrecision = false } = {}){
   const M = await factory();
   const w = (n,r='void',a=[]) => M.cwrap(n,r,a);
   const emu = {
@@ -67,6 +67,18 @@ export async function loadEmu(){
     M_JULIAN:  w('emu_MODE_JULIAN_DATE','number')(),
     M_MJD:     w('emu_MODE_MODIFIED_JD','number')(),
   };
+  // stockPrecision: the ground truth for the sub-second digits (truth.mjs precision) is the stock
+  // Tolerance_time_* ladder. This firmware's significance fade, on by default, replaces that ladder, so
+  // a caller checking the ladder switches the fade off after every boot. holdover_fade_check.mjs and
+  // fade_bound_check.mjs check the fade itself.
+  if (stockPrecision) {
+    const cfgLine = w('emu_config_line','void',['string']);
+    const off = () => cfgLine('significance_fade = off');
+    const boot = emu.boot, bootCold = emu.bootCold;
+    emu.boot = (t) => { boot(t); off(); };
+    emu.bootCold = (t) => { bootCold(t); off(); };
+    off();
+  }
   // Register a file's bytes into the wasm heap for the firmware's FATFS shim (e.g. /TZRULES.BIN).
   // The malloc'd buffer is intentionally NEVER freed — the C shim keeps the pointer.
   emu.registerFile = (name, bytes) => {

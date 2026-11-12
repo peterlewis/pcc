@@ -93,7 +93,7 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
   let state = { lat, lon, configText: config, signal: true, vbus: true, adc: 2600, geo: 'default',
     tol: { t1: 1000, t10: 10000, t100: 100000 },   // precision-ladder thresholds (s since PPS)
     baseTol: { t1: 1000, t10: 10000, t100: 100000 },   // user-configured values (time-lapse restores these)
-    holdoverFade: false, fadeAge: 0,   // significance_fade demo: enabled? + swept holdover age (s) under time-lapse
+    holdoverFade: true, fadeAge: 0,    // significance_fade (firmware default on): enabled? + swept holdover age (s) under time-lapse
     utc: false, tzZone: 'UTC', tzSec: 0, tzAge: 0,   // timezone: local (browser IANA) unless forced UTC
     locZone: null,   // zone resolved from a manually-observed position (ZoneDetect); overrides browser zone
     live: false };   // LIVE = fed by a real device's NMEA (not the virtual GPS)
@@ -433,7 +433,7 @@ export async function createEmuDriver({ lat = 51.4779, lon = -0.0015, config = D
       // otherwise the panel keeps showing the pre-reboot time-lapse ladder / significance-fade
       // state while the rebooted firmware is on the config's values. A reboot cancels the
       // time-lapse demo (tol returns to the configured tolerances) and fade follows the config.
-      let t1 = 1000, t10 = 10000, t100 = 100000, fade = false;
+      let t1 = 1000, t10 = 10000, t100 = 100000, fade = true;   // significance_fade is on unless the file says off
       for (const l of configLines(txt)) {
         const m = l.match(/^\s*(Tolerance_time_1ms|Tolerance_time_10ms|Tolerance_time_100ms|significance_fade)\s*=\s*(.+?)\s*$/i);
         if (!m) continue;

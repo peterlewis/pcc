@@ -150,27 +150,28 @@ cuckoo = off
 
 ## when GPS is lost
 
-# The clock hides its last digits as its time gets less certain. These are the
-# seconds without GPS after which the 1 ms, 10 ms and 100 ms digits go.
+# The clock hides its last digits as its time gets less certain. With
+# significance_fade off, these are the seconds without GPS after which the
+# 1 ms, 10 ms and 100 ms digits go.
 Tolerance_time_1ms   = 1000
 Tolerance_time_10ms  = 10000
 Tolerance_time_100ms = 100000
-# on: use the clock's own measurement of its error and not the three times above.
-# Each digit fades as the error reaches it.
-significance_fade = off
+# on (the default): use the clock's own measurement of its error and not the
+# three times above. Each digit fades as the error reaches it.
+significance_fade = on
 
-# on: without GPS, hold the oscillator frequency measured while GPS was present.
-# The clock needs 48 seconds of GPS first.
-freq_hold = off
+# on (the default): without GPS, hold the oscillator frequency measured while
+# GPS was present. The clock needs 48 seconds of GPS first.
+freq_hold = on
 
 # Temperature compensation. With GPS, tc_learn measures how the oscillators
 # drift with temperature. Without GPS, tc_apply corrects the display for it and
 # tc_rtc corrects the battery-backed clock. tc_persist keeps what was learned
-# across power-off.
-tc_learn   = off
-tc_apply   = off
+# across power-off. All but tc_rtc are on by default.
+tc_learn   = on
+tc_apply   = on
 tc_rtc     = off
-tc_persist = off
+tc_persist = on
 # Reference temperature in degrees C. Seconds without GPS before the correction
 # starts (2 or more). The largest correction, in parts per million.
 #tc_t0       = 40
@@ -200,11 +201,12 @@ BS5 = 3849,4095
 # A fixed brightness, 0.0 to 1.0 or 0 to 4095. Switched off, the light sensor sets it. An example.
 #brightness = 0.5
 
-# on: make every digit equally bright. Without it a 1 is brighter than an 8.
-# A number from 2 to 300 sets a fixed strength.
-seg_balance = off
-# on: dim the colons with the digits. A number from 2 to 256 sets a fixed level.
-colon_balance = off
+# on (the default): make every digit equally bright. Off, a 1 is brighter than
+# an 8. A number from 2 to 300 sets a fixed strength.
+seg_balance = on
+# on (the default): dim the colons with the digits. A number from 2 to 256 sets
+# a fixed level.
+colon_balance = on
 # The two ends of the automatic colon curve: the brightness at or below which the
 # colons are full, and their level (of 256) at the dimmest setting.
 #colon_full_at = 2048
@@ -215,8 +217,8 @@ colon_balance = off
 
 # GPS sentences: on, rmc (position and time only) or off
 nmea = on
-# on: one $PMTXTS timing sentence for each GPS pulse
-pps = off
+# on (the default): one $PMTXTS timing sentence for each GPS pulse
+pps = on
 # on: report the automatic dimmer once a second as $PMBRIT. PCC asks for this
 # when it connects. Leave it switched off here, or a reload of this file stops it.
 #brightness_report = on
@@ -226,9 +228,9 @@ pps = off
 
 ## reliability
 
-# on: restart the clock if its firmware stops for 8 seconds. Once on, "off"
-# takes effect at the next restart.
-watchdog = off
+# on (the default): restart the clock if its firmware stops for 8 seconds. Once
+# it is running, "off" takes effect at the next restart.
+watchdog = on
 
 
 ## this file and the menu

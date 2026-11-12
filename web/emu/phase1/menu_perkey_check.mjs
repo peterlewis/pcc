@@ -138,18 +138,19 @@ async function stable(name, c, keys) {
 }
 
 // ---- A setting the file did not mention when the menu set it: DIAG > F HOLD -----------------------
+// freq_hold is on by default, so the menu's choice is OFF, to be told apart from the default.
 {
   let c = await clock();
   c.save(BASE, 10);
   check('F HOLD: the row is found', c.menuTap(SEC.DIAG, 'F HOLD'));
-  check('F HOLD: the menu switches it on', c.peek('freq_hold') === 1);
+  check('F HOLD: the menu switches it off', c.peek('freq_hold') === 0);
   c.settle();
   c.save([...BASE, 'nmea = rmc'], 11);
-  check('F HOLD: another line is added, it stays on', c.peek('freq_hold') === 1);
-  c.save([...BASE, 'nmea = rmc', 'freq_hold = off'], 12);
-  check('F HOLD: its own line is added, the file wins', c.peek('freq_hold') === 0);
+  check('F HOLD: another line is added, it stays off', c.peek('freq_hold') === 0);
+  c.save([...BASE, 'nmea = rmc', 'freq_hold = on'], 12);
+  check('F HOLD: its own line is added, the file wins', c.peek('freq_hold') === 1);
   c.save([...BASE, 'nmea = rmc'], 13);
-  check('F HOLD: the line is removed again: off, the menu\'s choice does not come back', c.peek('freq_hold') === 0);
+  check('F HOLD: the line is removed again: on, its default; the menu\'s choice does not come back', c.peek('freq_hold') === 1);
   c = await stable('F HOLD', c, ['freq_hold']);
 }
 
@@ -172,16 +173,17 @@ async function stable(name, c, keys) {
 // ---- A setting made of several lines: DIAG > TEMPCOMP (tc_learn, tc_apply, tc_persist) -------------
 {
   let c = await clock();
-  c.save([...BASE, 'tc_learn = on'], 10);
+  c.save([...BASE, 'tc_learn = off'], 10);
   check('TEMPCOMP: the row is found', c.menuTap(SEC.DIAG, 'TEMPCO'));
-  // The file's "tc_learn = on" alone is not the whole compensator, so the row reads OFF and one tap arms all three.
+  // The file's "tc_learn = off" leaves the compensator incomplete (the other two are on by default), so
+  // the row reads OFF and one tap arms all three.
   const armed = () => `${c.peek('tc_learn')}${c.peek('tc_apply')}${c.peek('tc_persist')}`;
   check(`TEMPCOMP: the menu arms all three (${armed()})`, armed() === '111');
   c.settle();
-  c.save([...BASE, 'tc_learn = on', 'nmea = rmc'], 11);
+  c.save([...BASE, 'tc_learn = off', 'nmea = rmc'], 11);
   check(`TEMPCOMP: another line changes, all three stay (${armed()})`, armed() === '111');
-  c.save([...BASE, 'tc_learn = on', 'nmea = rmc', 'tc_persist = off'], 12);
-  check(`TEMPCOMP: one of its lines is added: the file wins, and the one the file leaves alone goes back to its default (${armed()})`, armed() === '100');
+  c.save([...BASE, 'tc_learn = off', 'nmea = rmc', 'tc_persist = on'], 12);
+  check(`TEMPCOMP: one of its lines is added: the file wins, and the one the file leaves alone goes back to its default (${armed()})`, armed() === '011');
   await stable('TEMPCOMP, after the file won', c, ['tc_learn', 'tc_apply', 'tc_persist']);
 }
 
@@ -205,17 +207,17 @@ async function stable(name, c, keys) {
   const c = await clock();
   c.save([...BASE, 'page_ms = 2000'], 10);
   c.menuTap(SEC.DISP, 'PAGE'); const menuVal = c.peek('page_ms');
-  c.menuTap(SEC.DIAG, 'F HOLD');
+  c.menuTap(SEC.DIAG, 'F HOLD');                       // on by default: the menu's choice is off
   c.settle();
   const same = await c.powerCycle(undefined, { dropFileRecords: true });
-  check(`no file record, the file unchanged: the menu's choices stand (${same.peek('page_ms')})`, same.peek('page_ms') === menuVal && same.peek('freq_hold') === 1);
+  check(`no file record, the file unchanged: the menu's choices stand (${same.peek('page_ms')}, ${same.peek('freq_hold')})`, same.peek('page_ms') === menuVal && same.peek('freq_hold') === 0);
   const n = await c.powerCycle({ lines: [...BASE, 'page_ms = 2000', 'nmea = rmc'], at: 11 }, { dropFileRecords: true });
   check(`no file record, the file changed: a setting it mentions goes to the file (${n.peek('page_ms')}, the menu had ${menuVal})`, n.peek('page_ms') === 2000);
-  check('no file record, the file changed: a setting it does not mention keeps the menu\'s choice', n.peek('freq_hold') === 1);
+  check('no file record, the file changed: a setting it does not mention keeps the menu\'s choice', n.peek('freq_hold') === 0);
   check('and the store is queued to be written again, with its file record', n.dirty() === 1);
   n.menuTap(SEC.DISP, 'PAGE'); const again = n.peek('page_ms'); n.settle();
   const p = await n.powerCycle({ lines: [...BASE, 'page_ms = 2000', 'nmea = all'], at: 12 });
-  check(`after that the comparison is exact again (${p.peek('page_ms')})`, p.peek('page_ms') === again && p.peek('freq_hold') === 1);
+  check(`after that the comparison is exact again (${p.peek('page_ms')})`, p.peek('page_ms') === again && p.peek('freq_hold') === 0);
 }
 
 // ---- Many saves: the two records of a pair cross from one page of the store to the other ------------

@@ -536,6 +536,36 @@ uint32_t HAL_ADC_GetValue(ADC_HandleTypeDef* h){ (void)h; return emu_adc; }
  */
 
 /* Cold power-on: no fix, no pulse, no position. Free-runs coarse (P0) until the sim locks it. */
+/* The feature switches' power-on values, as this firmware's .data initialisers set them, captured
+ * before any test or driver code runs. emu_boot_cold restores them as a real power-on's startup copy
+ * does, so the emulator follows whatever this branch's defaults are (on or off) without restating them. */
+static struct { uint8_t sf, pps, fh, wdt, tl, ta, tr, tp; uint16_t sb, cb; } emu_pwr;
+__attribute__((constructor)) static void emu_pwr_capture(void){
+  emu_pwr.sb = seg_balance; emu_pwr.cb = colon_balance; emu_pwr.tp = tc_persist;
+#if EMU_HAS_TEMPCOMP
+  emu_pwr.sf = significance_fade; emu_pwr.pps = pps_ts_enabled;
+  emu_pwr.tl = tc_learn; emu_pwr.ta = tc_apply; emu_pwr.tr = tc_rtc;
+#endif
+#if EMU_HAS_FREQ_HOLD
+  emu_pwr.fh = freq_hold;
+#endif
+#if EMU_HAS_WDT
+  emu_pwr.wdt = watchdog;
+#endif
+}
+static void emu_pwr_restore(void){
+  seg_balance = emu_pwr.sb; colon_balance = emu_pwr.cb; tc_persist = emu_pwr.tp;
+#if EMU_HAS_TEMPCOMP
+  significance_fade = emu_pwr.sf; pps_ts_enabled = emu_pwr.pps;
+  tc_learn = emu_pwr.tl; tc_apply = emu_pwr.ta; tc_rtc = emu_pwr.tr;
+#endif
+#if EMU_HAS_FREQ_HOLD
+  freq_hold = emu_pwr.fh;
+#endif
+#if EMU_HAS_WDT
+  watchdog = emu_pwr.wdt;
+#endif
+}
 void emu_boot_cold(unsigned int t){
   huart2.Instance = USART2;   /* see emu_boot: keep sendLatch()'s huart2.Instance->TDR off NULL */
   currentTime = (time_t)t; last_pps_time = 0; rtc_last_calibration = 0;
@@ -566,12 +596,13 @@ void emu_boot_cold(unsigned int t){
   tc_cfg_hse[0]=tc_cfg_hse[1]=tc_cfg_hse[2]=NAN; tc_cfg_lse[0]=tc_cfg_lse[1]=tc_cfg_lse[2]=NAN;
   tc_hse_tmin=tc_hse_tmax=tc_lse_tmin=tc_lse_tmax=0;
   tc_hse_resid=tc_lse_resid=0; tc_n_hse=tc_n_lse=0;
-  tc_seed=0; tc_seed_pending=0; tc_seed_lo=tc_seed_hi=0; tc_learn=tc_apply=tc_rtc=0; tc_disp_state='-';
+  tc_seed=0; tc_seed_pending=0; tc_seed_lo=tc_seed_hi=0; tc_disp_state='-';
   for (int i=0;i<40;i++){ tc_bins[i].hse_sum=tc_bins[i].lse_sum=0; tc_bins[i].hse_n=tc_bins[i].lse_n=0; }
 #endif
 #if EMU_HAS_BRIT
   brightness_report = 0; brit_win = 0;   /* power-on: the $PMBRIT switch is off, as .data restores it */
 #endif
+  emu_pwr_restore();            /* power-on: the feature switches return to their initialisers */
   ADC1->DR = emu_adc;           /* power-on: the sensor register holds what HAL_ADC_GetValue reports */
   colon_dma_ms = 0;             /* power-on: colon DMA starts from table index 0 */
   setNextTimestamp(currentTime);
@@ -899,7 +930,7 @@ const char* emu_tc_dump_next(void){ return ""; }
  * noise, as RAM2 holds after a power cycle. get: 0 armed, 1 stood down, 2 resets, 3 consecutive,
  * 4 last tag, 5 IWDG starts, 6 IWDG refreshes, 7 the config flag. */
 #if EMU_HAS_WDT
-void emu_wdt_power_on(void){ memset(&wdt_keep, 0xA5, sizeof wdt_keep); wdt_emu_starts = wdt_emu_kicks = 0; watchdog = 0; wdt_boot(0); }
+void emu_wdt_power_on(void){ memset(&wdt_keep, 0xA5, sizeof wdt_keep); wdt_emu_starts = wdt_emu_kicks = 0; watchdog = emu_pwr.wdt; wdt_boot(0); }
 void emu_wdt_boot(int was_wdt_reset){ wdt_boot(was_wdt_reset ? 1 : 0); }
 void emu_wdt_poll(void){ wdt_poll(); }
 void emu_wdt_tag(int n){ wdt_keep.tag = (uint8_t)n; }

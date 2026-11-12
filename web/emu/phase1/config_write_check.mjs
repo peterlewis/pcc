@@ -43,7 +43,7 @@ async function clock(flash) {
   if (flash) { const p = M._malloc(flSize); M.HEAPU8.set(flash, p); flImport(p); M._free(p); eeLoad(); }
   else eeReset();
   const c = {
-    peek: w('emu_cfg_peek', 'number', ['string']),
+    peek: w('emu_cfg_peek', 'number', ['string']), serial: w('emu_config_line', 'void', ['string']),
     usb: w('emu_usb_host', 'void', ['number']), backing: w('emu_ee_backing', 'number'),
     cut, ops, lost, readConfig,
     attach(lines, alloc, frag = 0) {
@@ -111,6 +111,10 @@ const lastOf = (text, key) => { const m = text.split('\r\n').filter((l) => l.rep
 const MENU = { page_ms: 2250, freq_hold: 1, 'MODE:MODE_UNIX': 0, tc_learn: 1, tc_apply: 1, tc_persist: 1 };
 const menuHolds = (c) => Object.entries(MENU).filter(([k, v]) => c.peek(k) !== v).map(([k, v]) => `${k}=${c.peek(k)} (menu ${v})`);
 function makeChoices(c) {
+  // The compensator is on by default and this file has no line for it: switch it off over serial
+  // first (not the file's, so not the file's to keep), so the menu's tap arms it and the writer adds
+  // the three "on" lines this check is about.
+  for (const k of ['tc_learn', 'tc_apply', 'tc_persist']) c.serial(`${k} = off`);
   c.menuEdit(SEC.DISP, 'PAGE', [EVT.BTN1]); c.menuEdit(SEC.DIAG, 'F HOLD', [EVT.BTN1]);
   c.menuEdit(SEC.CAL, 'UNIX', [EVT.BTN1]); c.menuEdit(SEC.DIAG, 'TEMPCO', [EVT.BTN1]);
   c.commit();

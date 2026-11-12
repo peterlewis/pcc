@@ -29,10 +29,11 @@ const sum = (a) => a.reduce((x, y) => x + y, 0);
 const fresh = (on) => { bootCold(1718971200); cfg(`freq_hold = ${on ? 'on' : 'off'}`); cfg('tc_max_ppm = 100'); setTc(0, 0); fhReset(); setTemp(30); second(1); };
 const dumpLine = () => { dumpStart(); let hit = ''; for (let i = 0; i < 14; i++) { const l = dumpNext(); if (l.startsWith('# freq_hold')) hit = l.trim(); } return hit; };
 
-// 1. Off by default: nothing is learned, nothing is steered.
-fresh(false);
+// 1. Off: nothing is learned, nothing is steered. The significance fade's bound learns the same
+//    offset, so "nothing is learned" holds only with that off too (both are on by default).
+fresh(false); cfg('significance_fade = off');
 lock(rep(10, WARM + 80));
-check('off: no estimate is kept', estimate() === NONE && blocks() === 0);
+check('off (and significance_fade off): no estimate is kept', estimate() === NONE && blocks() === 0);
 check('off: holdover is not steered', sum(hold(30).map(Math.abs)) === 0 && steering() === 0);
 check(`off: tc_dump says so ("${dumpLine()}")`, dumpLine() === '# freq_hold: off');
 
