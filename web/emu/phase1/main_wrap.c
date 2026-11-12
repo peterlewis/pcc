@@ -64,13 +64,14 @@
 /* Host (64-bit) twin: the firmware's __VECTORS_RAM is uint32_t[], but a native function pointer
  * is 64-bit — SetSysTick/SetPPS's (uint32_t)x cast would truncate it and dispatch would jump to
  * garbage. Redirect the two handler slots the emulator actually dispatches to a 64-bit side
- * table. (WASM keeps the real vector table: there function pointers ARE 32-bit table indices.) */
-static void (*g_systick)(void) = 0;
-static void (*g_pps)(void) = 0;
+ * table. (WASM keeps the real vector table: there function pointers ARE 32-bit table indices.)
+ * The names carry an emu_ prefix because the firmware's menu has its own g_pps (a getter). */
+static void (*emu_vec_systick)(void) = 0;
+static void (*emu_vec_pps)(void) = 0;
 #undef SetSysTick
 #undef SetPPS
-#define SetSysTick(x) (g_systick = (void(*)(void))(x))
-#define SetPPS(x)     (g_pps     = (void(*)(void))(x))
+#define SetSysTick(x) (emu_vec_systick = (void(*)(void))(x))
+#define SetPPS(x)     (emu_vec_pps     = (void(*)(void))(x))
 #endif
 
 #define main fw_main_unused
@@ -195,7 +196,7 @@ int emu_display_on(void){ return emu_disp_on; }
 void emu_tick(void){
   colon_dma_ms++;               /* the colon DMA free-runs in the SysTick (1 ms) domain */
 #ifdef EMU_NATIVE64
-  if (g_systick) g_systick();
+  if (emu_vec_systick) emu_vec_systick();
 #else
   void (*h)(void) = (void(*)(void)) __VECTORS_RAM[ 16 + SysTick_IRQn ];
   if (h) h();
@@ -1128,7 +1129,7 @@ int emu_tz_offset(void){ return (int)currentOffset; }
 /* One PPS rising edge -> whichever PPS variant setPrecision installed (PPS/NoUpdate/etc). */
 void emu_pps(void){
 #ifdef EMU_NATIVE64
-  if (g_pps) g_pps();
+  if (emu_vec_pps) emu_vec_pps();
 #else
   void (*h)(void) = (void(*)(void)) __VECTORS_RAM[ 16 + EXTI9_5_IRQn ];
   if (h) h();

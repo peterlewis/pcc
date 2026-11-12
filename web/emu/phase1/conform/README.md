@@ -41,11 +41,12 @@ Same shimmed source (`../main_wrap.c` → firmware `main.c`) built two ways — 
 (`build_native.sh` → `conform_native`) and emcc — driven by the IDENTICAL stdin event-script;
 the two SNAP traces are diffed. Proves the emcc port is bit-for-bit a faithful build.
 ```
-bash build_native.sh
-./conform_native      < scripts/battery.txt > native.snap
-node runner_wasm.mjs  < scripts/battery.txt > wasm.snap
-diff native.snap wasm.snap
+bash native_check.sh     # builds the twin, runs every script in scripts/ through both, compares
 ```
+`build_native.sh` uses the same firmware source as `../build.sh` (the `web/emu/firmware` submodule,
+or `FW=`) and the same feature flags (`../fw_features.sh`, sourced by both). It also defines
+`__EMSCRIPTEN__`: the firmware keys its emulator branches on that macro, and the twin is the
+emulator too. The objects and the binary are build output and are not committed.
 Event-script verbs: `bootcold/boot <epoch>`, `enable <mode>`, `setadc <u>`, `setpos <lat> <lon>`,
 `tick <n>`, `pps`, `pendsv`, `poll`, `nmea <sentence>`, `b1`/`b2`, `snap <label>`.
 
