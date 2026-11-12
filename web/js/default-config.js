@@ -1,183 +1,250 @@
 // default-config.js — config.txt is the SINGLE SOURCE OF TRUTH for PCC Web.
 //
 // DEFAULT_CONFIG is the canonical, annotated "golden" config.txt: every option the clock4 firmware
-// understands, curated in the device's own house style. It does two jobs:
+// understands, curated in the device's own house style. It does three jobs:
 //   1. Seeds the app's boot defaults (configToState) — so the UI and the clock start from ONE place.
 //   2. Is what Export writes out (stateToConfig) — a file you can drop straight on the CLOCK drive.
+//   3. Is the sample config.txt the firmware ships: emu/firmware/qspi/config.txt is this text, byte
+//      for byte. emu/phase1/config_template_check.mjs fails if the two differ, if the firmware's
+//      parser knows a key this does not list, or if a switched-off line shows a value that is not
+//      the firmware's default. Change the file there and paste it here, or the other way round.
+// retemplate() lays any config.txt onto it: that file's settings, this file's layout and comments.
 // The same CONFIG_FIELDS table drives both directions, so the UI and the clock can never diverge.
 //
 // Keys use the CURRENT firmware spellings (e.g. MODE_SOLAR, not the older MODE_SUNDIAL). Parsing is
 // case-insensitive; firmware `enabled/on/1/yes` are truthy. See the conformance notes in main.c.
 
 export const DEFAULT_CONFIG = `# =============================================================================
-# Precision Clock Mk IV — config.txt
-# The single source of truth. This drives the clock, and PCC Web seeds its
-# defaults from it. Every firmware option is listed with its default; edit and
-# drop on the CLOCK USB drive, or round-trip it through PCC Web (Export).
+# Precision Clock Mk IV: config.txt
+#
+# Edit this file on the CLOCK drive. The clock reads it at power-on and again
+# when you save it. A line that starts with # is switched off: the clock then
+# uses its built-in value for that key. Delete a line, or put # in front of it,
+# and that setting goes back to its built-in value.
+#
+# Every key the firmware knows is in this file. Precision Clock Companion (PCC)
+# uses the same file as its template.
 # =============================================================================
 
-# Matrix refresh rate, in Hz (min 1000, max 100000). A target only — the exact
-# frequency is a division of the processor clock.
+
+## display
+
+# Matrix refresh rate in Hz, 1000 to 100000. The clock uses the nearest rate it
+# can divide from its processor clock.
 MATRIX_FREQUENCY = 20000
 
-# Timezone. Leave commented to auto-detect from the GPS fix. IANA name, e.g.
-# Europe/London; Etc/GMT+5 for a fixed offset; Etc/UTC for UTC.
+
+## timezone
+
+# Leave ZONE_OVERRIDE switched off to find the zone from the GPS position. To
+# fix it, give an IANA name: Europe/London, Etc/UTC, or Etc/GMT+5 for a fixed
+# offset. The value below is an example.
 #ZONE_OVERRIDE = Europe/London
 
-# Second timezone for MODE_ZONE2 (a live clock on the time row). Same format as ZONE_OVERRIDE:
-# an IANA name (full DST) or a fixed offset (Etc/UTC, Etc/GMT+5). Leave commented for none.
+# The second timezone, shown by MODE_ZONE2. Same format. An example.
 #zone2 = America/New_York
 
 
-## display modes — enable every row you want; the buttons cycle the enabled set
+## display modes
+# Enable each mode you want. The two buttons step through the enabled modes.
 
-# Date row — ISO 8601 standard (YYYY-MM-DD)
+# Date row: ISO 8601 date (YYYY-MM-DD), day of the year, week number
 MODE_ISO8601_STD = enabled
-# ISO 8601 ordinal (day-of-year) / ISO week
 MODE_ISO_ORDINAL = disabled
 MODE_ISO_WEEK    = disabled
-# Unix timestamp (always UTC) / Julian Date / Modified Julian Date
+# Unix time (always UTC), Julian Date, Modified Julian Date
 MODE_UNIX        = disabled
 MODE_JULIAN_DATE = disabled
 MODE_MODIFIED_JD = disabled
 
-# Weekday name, and weekday-with-date variants
+# Weekday name, alone and with the date
 MODE_WEEKDAY   = disabled
 MODE_WDY_MM_DD = disabled
 MODE_WEEKDA_DD = disabled
 
-# Time row — UTC offset (e.g. +01:00) / timezone name
+# UTC offset (+01:00) and timezone name
 MODE_SHOW_OFFSET  = disabled
 MODE_SHOW_TZ_NAME = disabled
 
-# Alternate timebases on the time row (the date row keeps the civil date):
-# Local Sidereal Time (live), and apparent-solar / sundial time.
+# Other clocks on the time row. The date row keeps the local date.
+# Local sidereal time, apparent solar (sundial) time, the second timezone.
 MODE_LST   = disabled
 MODE_SOLAR = disabled
+MODE_ZONE2 = disabled
 
-# Generic text (see 'text' below) and countdown (see 'countdown_to' below)
+# The text and the countdown set further down
 MODE_TEXT      = disabled
 MODE_COUNTDOWN = disabled
 
-# Turn off all LEDs (GPS stays fully powered)
+# All LEDs off. GPS stays on.
 MODE_STANDBY = disabled
 
 
-## astro modes (GPS-derived; shown on the date row while the clock keeps ticking)
+## astronomy modes
+# These need a position: a GPS fix, or the fixed position below.
+
+# Sunrise, sunset and solar noon. The sun's azimuth and elevation now.
 MODE_SUN      = disabled
 MODE_SUN_AZEL = disabled
+# Moon phase and illuminated percentage (needs no position)
 MODE_MOON     = disabled
+# Maidenhead grid locator. Latitude and longitude.
 MODE_GRID     = disabled
 MODE_LATLON   = disabled
-# Observing twilight ladder — civil / nautical / astronomical dusk + a live countdown to
-# astronomical darkness (sun -18°). White nights report NO DARK; needs a position.
+# Countdown to astronomical darkness (sun 18 degrees down), and the twilight times
 MODE_DARK     = disabled
+# Countdown to the next bright stars crossing your meridian. Needs STARS.BIN on the drive.
+MODE_STAR     = disabled
 
-# Bright-star meridian-transit predictor — paged countdowns to the soonest bright stars
-# crossing your local meridian, e.g. "SIRI  1 35". Needs a position (GPS or fake_longitude).
-# The catalogue is loaded from STARS.BIN on the CLOCK drive (93 naked-eye stars, generate-stars.py);
-# without a card it falls back to a baked ~30-star set.
-MODE_STAR = disabled
-# Trim the transit catalogue to stars brighter than this magnitude (smaller = fewer, more famous;
-# 1.5 ~= the two dozen first-magnitude stars, 2.5 = the whole STARS.BIN). Applied at boot.
-#star_max_mag = 1.5
+# Use only stars brighter than this magnitude. A smaller number gives fewer,
+# better-known stars: 1.5 is about two dozen.
+#star_max_mag = 6
 
-# Dwell per sub-screen for the paged read-outs (astro + temp comp + ADEV/STAR), in ms
-# (default 5500, min 250). Older firmware called this astro_page_ms.
+# How long each page of a paged mode stays up, in milliseconds. 250 or more.
 page_ms = 5500
 
-# Fixed position for astro when there's no GPS fix (decimal degrees, N+/E+)
-#fake_latitude  = 51.48
-#fake_longitude = -0.01
+# A fixed position, in decimal degrees, north and east positive. With these set
+# the clock ignores the GPS position. An example.
+#fake_latitude  = 51.4779
+#fake_longitude = -0.0015
 
 
-## colon animation
-# One of: slowfade, heartbeat, sawtooth, alt_sawtooth, toggle, solid
+## diagnostic modes
+
+# Satellites in view
+MODE_SATVIEW  = disabled
+# Allan deviation of the clock's own oscillator, measured against GPS
+MODE_ADEV     = disabled
+# What the temperature compensation has learned
+MODE_TEMPCOMP = disabled
+# Coin-cell voltage
+MODE_VBAT     = disabled
+# Checksum of the installed firmware
+MODE_FIRMWARE_CRC = disabled
+# Time to first fix after power-on. Light every segment. Raw brightness. RTC calibration.
+MODE_TTFF             = disabled
+MODE_DISPLAYTEST      = disabled
+MODE_DEBUG_BRIGHTNESS = disabled
+MODE_DEBUG_RTC        = disabled
+
+
+## colons
+
+# slowfade, heartbeat, sawtooth, alt_sawtooth, toggle or solid
 colon_mode = heartbeat
-# Colon for the alternate timebases (LST/SOLAR) — kept automatically distinct
-# from the civil colon; leave commented for that guarantee.
+# The colon for MODE_LST, MODE_SOLAR and MODE_ZONE2. Switched off, the clock
+# picks one that differs from colon_mode, so those modes never look like local time.
 #colon_alt_mode = alt_sawtooth
 
+# A small flourish on each quarter-hour and a longer one on the hour: off or trust
+cuckoo = off
 
-## text & countdown
-#text = hello
+
+## text and countdown
+
+# The text MODE_TEXT shows. An example.
+#text = HELLO
+# The moment MODE_COUNTDOWN counts down to, in UTC. An example.
 #countdown_to = 2027-01-01T00:00:00Z
 
 
-## holdover tolerance times, in seconds
-# As the GPS fix ages, the clock hides its least-significant digits to reflect
-# the widening accuracy. These set when each digit drops.
+## when GPS is lost
+
+# The clock hides its last digits as its time gets less certain. These are the
+# seconds without GPS after which the 1 ms, 10 ms and 100 ms digits go.
 Tolerance_time_1ms   = 1000
 Tolerance_time_10ms  = 10000
 Tolerance_time_100ms = 100000
-# Replace the fixed ladder above with measured uncertainty: each digit is dashed when the
-# live 3-sigma holdover error passes its place value (needs the significance-fade firmware).
+# on: use the clock's own measurement of its error and not the three times above.
+# Each digit fades as the error reaches it.
 significance_fade = off
+
+# on: without GPS, hold the oscillator frequency measured while GPS was present.
+# The clock needs 48 seconds of GPS first.
+freq_hold = off
+
+# Temperature compensation. With GPS, tc_learn measures how the oscillators
+# drift with temperature. Without GPS, tc_apply corrects the display for it and
+# tc_rtc corrects the battery-backed clock. tc_persist keeps what was learned
+# across power-off.
+tc_learn   = off
+tc_apply   = off
+tc_rtc     = off
+tc_persist = off
+# Reference temperature in degrees C. Seconds without GPS before the correction
+# starts (2 or more). The largest correction, in parts per million.
+#tc_t0       = 40
+#tc_engage_s = 2
+#tc_max_ppm  = 100
+# A model to start from. Send "tc_dump = on" over USB serial and paste the lines
+# it prints here. The numbers below are placeholders.
+#tc_hse_b = 0
+#tc_hse_c = 0
+#tc_lse_a = 0
+#tc_lse_b = 0
+#tc_lse_c = 0
+#tc_seed_lo = 0
+#tc_seed_hi = 0
+#tc_seed = on
 
 
 ## brightness
-# Nonlinear ambient-light curve: five (input,output) stops, 0..4095.
-# Default = VTT9812FH sensor with R11 = 470K.
+
+# The curve from the light sensor to the display brightness: five points, each
+# "sensor,brightness", 0 to 4095. This one suits the VTT9812FH sensor with R11 = 470K.
 BS1 = 0,0
 BS2 = 131,365
 BS3 = 1076,1422
 BS4 = 2774,2665
 BS5 = 3849,4095
-# Fixed brightness override (0.0-1.0 or 0-4095); leave commented for auto.
+# A fixed brightness, 0.0 to 1.0 or 0 to 4095. Switched off, the light sensor sets it. An example.
 #brightness = 0.5
 
-
-## display balance
-# Equalise per-segment brightness by duty so a "1" isn't brighter than an "8". "on" = the
-# calibrated auto curve (recommended); a number 2..300 pins a fixed manual strength.
-#seg_balance = on
-# Dim the colons in step with the main brightness (they are on their own PWM rail). "on" = auto
-# curve; a number 2..256 pins a fixed scale. Leave off until the digit levels are dialled in.
-#colon_balance = on
-# Factory-reset the stored settings: send "factory_reset = on" over USB serial (ignored in this file).
-# Erases menu-changed settings AND the learned temperature-compensation model, then re-reads this
-# config.txt — the clock returns to exactly what this file says, tc_* seed lines included. The
-# on-device menu's SYS > RESET does the same after a SURE? confirm. A power-cycle keeps settings.
+# on: make every digit equally bright. Without it a 1 is brighter than an 8.
+# A number from 2 to 300 sets a fixed strength.
+seg_balance = off
+# on: dim the colons with the digits. A number from 2 to 256 sets a fixed level.
+colon_balance = off
+# The two ends of the automatic colon curve: the brightness at or below which the
+# colons are full, and their level (of 256) at the dimmest setting.
+#colon_full_at = 2048
+#colon_floor   = 20
 
 
-## temperature compensation (opt-in; all off = stock behaviour)
-# GPS-locked, the clock can LEARN how each oscillator drifts with die temp
-# (tc_learn), then during a GPS outage steer the timebase (tc_apply) and/or
-# trim the battery RTC (tc_rtc). Paste tc_dump output below to freeze a model.
-tc_learn = off
-tc_apply = off
-tc_rtc   = off
-# Diagnostic date-row read-out: die temp / HSE model / LSE model / samples (pages, page_ms each)
-MODE_TEMPCOMP = disabled
-#tc_t0 = 40
-#tc_engage_s = 2
-#tc_max_ppm = 100
+## USB serial output
 
-# Live Allan deviation of the FREE-RUNNING crystal — pages sigma_y(tau) across octave averaging
-# times on the date row ("1s 3.2e-11" ... "1024s 3e-11"). The honest, undisciplined crystal signal.
-MODE_ADEV = disabled
-
-# Second civil timezone as a live clock on the time row, like sidereal and solar time: the date
-# row keeps the local date and the colons take colon_alt_mode. Set the zone with the 'zone2' key
-# up by ZONE_OVERRIDE; the time row shows dashes until it's set.
-MODE_ZONE2 = disabled
-
-
-## serial output
-# NMEA passthrough over USB: off / rmc / on
-nmea = off
-# Emit a $PMTXTS PPS-edge timing sentence for host-side jitter/drift analysis
+# GPS sentences: on, rmc (position and time only) or off
+nmea = on
+# on: one $PMTXTS timing sentence for each GPS pulse
 pps = off
-# Report the auto-dimmer once a second as $PMBRIT: the ambient light reading, the brightness it
-# chose (BSn scale), what chose it (A auto, M manual, S standby) and the balance values that
-# follow it. PCC Web asks for it when it connects; left commented, a config reload won't stop it.
+# on: report the automatic dimmer once a second as $PMBRIT. PCC asks for this
+# when it connects. Leave it switched off here, or a reload of this file stops it.
 #brightness_report = on
-# Watchdog: reset the clock if its firmware hangs for 8 seconds. It restarts from the RTC in about
-# a second. Not armed during a firmware update. Once armed, "off" takes effect at the next reset.
-#watchdog = on
-# Frequency hold: without GPS, keep the oscillator frequency that was measured against GPS. The
-# clock needs 48 seconds of lock first. Works alone or with tc_apply.
-#freq_hold = on
+# on: report the main loop's longest pause once a second as $PMLOOP
+#loop_diag = on
+
+
+## reliability
+
+# on: restart the clock if its firmware stops for 8 seconds. Once on, "off"
+# takes effect at the next restart.
+watchdog = off
+
+
+## this file and the menu
+
+# A setting you change with the clock's buttons stays until you change that
+# setting's line in this file. Changing a different line does not undo it.
+#
+# on: the clock writes its menu changes into this file, so the file shows what
+# the clock is doing. It only does this when no computer has been connected
+# since power-on. It then adds a line that starts "# synced". With PCC's pccd
+# running on a connected computer, pccd writes the changes whatever this says.
+config_write = off
+
+# To erase every menu change and everything the clock has learned, choose
+# SYS > RESET in the menu, or send "factory_reset = on" over USB serial. The
+# clock then does exactly what this file says.
 `;
 
 // --- config.txt grammar (mirrors the firmware): `key = value`, `#`/`;` comments, case-insensitive
@@ -194,6 +261,34 @@ export function parseConfigText(text) {
     if (key) out[key] = val;
   }
   return out;
+}
+
+// Lay a config.txt onto the template: every setting `text` makes (its active `key = value` lines, the
+// last one for a key winning, as in the firmware) goes onto the template's line for that key, which is
+// switched on if it was off. The template's layout, comments and every other line stay as they are.
+// MODE_* values are written as enabled/disabled. `aliases` maps an old key to the current one
+// (MODE_SUNDIAL is MODE_SOLAR). Returns { text, unknown }: `unknown` lists the keys the template has
+// no line for; they are added at the end, so nothing the file set is lost.
+export function retemplate(text, template = DEFAULT_CONFIG, aliases = { mode_sundial: 'mode_solar', alt_colon_mode: 'colon_alt_mode', astro_page_ms: 'page_ms' }) {
+  const want = new Map();
+  for (const [k, v] of Object.entries(parseConfigText(text))) want.set(aliases[k] || k, v);
+  const seen = new Set();
+  const out = String(template).split('\n').map((line) => {
+    const m = line.match(/^(#?)(\s*)([A-Za-z0-9_]+)(\s*=\s*)(.*)$/);
+    if (!m) return line;
+    const kl = m[3].toLowerCase();
+    if (!want.has(kl)) return line;
+    seen.add(kl);
+    let v = want.get(kl);
+    if (kl.startsWith('mode_')) v = truthy(v) ? 'enabled' : 'disabled';
+    return m[2] + m[3] + m[4] + v;
+  });
+  const unknown = [...want.keys()].filter((k) => !seen.has(k));
+  if (unknown.length) {
+    while (out.length && out[out.length - 1] === '') out.pop();
+    out.push('', '', '## keys this template has no line for', ...unknown.map((k) => `${k} = ${want.get(k)}`), '');
+  }
+  return { text: out.join('\n'), unknown };
 }
 
 const truthy = (v) => /^(enabled|on|1|true|yes)$/i.test(String(v || '').trim());
