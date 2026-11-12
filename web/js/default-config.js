@@ -172,6 +172,9 @@ pps = off
 # chose (BSn scale), what chose it (A auto, M manual, S standby) and the balance values that
 # follow it. PCC Web asks for it when it connects; left commented, a config reload won't stop it.
 #brightness_report = on
+# Watchdog: reset the clock if its firmware hangs for 8 seconds. It restarts from the RTC in about
+# a second. Not armed during a firmware update. Once armed, "off" takes effect at the next reset.
+#watchdog = on
 `;
 
 // --- config.txt grammar (mirrors the firmware): `key = value`, `#`/`;` comments, case-insensitive
