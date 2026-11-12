@@ -801,6 +801,9 @@ double emu_cfg_peek(const char* n){
 #endif
 #if EMU_HAS_TC_PERSIST
   P("tc_persist", tc_persist)
+#if EMU_HAS_CFGWRITE
+  P("config_write", config_write)
+#endif
 #endif
 #if EMU_HAS_STAR
   P("star_max_mag", star_max_mag)

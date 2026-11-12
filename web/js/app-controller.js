@@ -10,7 +10,7 @@ import { prepReview, drawReview, tAtX } from './review.js?v=3';
 import { StreamReplay, FRAME_FIELDS, WINDOW_S as REPLAY_REACH_S } from './streamreplay.js?v=2';
 import { subSatellitePoint } from './satpass.js?v=2';
 import { parsePMSTAR, parsePMADEV } from './pmext.mjs?v=2';
-import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=8';
+import { DEFAULT_CONFIG, configToState, stateToConfig } from './default-config.js?v=9';
 import { REC as PF_REC, RANGE as PF_RANGE, modelStream, runPrefilter } from './prefilter.mjs?v=2';
 
 // config.txt is the single source of truth: the clock-behaviour defaults (enabled modes, colon,
