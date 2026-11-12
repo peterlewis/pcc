@@ -34,6 +34,9 @@
 #ifndef EMU_HAS_STAR
 #  define EMU_HAS_STAR 0
 #endif
+#ifndef EMU_HAS_FW_PERSIST
+#  define EMU_HAS_FW_PERSIST 0
+#endif
 #ifndef EMU_HAS_FADE_WANDER
 #  define EMU_HAS_FADE_WANDER 0
 #endif
@@ -332,7 +335,33 @@ void   emu_ee2_load(void){
   if (ee_backing == EE_BK_NONE) ee_init_base();
   ee2_load();                                            /* re-scan (reboot) */
 }
+#if EMU_HAS_FW_PERSIST
+int    emu_ee2_commit(void){ return (int)ee2_commit(1); }
+/* Wander persistence harness (fade_persist_check): inject a learned level as the learner would leave
+ * it, run the real persist step, and read back what the store shadow and the learner hold. A
+ * "power cycle" clears the learner and the once-per-boot latch, re-scans the store, and runs the
+ * boot restore. emu_uptime advances the millisecond tick the 30-minute commit throttle runs on. */
+void   emu_fw_set(double var, int count){ fw_var = (float)var; fw_count = (uint16_t)count; fw_new_pair = 1; }
+void   emu_tc_persist_step(void){ tc_persist_step(); }
+void   emu_fw_power_cycle(void){ fw_break(); fw_var = 0; fw_count = 0; fw_new_pair = 0; fw_dirty = 0; fw_restored = 0; tc_last_commit_ms = uwTick; ee2_load(); fw_restore_from_flash(); }
+int    emu_fw_stored_count(void){ return fw2.count; }
+double emu_fw_stored_var(void){ return (double)fw2.var; }
+int    emu_fw_dirty(void){ return fw_dirty; }
+int    emu_ee2_gen(void){ return (int)ee2_gen; }
+void   emu_uptime(unsigned ms){ uwTick += ms; }
+void   emu_tc_housekeeping(void){ tc_housekeeping(); tc_forget_step(); }
+#else
 int    emu_ee2_commit(void){ return (int)ee2_commit(); }
+void   emu_fw_set(double var, int count){ (void)var; (void)count; }
+void   emu_tc_persist_step(void){}
+void   emu_fw_power_cycle(void){}
+int    emu_fw_stored_count(void){ return 0; }
+double emu_fw_stored_var(void){ return 0; }
+int    emu_fw_dirty(void){ return 0; }
+int    emu_ee2_gen(void){ return 0; }
+void   emu_uptime(unsigned ms){ (void)ms; }
+void   emu_tc_housekeeping(void){}
+#endif
 int    emu_ee2_peek(unsigned off){ off += EE2_EMU_OFF; return off<sizeof(ee_sfile)?ee_sfile[off]:-1; }
 void   emu_ee2_poke(unsigned off,int v){ off += EE2_EMU_OFF; if(off<sizeof(ee_sfile)) ee_sfile[off]=(uint8_t)v; }
 void   emu_tc_persist_set(int on){ tc_persist = on?1:0; }
@@ -372,6 +401,15 @@ double emu_tc2_probe(int field){
 void   emu_ee2_reset(void){}
 void   emu_ee2_load(void){}
 int    emu_ee2_commit(void){ return 0; }
+void   emu_fw_set(double var, int count){ (void)var; (void)count; }   /* lean branch: no store, no wander persistence */
+void   emu_tc_persist_step(void){}
+void   emu_fw_power_cycle(void){}
+int    emu_fw_stored_count(void){ return 0; }
+double emu_fw_stored_var(void){ return 0; }
+int    emu_fw_dirty(void){ return 0; }
+int    emu_ee2_gen(void){ return 0; }
+void   emu_uptime(unsigned ms){ (void)ms; }
+void   emu_tc_housekeeping(void){}
 int    emu_ee2_peek(unsigned off){ (void)off; return -1; }
 void   emu_ee2_poke(unsigned off,int v){ (void)off; (void)v; }
 void   emu_tc_persist_set(int on){ (void)on; }
