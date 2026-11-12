@@ -34,6 +34,9 @@
 #ifndef EMU_HAS_STAR
 #  define EMU_HAS_STAR 0
 #endif
+#ifndef EMU_HAS_FADE_WANDER
+#  define EMU_HAS_FADE_WANDER 0
+#endif
 #ifndef EMU_HAS_CFG_REDERIVE
 #  define EMU_HAS_CFG_REDERIVE 0
 #endif
@@ -764,11 +767,23 @@ void emu_fh_reset(void){
   if (!tc_nom_load) tc_nom_load = 79999u;
   fh_count = fh_head = fh_n = 0; fh_sum = 0; fh_have_prev = 0; fh_warm = 0;
   for (unsigned i = 0; i < FH_BLOCKS; i++) fh_ring[i] = 0;
+#if EMU_HAS_FADE_WANDER
+  fw_break(); fw_var = 0; fw_count = 0;
+#endif
 }
+#if EMU_HAS_FADE_WANDER
+int    emu_fw_count(void){ return fw_count; }
+double emu_fw_var(void){ return (double)fw_var; }          /* learned Allan variance at 1024 s, (ticks/s)^2 */
+double emu_fw_used(void){ return (double)fade_wander_var(); }
+#else
+int    emu_fw_count(void){ return 0; }
+double emu_fw_var(void){ return 0; }
+double emu_fw_used(void){ return 0; }
+#endif
 void emu_fh_edge(int d, int valid){
   pps_cap.seq++; pps_cap.dwt_pps += (tc_nom_load + 1u) * 1000u + (uint32_t)d;
   pps_cap.flags = valid ? 3 : 0;
-  if (freq_hold) fh_learn();
+  if (freq_hold || significance_fade) fh_learn();
 }
 void emu_fh_missed_edge(void){ pps_cap.seq++; pps_cap.dwt_pps += (tc_nom_load + 1u) * 1000u; }   /* the main loop never saw it */
 int  emu_fh_estimate(void){ int32_t e = 0; return fh_estimate(&e) ? (int)e : -2000000000; }
