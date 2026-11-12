@@ -3902,8 +3902,8 @@ class Component extends DcLite {
     // phase 1 ms off (folded in realdev.js). Shown so the heal is visible, not silent.
     const folds = S && S.real && S.pps && S.pps.msFolds ? ' · MS-RACE FOLDED ×' + S.pps.msFolds : '';
     const banner = S && S.real
-      ? (streaming ? '$PMTXTS · LIVE · DRAFT FW (pps=on)' + folds : '$PMTXTS · SEND "pps = on" TO STREAM')
-      : (S && S.connected ? '$PMTXTS · SIMULATED STREAM' : '$PMTXTS · DRAFT-FIRMWARE FEATURE — pps=on');
+      ? (streaming ? '$PMTXTS · LIVE · EXTENDED FIRMWARE' + folds : '$PMTXTS · NOT STREAMING — NEEDS THE EXTENDED FIRMWARE, WITH pps ON')
+      : (S && S.connected ? '$PMTXTS · SIMULATED STREAM' : '$PMTXTS · FROM THE EXTENDED FIRMWARE');
     return {
       ppsBanner: banner,
       ppsBannerC: (S && S.real && streaming) ? 'var(--lock)' : 'var(--acq)',
