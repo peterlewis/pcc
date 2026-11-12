@@ -79,19 +79,18 @@ cfgDef(0, 0); setMtime(0x9999, 0x9999);                        // config defines
 eeApply();
 check(`armed TEMPCOMP SURVIVES reboot incl. persist (learn=${tcLearn()} apply=${tcApply()} persist=${tcPersist()})`, tcLearn() === 1 && tcApply() === 1 && tcPersist() === 1);
 
-// (3) precedence: config.txt DEFINES the tc_learn/tc_apply pair (KID_TEMPCOMP) with a mtime that DOESN'T
-//     match the override stamp -> config owns it, the stored override is skipped. Scribble off first;
-//     with the override skipped the flags stay off (config path, not the menu store, decides).
+// (3) a reload: config.txt has gained tc_learn/tc_apply lines (KID_TEMPCOMP) -> the file owns the
+//     setting and the stored choice is deleted. Scribble off first: the flags stay off.
 setTc(0, 0);
-cfgDef(1 << KID_TEMPCOMP, 0); setMtime(0x1111, 0x2222);        // defined, mtime != 0x5AA5/0x1234
+cfgDef(1 << KID_TEMPCOMP, 0); setMtime(0x1111, 0x2222);
 eeApply();
-check(`defined-in-config + mtime mismatch -> override skipped (flags stay off)`, tcLearn() === 0 && tcApply() === 0);
+check(`new tc lines in config.txt -> the stored choice is not applied (flags stay off)`, tcLearn() === 0 && tcApply() === 0);
 
-// (4) precedence: same config key but mtime MATCHES the stamp -> the on-device override wins again.
+// (4) the choice is gone for good: the file it was made against does not bring it back.
 setTc(0, 0);
-cfgDef(1 << KID_TEMPCOMP, 0); setMtime(0x5AA5, 0x1234);        // defined, mtime == stamp
+cfgDef(1 << KID_TEMPCOMP, 0); setMtime(0x5AA5, 0x1234);
 eeApply();
-check(`defined-in-config + mtime match -> override applies (learn=${tcLearn()} apply=${tcApply()})`, tcLearn() === 1 && tcApply() === 1);
+check(`the beaten choice does not return (learn=${tcLearn()} apply=${tcApply()})`, tcLearn() === 0 && tcApply() === 0);
 
 let fail = 0;
 for (const r of results) { if (!r.pass) fail++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}`); }

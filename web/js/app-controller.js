@@ -128,7 +128,7 @@ class Component extends DcLite {
     fetch('build-info.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (j && j.fwSha) { this.buildInfo = j; this.setState({}); }
     }).catch(() => {});
-    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=111'), import('./realdev.js?v=122'), import('./emu-driver.js?v=45'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=4')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
+    Promise.all([import('./clockface.js?v=91'), import('./clockface-svg.js?v=114'), import('./sim.js?v=101'), import('./charts.js?v=111'), import('./realdev.js?v=122'), import('./emu-driver.js?v=45'), import('./ppsts.js?v=15'), import('./settings-bin.js?v=5')]).then(([CF, CFSVG, SIM, CH, RD, ED, PT, SB]) => {
       this.CF = CF; this.CFSVG = CFSVG; this.SIM = SIM; this.CH = CH; this.RD = RD; this.ED = ED; this.PT = PT; this.SB = SB;
       try { localStorage.removeItem('pccweb.cuckoo'); } catch (e) {}   // parked feature's persisted setting — clear the ghost
       this.session = SIM.createSession({ preroll: 1560 });
@@ -3686,7 +3686,9 @@ class Component extends DcLite {
           tagColor: m.wins ? 'var(--lock)' : 'var(--txt3)',
         })),
       ] : [],
-      menuOvrNote: this._menuOvr ? (this._menuOvr.stampOk
+      menuOvrNote: this._menuOvr ? (this._menuOvr.perSetting
+        ? `Menu values apply. A config.txt line that changes takes its setting back · store gen ${this._menuOvr.gen}`
+        : this._menuOvr.stampOk
         ? `Menu values apply. config.txt is unchanged since the menu edit · store gen ${this._menuOvr.gen}`
         : `config.txt applies where both set a key. It was saved after the menu edit · store gen ${this._menuOvr.gen}`) : '',
       // Transpose the on-device menu state into the config.txt editor as key = value lines. Existing
