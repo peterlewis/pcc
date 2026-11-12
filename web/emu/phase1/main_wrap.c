@@ -58,6 +58,12 @@
 #ifndef EMU_HAS_BRIT
 #  define EMU_HAS_BRIT 0
 #endif
+#ifndef EMU_HAS_MENU_EXPORT
+#  define EMU_HAS_MENU_EXPORT 0
+#endif
+#ifndef EMU_HAS_CFGWRITE
+#  define EMU_HAS_CFGWRITE 0
+#endif
 #include "shim_redirect.h"
 
 #ifdef EMU_NATIVE64
@@ -748,6 +754,13 @@ const char* emu_pmbrit_line(void){
 }
 /* "menu_dump = on": one emit through the firmware's own menu_dump_step(), so a check can read the
  * store diagnostic for each SETTINGS.BIN state. Empty string = the firmware dropped the line. */
+#if EMU_HAS_MENU_EXPORT
+/* The menu's choices as config.txt lines ($PMCFG). start asks for a set as "menu_export = on" does;
+ * next runs one main-loop pass of the sender and returns the line it sent, or "" once the set is done. */
+void emu_menu_export_start(void){ hUsbDeviceFS.dev_state = USBD_STATE_CONFIGURED; menu_export_pending = 1; }
+int  emu_menu_export_pending(void){ return menu_export_pending ? 1 : 0; }
+const char* emu_menu_export_next(void){ emu_pmtxts_buf[0] = 0; menu_export_step(); return emu_pmtxts_buf; }
+#endif
 const char* emu_menu_dump_line(void){
   emu_pmtxts_buf[0] = 0;
   hUsbDeviceFS.dev_state = USBD_STATE_CONFIGURED;
@@ -1028,8 +1041,81 @@ FRESULT f_stat(const TCHAR* path, FILINFO* fno){
   }
   return FR_NO_FILE;
 }
+#if EMU_HAS_CFGWRITE
+/* ---- The disk model for the config.txt writer (config_write_check) -----------------------------------
+ * A root-directory sector and ten data sectors, in the firmware's NOR flash model (store.h), with the
+ * settings file beside them. emu_disk_attach lays a config.txt out on it: `alloc` data sectors in the
+ * order `frag` selects (0 in order, 1 scattered), the text in them, and whatever the cluster's unused
+ * part held before left as junk, as on a real card. The directory lists a volume label, SETTINGS.BIN,
+ * two other files and CONFIG.TXT. /CONFIG.TXT is then served from the model, size and timestamp from
+ * its directory entry, so the firmware's loader reads what its writer wrote. */
+static uint8_t emu_disk_view[8 * 4096];
+static const uint8_t *emu_disk_entry(void){
+  for (unsigned o = 0; o < 4096; o += 32){
+    const uint8_t *e = &emu_disk[o];
+    if (!e[0]) break;
+    if (!memcmp(e, "CONFIG  TXT", 11) && !(e[11] & 0x18)) return e;
+  }
+  return 0;
+}
+static void emu_disk_publish(void){
+  if (!emu_disk_attached) return;
+  const uint8_t *e = emu_disk_entry();
+  uint32_t size = e ? ((uint32_t)e[28] | ((uint32_t)e[29] << 8) | ((uint32_t)e[30] << 16) | ((uint32_t)e[31] << 24)) : 0;
+  if (!e || size > (uint32_t)emu_cw_n * 4096u || size > sizeof emu_disk_view){ emu_file_remove("/CONFIG.TXT"); return; }
+  for (uint32_t i = 0; i < size; i++) emu_disk_view[i] = emu_disk[4096u * (1u + emu_cw_chain[i / 4096u]) + (i & 4095u)];
+  emu_register_file("/CONFIG.TXT", emu_disk_view, size);
+  emu_file_mtime(e[24] | (e[25] << 8), e[22] | (e[23] << 8));
+}
+void emu_disk_attach(const uint8_t *text, unsigned len, int alloc, int frag){
+  static const uint8_t order[2][8] = { {0,1,2,3,4,5,6,7}, {6,2,9,0,4,7,1,3} };
+  if (alloc < 1) alloc = 1; if (alloc > 8) alloc = 8;
+  if (len > (unsigned)alloc * 4096u) len = (unsigned)alloc * 4096u;
+  for (unsigned i = 0; i < sizeof emu_disk; i++) emu_disk[i] = (uint8_t)('A' + (i * 7u) % 26u);   /* stale data everywhere */
+  memset(emu_disk, 0, 4096);
+  static const struct { const char *name; uint8_t attr; uint16_t cl; uint32_t size; } D[] = {
+    { "CLOCK      ", 0x08, 0, 0 }, { "SETTINGSBIN", 0x20, 900, 16384 }, { "TZRULES BIN", 0x20, 904, 171726 },
+    { "CONFIG  TXT", 0x20, 0, 0 }, { "FWT     BIN", 0x20, 950, 196608 },
+  };
+  emu_cw_n = (uint8_t)alloc;
+  for (int i = 0; i < alloc; i++) emu_cw_chain[i] = order[frag ? 1 : 0][i];
+  for (unsigned i = 0; i < sizeof D / sizeof *D; i++){
+    uint8_t *e = &emu_disk[32u * i];
+    memcpy(e, D[i].name, 11); e[11] = D[i].attr;
+    uint16_t cl = D[i].cl; uint32_t sz = D[i].size;
+    if (i == 3){ cl = (uint16_t)(2u + emu_cw_chain[0]); sz = len; e[22] = 0x21; e[23] = 0x43; e[24] = 0x6C; e[25] = 0x5B; }   /* 2025-11-12 08:25:02 */
+    e[26] = (uint8_t)cl; e[27] = (uint8_t)(cl >> 8); memcpy(e + 28, &sz, 4);
+  }
+  for (unsigned i = 0; i < len; i++) emu_disk[4096u * (1u + emu_cw_chain[i / 4096u]) + (i & 4095u)] = text[i];
+  emu_disk_attached = 1;
+  emu_disk_publish();
+}
+unsigned emu_disk_file_len(void){ emu_disk_publish(); const uint8_t *e = emu_disk_entry(); return e ? ((uint32_t)e[28] | ((uint32_t)e[29] << 8) | ((uint32_t)e[30] << 16)) : 0; }
+const uint8_t *emu_disk_file(void){ emu_disk_publish(); return emu_disk_view; }
+const uint8_t *emu_disk_dir(void){ return emu_disk; }
+/* The whole flash model (settings file, disk, and how config.txt is laid out on it), to carry across a
+ * power cycle into a fresh emulator. */
+unsigned emu_flash_size(void){ return (unsigned)(sizeof ee_sfile + sizeof emu_disk + 10); }
+void emu_flash_export(uint8_t *d){ memcpy(d, ee_sfile, sizeof ee_sfile); memcpy(d + sizeof ee_sfile, emu_disk, sizeof emu_disk);
+  uint8_t *t = d + sizeof ee_sfile + sizeof emu_disk; t[0] = emu_disk_attached; t[1] = emu_cw_n; memcpy(t + 2, emu_cw_chain, 8); }
+void emu_flash_import(const uint8_t *d){ memcpy(ee_sfile, d, sizeof ee_sfile); memcpy(emu_disk, d + sizeof ee_sfile, sizeof emu_disk);
+  const uint8_t *t = d + sizeof ee_sfile + sizeof emu_disk; emu_disk_attached = t[0]; emu_cw_n = t[1]; memcpy(emu_cw_chain, t + 2, 8);
+  emu_power_lost = 0; emu_cut_after = -1; }
+/* Power cuts: the flash operation that brings `after` to zero is interrupted, and nothing happens after it. */
+void emu_flash_cut(int after, int kind){ emu_cut_after = after; emu_cut_kind = (uint8_t)kind; emu_power_lost = 0; }
+unsigned emu_flash_op_count(void){ return emu_flash_ops; }
+int  emu_power_lost_now(void){ return emu_power_lost; }
+/* The writer: one main-loop pass; whether it or a sector rewrite is in progress; whether it has asked
+ * for config.txt to be read again (taking the request). */
+void emu_cw_step(void){ cw_step(); }
+int  emu_cw_busy(void){ return (cw.st != CW_IDLE || jx.st != J_IDLE || cw.wait || cw.full) ? 1 : 0; }
+int  emu_cw_take_reload(void){ int r = delayedReadConfigFile ? 1 : 0; delayedReadConfigFile = 0; return r; }
+int  emu_cw_host_seen(void){ return cw_host_seen ? 1 : 0; }
+#else
+static void emu_disk_publish(void){}
+#endif
 /* The firmware's real config loader, against a registered /CONFIG.TXT (it never closes the file). */
-void emu_read_config(void){ for (int j = 0; j < EMU_VFS_MAX; j++) emu_vopen[j].fp = 0; readConfigFile(); }
+void emu_read_config(void){ emu_disk_publish(); for (int j = 0; j < EMU_VFS_MAX; j++) emu_vopen[j].fp = 0; readConfigFile(); }
 FRESULT f_close(FIL* fp){
   for (int j = 0; j < EMU_VFS_MAX; j++) if (emu_vopen[j].fp == fp) emu_vopen[j].fp = 0;
   return FR_OK;

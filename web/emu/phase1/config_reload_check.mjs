@@ -73,7 +73,7 @@ const NAMES = LINES.map((l) => l[1]);
   const c = await clock();
   const rows = []; const n = c.w('emu_cfg_rows', 'number')(); const key = c.w('emu_cfg_row_key', 'string', ['number']);
   for (let i = 0; i < n; i++) rows.push(key(i));
-  const SERIAL_ONLY = ['cuckoo_preview', 'tc_forget', 'tc_dump', 'adev_dump', 'hdev_dump', 'star_dump', 'wdt_dump', 'menu_dump', 'factory_reset', 'tc_reset'];
+  const SERIAL_ONLY = ['cuckoo_preview', 'tc_forget', 'tc_dump', 'adev_dump', 'hdev_dump', 'star_dump', 'wdt_dump', 'menu_dump', 'menu_export', 'factory_reset', 'tc_reset'];
   const RESET_EVERY_LOAD = ['brightness', 'colon_mode', 'colon_alt_mode', 'Tolerance_time_1ms', 'Tolerance_time_10ms', 'Tolerance_time_100ms'];
   const NEXT_POWER_ON = ['MATRIX_FREQUENCY'];            // two boards, two defaults: see cfg_defaults
   const COMPILED_OUT = ['MODE_DDMMYYYY'];                // only with NONCOMPLIANT_DATE_MODES

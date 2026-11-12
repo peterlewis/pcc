@@ -78,3 +78,12 @@ fi
 if fw_has "ee2_init_base"; then
   FW_FEATURES+=(-DEMU_HAS_TC_PERSIST=1)
 fi
+
+# The menu's choices sent as config.txt lines ($PMCFG).
+if fw_has "menu_export_step"; then
+  FW_FEATURES+=(-DEMU_HAS_MENU_EXPORT=1)
+fi
+# The clock writing config.txt itself: the journal in the store, and the writer.
+if fw_has "ee_j_begin"; then
+  FW_FEATURES+=(-DEMU_HAS_CFGWRITE=1)
+fi
