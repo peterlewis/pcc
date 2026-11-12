@@ -11,7 +11,7 @@
 // later cannot be left out the way these were. With the old code the removal cases FAIL.
 // Run: node config_reload_check.mjs
 process.env.TZ = 'UTC';   // the emulator's mktime follows the host zone; the clock's is UTC (countdown_to)
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 const { default: factory } = await import('../clock-fw.mjs');
 
 const results = [];
@@ -63,7 +63,11 @@ const NAMES = LINES.map((l) => l[1]);
 
 // 0. Every key the parser knows is accounted for.
 {
-  const src = readFileSync(new URL('../firmware/mk4-time/Core/Src/main.c', import.meta.url), 'utf8');
+  // main.c and its sections (main_parts/*.h): the parser lives in one of them
+  const dir = new URL('../firmware/mk4-time/Core/Src/', import.meta.url);
+  const partsDir = new URL('main_parts/', dir);
+  const src = [readFileSync(new URL('main.c', dir), 'utf8'),
+    ...(existsSync(partsDir) ? readdirSync(partsDir).filter((f) => f.endsWith('.h')).sort().map((f) => readFileSync(new URL(f, partsDir), 'utf8')) : [])].join('\n');
   const body = src.slice(src.indexOf('void parseConfigString(char *key'), src.indexOf('void postConfigCleanup(void)'));
   const parser = [...body.matchAll(/strcasecmp\(key, "([^"]+)"\)/g)].map((m) => m[1]);
   const c = await clock();
