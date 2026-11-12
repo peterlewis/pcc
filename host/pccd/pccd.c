@@ -47,7 +47,7 @@
 #endif
 
 #ifndef PCCD_VERSION
-#define PCCD_VERSION "0.10.1"               /* overridable (-DPCCD_VERSION=...) so a test build can look older */
+#define PCCD_VERSION "0.11.0"               /* overridable (-DPCCD_VERSION=...) so a test build can look older */
 #endif
 #ifdef PCCD_GIT
 #define PCCD_VERSTR PCCD_VERSION "+" PCCD_GIT      /* Makefile stamps the short git hash for traceable /health */
