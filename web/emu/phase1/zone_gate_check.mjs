@@ -7,6 +7,7 @@
 //      A lookup that failed leaves no such fix, so the next fix tries again; so does a ZONE_OVERRIDE
 //      that names no zone. (The first cut of the gate recorded the fix before the lookup had worked,
 //      and a clock that had not moved then never tried again.)
+//   4. A computer using the drive holds it too: see the part itself.
 //   3. The cuckoo holds the lookup clear of its quarter and hour pieces, which are scheduled and
 //      stepped from the same main loop. The clock is run across a quarter with a fix arriving at .350
 //      of every second and each lookup costing the main loop 300 ms, as on the hardware. Taken on
@@ -113,6 +114,42 @@ approach('off');
 const off = across(14000, () => due() === 1);
 check(`cuckoo = off: nothing is ever held, the :59 second included (lookups in seconds ${off.lookups.join(' ')})`, [55, 56, 57, 58, 59, 0, 1, 2, 3, 4].every((s) => off.lookups.includes(s)));
 check('cuckoo = off: and the firmware is not holding', holds() === 0);
+
+// ---- 4. a computer using the drive -------------------------------------------------------------
+// The lookup reads the map through the same flash chip a connected computer reads the drive through,
+// and a read or write from the computer that arrives while the lookup has the chip fails. So no
+// lookup starts while the computer is at the drive, nor for two seconds after it stops; the fix is
+// kept and looked up then. (Inside a lookup, the firmware's zonedetect.c gives up at the computer's
+// first read: mk4-time/test/zone_host_test.c in the firmware checks that half.)
+const hostIo = w('emu_host_io', 'number', ['number', 'number']);
+if (hostIo(0, 0) === -1) console.log('this firmware does not hold the lookup for a computer: part 4 skipped');
+else {
+  // `ms` of the clock running, a main-loop pass every millisecond, each asking whether a lookup is due.
+  // Returns how many passes said yes. A fix arrives at .350 of each second, as in part 3.
+  const passes = (ms) => { let yes = 0; for (let i = 0; i < ms; i++) { tick(); if (subms() === 350) fix(LAT, LON); poll(); if (due() === 1) yes++; } return yes; };
+  for (const [what, r, wr] of [['reading', 1, 0], ['writing to', 0, 1]]) {
+    start(); hostIo(0, 0); passes(2500);
+    fix(LAT, LON);
+    check(`no computer: the lookup runs (${what})`, due() === 1);
+    run(1);
+    hostIo(r, wr); fix(LAT, LON);
+    check(`a computer ${what} the drive: the lookup waits`, due() === 0);
+    const during = passes(20000);
+    check(`... for as long as the computer goes on, 20 s here (${during} passes found it due)`, during === 0);
+    hostIo(0, 0);
+    const after = passes(1900);
+    check(`... and for two seconds after it stops (${after} passes found it due)`, after === 0);
+    const later = passes(400);
+    check(`... then the fix that was kept is looked up (new_position ${peek('new_position')})`, later > 0 && due() === 1);
+    run(1);
+  }
+  start(); hostIo(0, 0); passes(2500);
+  fix(LAT, LON); run(1);                           // nothing waiting
+  hostIo(1, 0); passes(50); hostIo(0, 0);          // a short read between two fixes
+  passes(100); fix(LAT, LON);
+  check('a short read between two fixes holds the next one', due() === 0);
+  check('... for two seconds, no longer', passes(1700) === 0 && passes(600) > 0);
+}
 
 let fail = 0;
 for (const r of results) { if (!r.pass) fail++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}`); }

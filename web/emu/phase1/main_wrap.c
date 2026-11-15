@@ -67,6 +67,9 @@
 #ifndef EMU_HAS_ZONE_GATE
 #  define EMU_HAS_ZONE_GATE 0
 #endif
+#ifndef EMU_HAS_ZONE_HOST
+#  define EMU_HAS_ZONE_HOST 0
+#endif
 #include "shim_redirect.h"
 
 #ifdef EMU_NATIVE64
@@ -813,6 +816,18 @@ const char* emu_menu_dump_line(void){
  * readConfigFile against a registered /CONFIG.TXT. emu_cfg_peek reads one piece of config-owned
  * state by name, so a check can compare "this key was removed" with "this key was never set".
  * (emu_read_config itself sits with the file shim, further down.) */
+/* A computer using the drive (zone_gate_check): the two flags the storage handlers set on a read and on
+ * a write, which the 10 Hz interrupt clears again once the computer stops. Here they stay as set.
+ * -1: this firmware does not hold the lookup for a computer. */
+#if EMU_HAS_ZONE_HOST
+int emu_host_io(int reading, int writing){
+  qspi_usb_read_time = reading ? (uwTick ? uwTick : 1) : 0;
+  qspi_write_time    = writing ? (uwTick ? uwTick : 1) : 0;
+  return 0;
+}
+#else
+int emu_host_io(int reading, int writing){ (void)reading; (void)writing; return -1; }
+#endif
 /* The main loop's timezone lookup (zone_gate_check). emu_zone_lookup_due is the firmware's own test
  * of whether it runs this pass; emu_zone_lookup_run takes the fix as the main loop does and finishes
  * the way the lookup did (loaded = its rules loaded; 0 = cut short, no map, or rules not found). */

@@ -91,3 +91,7 @@ fi
 if fw_has "zone_lookup_due"; then
   FW_FEATURES+=(-DEMU_HAS_ZONE_GATE=1)
 fi
+# The timezone lookup giving way to a computer that is using the drive.
+if fw_has "zone_host_busy"; then
+  FW_FEATURES+=(-DEMU_HAS_ZONE_HOST=1)
+fi
