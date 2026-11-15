@@ -152,10 +152,11 @@ cuckoo = off
 
 ## the millisecond count
 
-# on: start each second's millisecond count at the GPS pulse. Without it the
-# count usually runs one millisecond ahead, as on the stock clock. Checked in
-# the emulator and against the clock's own timing reports; not yet filmed on a
-# clock.
+# on: start each second's millisecond count at the GPS pulse. Without it, on
+# some clocks the count runs one millisecond ahead, as with the stock firmware.
+# On a clock that does not need it, it does nothing. Recommended: on. Checked
+# in the emulator and against one clock's own timing reports; not yet filmed
+# on a clock.
 ms_align = off
 
 
