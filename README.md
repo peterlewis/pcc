@@ -69,7 +69,7 @@ The face itself runs my [extended firmware](https://github.com/peterlewis/clock4
 <details>
 <summary><b>Where the firmware is tested and tuned</b></summary>
 
-**Tested here.** The firmware's emulator test suites live in [`web/emu/phase1`](web/emu/phase1): 37 suites that drive the real firmware code. A firmware change comes with a test in this repository.
+**Tested here.** The firmware's emulator test suites live in [`web/emu/phase1`](web/emu/phase1): 39 suites that drive the real firmware code. A firmware change comes with a test in this repository.
 
 **Tuned here.** `pccd` records everything a connected clock reports. The firmware's holdover was designed from those recordings, not from estimates: the frequency hold, the bound behind the fading digits, and the discovery that the millisecond count ran one ahead of GPS all came from them.
 

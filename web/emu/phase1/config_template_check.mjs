@@ -48,12 +48,12 @@ check(`every line that looks like a setting is one (${stray.join(', ') || 'none 
 check(`no key has two lines (${twice.join(', ') || 'none'})`, twice.length === 0);
 check('no serial-only command is in the file', !keyLines.some((x) => SERIAL_ONLY.includes(x.key.toLowerCase())));
 check('modes are spelled enabled or disabled, switches on or off', keyLines.filter((x) => /^MODE_/i.test(x.key)).every((x) => /^(enabled|disabled)$/.test(x.value)) &&
-  ['significance_fade', 'freq_hold', 'tc_learn', 'tc_apply', 'tc_rtc', 'tc_persist', 'seg_balance', 'colon_balance', 'pps', 'watchdog', 'config_write'].every((k) => /^(on|off)$/.test(keyLines.find((x) => x.key === k)?.value || '')));
+  ['significance_fade', 'freq_hold', 'tc_learn', 'tc_apply', 'tc_rtc', 'tc_persist', 'seg_balance', 'colon_balance', 'pps', 'watchdog', 'config_write', 'zone_gate', 'ms_align'].every((k) => /^(on|off)$/.test(keyLines.find((x) => x.key === k)?.value || '')));
 
 // ---- through the firmware's own loader -------------------------------------------------------------
 const PEEKS = ['pps', 'nmea', 'page_ms', 'text_len', 'fake_longitude', 'fake_latitude', 'countdown_to', 'brightness', 'tolerance_1ms', 'colon_mode', 'zone2_set', 'matrix',
   'BS2_in', 'BS2_out', 'seg_balance', 'colon_balance', 'colon_full_at', 'colon_floor', 'cuckoo', 'tc_learn', 'tc_apply', 'tc_rtc', 'significance_fade', 'tc_t0', 'tc_engage_s',
-  'tc_max_ppm', 'tc_hse_b', 'tc_lse_a', 'tc_seed', 'tc_seed_lo', 'tc_persist', 'star_max_mag', 'brightness_report', 'watchdog', 'freq_hold', 'loop_diag', 'config_write']
+  'tc_max_ppm', 'tc_hse_b', 'tc_lse_a', 'tc_seed', 'tc_seed_lo', 'tc_persist', 'star_max_mag', 'brightness_report', 'watchdog', 'freq_hold', 'loop_diag', 'config_write', 'zone_gate', 'ms_align']
   .concat(keyLines.filter((x) => /^MODE_/i.test(x.key)).map((x) => 'MODE:' + (x.key === 'MODE_FIRMWARE_CRC' ? 'MODE_FIRMWARE_CRC_T' : x.key)));
 let stamp = 100;
 async function load(text) {
@@ -97,7 +97,7 @@ const L = laid.text.split('\n');
 check('an old-style file: its settings land on the template\'s lines, switched on, modes respelled', L.includes('MODE_UNIX        = enabled') && L.includes('MODE_TEMPCOMP = enabled') && L.includes('tc_hse_b = 0.00669') && L.includes('zone2 = Etc/GMT+5') && L.includes('cuckoo = trust') && L.includes('page_ms = 4000'));
 check('old key names land on the current keys', L.includes('MODE_SOLAR = enabled') && L.includes('colon_alt_mode = toggle') && !/MODE_SUNDIAL|alt_colon_mode/.test(laid.text));
 check(`a key the template has no line for is kept at the end and reported (${laid.unknown.join(', ')})`, laid.unknown.join() === 'frobnicate' && L.includes('frobnicate = 7'));
-check('everything the file did not set is the template\'s line, untouched', L.includes('MODE_MOON     = disabled') && L.includes('#brightness = 0.5') && L.includes('config_write = on'));
+check('everything the file did not set is the template\'s line, untouched', L.includes('MODE_MOON     = disabled') && L.includes('#brightness = 0.5') && L.includes('config_write = off'));
 // The proof that nothing was lost or changed: the firmware, loading each, ends in the same state.
 // (The old names are spelled the current way in the original first: this firmware does not read them.)
 d = differ(await load(laid.text), await load(old.replace('MODE_SUNDIAL', 'MODE_SOLAR').replace('alt_colon_mode', 'colon_alt_mode')));

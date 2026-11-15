@@ -11,6 +11,9 @@
 // value at the capture and whether a wrap is pending. After the handler returns the test does what
 // the CPU does: a SysTick that is still pending runs.
 // With the old code every "not ahead" case after the first second FAILS.
+//
+// The firmware keeps the stock handler unless config.txt says "ms_align = on", so every case here
+// switches it on first; the last block checks that without the key the handler is the stock one.
 // Run: node pps_edge_check.mjs
 import factory from '../clock-fw.mjs';
 
@@ -27,7 +30,7 @@ const bufcLow = w('emu_bufc_low', 'number', ['number']);
 
 // A locked, running clock. The cold boot installs the PPS handler (PPS_Init's job on the clock); the
 // warm boot on top of it gives a valid time and full precision, so the ms digits are live.
-const boot = (t) => { bootCold(t); bootWarm(t); };
+const boot = (t, align = 'on') => { bootCold(t); bootWarm(t); if (align) cfg(`ms_align = ${align}`); };
 
 const results = [];
 const check = (n, pass) => results.push({ n, pass: !!pass });
@@ -113,6 +116,23 @@ edge('restartFirst');
 const sent = [];
 for (let i = 0; i < 5; i++) { ticks(999); edge('wrapInHandler'); const f = String(pmtxts()).split(','); sent.push(`${f[3]}/${f[4]}`); }
 check(`$PMTXTS reports subms 999, systick 240 in a locked second (got ${[...new Set(sent)].join(' ')})`, sent.every((s) => s === '999/240'));
+
+// Without the key the handler is the stock one: the wrap left pending runs as the first millisecond
+// of the new second, so the count is one ahead, and from the second edge on the capture reports the
+// recorded signature (subms 0 with the counter nearly expired).
+{
+  const peek = w('emu_cfg_peek', 'number', ['string']);
+  boot(1718971200, null);
+  check(`ms_align is off unless asked for (${peek('ms_align')})`, peek('ms_align') === 0);
+  edge('restartFirst');
+  const rows = Array(5).fill('wrapInHandler').map((k) => second(k));
+  check(`ms_align off: the stock count, one ahead after an edge that met the wrap (starts at ${[...new Set(rows.map((r) => r.after))].join(',')})`, rows.every((r) => r.after === 1));
+  check(`ms_align off: 500 ms after such an edge the count reads 501 (got ${[...new Set(rows.slice(1).map((r) => r.mid))].join(',')})`, rows.slice(1).every((r) => r.mid === 501));
+  check(`ms_align off: the capture reports 0 from the second edge on (got ${rows.map((r) => r.cap).join(',')})`, rows[0].cap === 999 && rows.slice(1).every((r) => r.cap === 0));
+  cfg('ms_align = on');
+  const on = Array(3).fill('wrapInHandler').map((k) => second(k));
+  check(`ms_align = on while running: aligned from the next edge (starts at ${on.map((r) => r.after).join(',')})`, on.every((r) => r.after === 0));
+}
 
 let fail = 0;
 for (const r of results) { if (!r.pass) fail++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}`); }

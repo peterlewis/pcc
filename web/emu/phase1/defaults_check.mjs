@@ -1,9 +1,9 @@
-// defaults_check.mjs — the switches this fork turns on by default, and the ones it leaves off.
-// On by default: significance_fade, freq_hold, tc_learn, tc_apply, tc_persist, seg_balance and
-// colon_balance (AUTO, 1), pps, watchdog and config_write. Each must be on at power-on with no config.txt and with a
-// config.txt that does not mention it; `key = off` must switch it off; and removing that line must
-// put it back on. The rest stay off unless asked for. Runs the firmware's REAL loader against an
-// in-memory /CONFIG.TXT, in a fresh emulator per key. Run: node defaults_check.mjs
+// defaults_check.mjs — everything this firmware adds is off until asked for.
+// A clock with no config.txt, or with one that does not mention a key, behaves as stock for that key.
+// For each switch: off at power-on with no config.txt and with a config.txt that does not mention
+// it; `key = on` switches it on; and removing that line puts it back off. The new display modes stay
+// off too. Runs the firmware's REAL loader against an in-memory /CONFIG.TXT, in a fresh emulator per
+// key. Run: node defaults_check.mjs
 process.env.TZ = 'UTC';
 const { default: factory } = await import('../clock-fw.mjs');
 
@@ -29,25 +29,26 @@ async function clock() {
 }
 
 const BASE = ['# a config.txt that does not mention the key', 'MODE_ISO8601_STD = enabled'];
-const ON = ['significance_fade', 'freq_hold', 'tc_learn', 'tc_apply', 'tc_persist', 'seg_balance', 'colon_balance', 'pps', 'watchdog', 'config_write'];
-const OFF = ['tc_rtc', 'cuckoo', 'brightness_report', 'loop_diag'];
+const SWITCHES = ['significance_fade', 'freq_hold', 'tc_learn', 'tc_apply', 'tc_persist', 'tc_rtc', 'seg_balance', 'colon_balance', 'pps',
+  'watchdog', 'config_write', 'zone_gate', 'ms_align', 'brightness_report', 'loop_diag'];
+const OFF = [...SWITCHES, 'cuckoo'];
 
-for (const key of ON) {
+for (const key of SWITCHES) {
   const c = await clock();
-  check(`${key}: on at power-on, before any config.txt`, c.peek(key) === 1);
+  check(`${key}: off at power-on, before any config.txt`, c.peek(key) === 0);
   c.load(BASE);
-  check(`${key}: on with a config.txt that does not mention it`, c.peek(key) === 1);
-  c.load([...BASE, `${key} = off`]);
-  check(`${key}: "${key} = off" switches it off`, c.peek(key) === 0);
+  check(`${key}: off with a config.txt that does not mention it`, c.peek(key) === 0);
+  c.load([...BASE, `${key} = on`]);
+  check(`${key}: "${key} = on" switches it on`, c.peek(key) === 1);
   c.load(BASE);
-  check(`${key}: removing that line puts it back on`, c.peek(key) === 1);
+  check(`${key}: removing that line puts it back off`, c.peek(key) === 0);
 }
 
 {
   const c = await clock();
   c.load(BASE);
   const on = OFF.filter((k) => c.peek(k) !== 0);
-  check(`still off unless asked for: ${OFF.join(', ')}${on.length ? ` (on: ${on.join(', ')})` : ''}`, on.length === 0);
+  check(`all off together: ${OFF.join(', ')}${on.length ? ` (on: ${on.join(', ')})` : ''}`, on.length === 0);
   const modes = ['MODE_SUN', 'MODE_MOON', 'MODE_LST', 'MODE_SOLAR', 'MODE_ZONE2', 'MODE_STAR', 'MODE_ADEV', 'MODE_TEMPCOMP', 'MODE_DARK'];
   const lit = modes.filter((m) => c.peek(`MODE:${m}`) !== 0);
   check(`the new display modes stay off${lit.length ? ` (on: ${lit.join(', ')})` : ''}`, lit.length === 0);

@@ -24,6 +24,10 @@ export const DEFAULT_CONFIG = `# ===============================================
 #
 # Every key the firmware knows is in this file. Precision Clock Companion (PCC)
 # uses the same file as its template.
+#
+# As supplied, this file gives the stock clock: everything this firmware adds
+# is switched off. The additions its author runs with are marked
+# "Recommended: on". Change those lines to "on" to use them.
 # =============================================================================
 
 
@@ -43,6 +47,12 @@ MATRIX_FREQUENCY = 20000
 
 # The second timezone, shown by MODE_ZONE2. Same format. An example.
 #zone2 = America/New_York
+
+# off: look the timezone up from the position every second, as the stock clock
+# does. Each lookup keeps the clock busy for about a third of a second.
+# on: look it up again only when the clock has moved about half a kilometre.
+# Recommended: on for a clock that stays put, if you use seg_balance.
+zone_gate = off
 
 
 ## display modes
@@ -140,6 +150,16 @@ colon_mode = heartbeat
 cuckoo = off
 
 
+## the millisecond count
+
+# on: start each second's millisecond count at the GPS pulse. Without it, on
+# some clocks the count runs one millisecond ahead, as with the stock firmware.
+# On a clock that does not need it, it does nothing. Recommended: on. Checked
+# in the emulator and against one clock's own timing reports; not yet filmed
+# on a clock.
+ms_align = off
+
+
 ## text and countdown
 
 # The text MODE_TEXT shows. An example.
@@ -150,28 +170,27 @@ cuckoo = off
 
 ## when GPS is lost
 
-# The clock hides its last digits as its time gets less certain. With
-# significance_fade off, these are the seconds without GPS after which the
-# 1 ms, 10 ms and 100 ms digits go.
+# The clock hides its last digits as its time gets less certain. These are the
+# seconds without GPS after which the 1 ms, 10 ms and 100 ms digits go.
 Tolerance_time_1ms   = 1000
 Tolerance_time_10ms  = 10000
 Tolerance_time_100ms = 100000
-# on (the default): use the clock's own measurement of its error and not the
-# three times above. Each digit fades as the error reaches it.
-significance_fade = on
+# on: use the clock's own measurement of its error and not the three times above.
+# Each digit fades as the error reaches it. Recommended: on.
+significance_fade = off
 
-# on (the default): without GPS, hold the oscillator frequency measured while
-# GPS was present. The clock needs 48 seconds of GPS first.
-freq_hold = on
+# on: without GPS, hold the oscillator frequency measured while GPS was present.
+# The clock needs 48 seconds of GPS first. Recommended: on.
+freq_hold = off
 
 # Temperature compensation. With GPS, tc_learn measures how the oscillators
 # drift with temperature. Without GPS, tc_apply corrects the display for it and
 # tc_rtc corrects the battery-backed clock. tc_persist keeps what was learned
-# across power-off. All but tc_rtc are on by default.
-tc_learn   = on
-tc_apply   = on
+# across power-off. Recommended: tc_learn, tc_apply and tc_persist on.
+tc_learn   = off
+tc_apply   = off
 tc_rtc     = off
-tc_persist = on
+tc_persist = off
 # Reference temperature in degrees C. Seconds without GPS before the correction
 # starts (2 or more). The largest correction, in parts per million.
 #tc_t0       = 40
@@ -201,12 +220,14 @@ BS5 = 3849,4095
 # A fixed brightness, 0.0 to 1.0 or 0 to 4095. Switched off, the light sensor sets it. An example.
 #brightness = 0.5
 
-# on (the default): make every digit equally bright. Off, a 1 is brighter than
-# an 8. A number from 2 to 300 sets a fixed strength.
-seg_balance = on
-# on (the default): dim the colons with the digits. A number from 2 to 256 sets
-# a fixed level.
-colon_balance = on
+# on: make every digit equally bright. Without it a 1 is brighter than an 8.
+# A number from 2 to 300 sets a fixed strength. Recommended: on, together with
+# the zone_gate line under timezone. With the timezone looked up every second
+# the fast digits may flicker faintly once a second: not yet checked on a clock.
+seg_balance = off
+# on: dim the colons with the digits. A number from 2 to 256 sets a fixed level.
+# Recommended: on.
+colon_balance = off
 # The two ends of the automatic colon curve: the brightness at or below which the
 # colons are full, and their level (of 256) at the dimmest setting.
 #colon_full_at = 2048
@@ -217,8 +238,9 @@ colon_balance = on
 
 # GPS sentences: on, rmc (position and time only) or off
 nmea = on
-# on (the default): one $PMTXTS timing sentence for each GPS pulse
-pps = on
+# on: one $PMTXTS timing sentence for each GPS pulse. Recommended: on if you
+# use PCC, which reads it.
+pps = off
 # on: report the automatic dimmer once a second as $PMBRIT. PCC asks for this
 # when it connects. Leave it switched off here, or a reload of this file stops it.
 #brightness_report = on
@@ -228,9 +250,9 @@ pps = on
 
 ## reliability
 
-# on (the default): restart the clock if its firmware stops for 8 seconds. Once
-# it is running, "off" takes effect at the next restart.
-watchdog = on
+# on: restart the clock if its firmware stops for 8 seconds. Once on, "off"
+# takes effect at the next restart. Recommended: on.
+watchdog = off
 
 
 ## this file and the menu
@@ -238,12 +260,12 @@ watchdog = on
 # A setting you change with the clock's buttons stays until you change that
 # setting's line in this file. Changing a different line does not undo it.
 #
-# on (the default): the clock writes its menu changes into this file, so the
-# file shows what the clock is doing. It only does this when no computer has
-# been connected since power-on. It then adds a line that starts "# synced".
-# With PCC's pccd running on a connected computer, pccd writes the changes
-# whatever this says.
-config_write = on
+# on: the clock writes its menu changes into this file, so the file shows what
+# the clock is doing. It only does this when no computer has been connected
+# since power-on. It then adds a line that starts "# synced". With PCC's pccd
+# running on a connected computer, pccd writes the changes whatever this says.
+# Recommended: on.
+config_write = off
 
 # To erase every menu change and everything the clock has learned, choose
 # SYS > RESET in the menu, or send "factory_reset = on" over USB serial. The
