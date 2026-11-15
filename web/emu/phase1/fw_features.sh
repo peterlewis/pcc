@@ -87,3 +87,7 @@ fi
 if fw_has "ee_j_begin"; then
   FW_FEATURES+=(-DEMU_HAS_CFGWRITE=1)
 fi
+# The timezone lookup's own test of when it runs (zone_gate, and the cuckoo holding it), and ms_align.
+if fw_has "zone_lookup_due"; then
+  FW_FEATURES+=(-DEMU_HAS_ZONE_GATE=1)
+fi

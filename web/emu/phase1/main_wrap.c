@@ -64,6 +64,9 @@
 #ifndef EMU_HAS_CFGWRITE
 #  define EMU_HAS_CFGWRITE 0
 #endif
+#ifndef EMU_HAS_ZONE_GATE
+#  define EMU_HAS_ZONE_GATE 0
+#endif
 #include "shim_redirect.h"
 
 #ifdef EMU_NATIVE64
@@ -539,7 +542,7 @@ uint32_t HAL_ADC_GetValue(ADC_HandleTypeDef* h){ (void)h; return emu_adc; }
 /* The feature switches' power-on values, as this firmware's .data initialisers set them, captured
  * before any test or driver code runs. emu_boot_cold restores them as a real power-on's startup copy
  * does, so the emulator follows whatever this branch's defaults are (on or off) without restating them. */
-static struct { uint8_t sf, pps, fh, wdt, tl, ta, tr, tp; uint16_t sb, cb; } emu_pwr;
+static struct { uint8_t sf, pps, fh, wdt, tl, ta, tr, tp, zg, ma; uint16_t sb, cb; } emu_pwr;
 __attribute__((constructor)) static void emu_pwr_capture(void){
   emu_pwr.sb = seg_balance; emu_pwr.cb = colon_balance; emu_pwr.tp = tc_persist;
 #if EMU_HAS_TEMPCOMP
@@ -551,6 +554,9 @@ __attribute__((constructor)) static void emu_pwr_capture(void){
 #endif
 #if EMU_HAS_WDT
   emu_pwr.wdt = watchdog;
+#endif
+#if EMU_HAS_ZONE_GATE
+  emu_pwr.zg = zone_gate; emu_pwr.ma = ms_align;
 #endif
 }
 static void emu_pwr_restore(void){
@@ -564,6 +570,10 @@ static void emu_pwr_restore(void){
 #endif
 #if EMU_HAS_WDT
   watchdog = emu_pwr.wdt;
+#endif
+#if EMU_HAS_ZONE_GATE
+  zone_gate = emu_pwr.zg; ms_align = emu_pwr.ma;
+  zone_lat = 999.0; zone_lon = 999.0;   /* no fix has loaded its rules yet */
 #endif
 }
 void emu_boot_cold(unsigned int t){
@@ -803,7 +813,26 @@ const char* emu_menu_dump_line(void){
  * readConfigFile against a registered /CONFIG.TXT. emu_cfg_peek reads one piece of config-owned
  * state by name, so a check can compare "this key was removed" with "this key was never set".
  * (emu_read_config itself sits with the file shim, further down.) */
+/* The main loop's timezone lookup (zone_gate_check). emu_zone_lookup_due is the firmware's own test
+ * of whether it runs this pass; emu_zone_lookup_run takes the fix as the main loop does and finishes
+ * the way the lookup did (loaded = its rules loaded; 0 = cut short, no map, or rules not found). */
+#if EMU_HAS_ZONE_GATE
+int  emu_zone_lookup_due(void){ return (int)zone_lookup_due(); }
+void emu_zone_lookup_run(int loaded){ new_position = 0; zone_lookup_done(latitude, longitude, loaded != 0); }
+void emu_zone_looked_up(double lat, double lon){ new_position = 0; zone_lookup_done(lat, lon, 1); }   /* as the main loop leaves it after a timezone lookup */
+void emu_new_fix(double lat, double lon){ latitude = (float)lat; longitude = (float)lon; data_valid = 1; new_position = 1; }   /* as the NMEA parser leaves a fix */
+void emu_override_fail(void){ strcpy(preloadRulesString, "Nowhere/Nonesuch"); delayedLoadRules = 1; checkDelayedLoadRules(); }   /* a zone_override that names no zone */
+int  emu_cuckoo_holds_lookup(void){ return (int)cuckoo_holds_lookup(); }
+int  emu_ms_align(void){ return (int)ms_align; }
+#else
+int  emu_zone_lookup_due(void){ return -1; }
+void emu_zone_lookup_run(int loaded){ (void)loaded; }
 void emu_zone_looked_up(double lat, double lon){ zone_lat = lat; zone_lon = lon; new_position = 0; }   /* as the main loop leaves it after a timezone lookup */
+void emu_new_fix(double lat, double lon){ (void)lat; (void)lon; }
+void emu_override_fail(void){}
+int  emu_cuckoo_holds_lookup(void){ return -1; }
+int  emu_ms_align(void){ return -1; }
+#endif
 #if EMU_HAS_CFG_REDERIVE
 int emu_cfg_rows(void){ return (int)CFG_ROWS; }
 const char* emu_cfg_row_key(int i){ return (i >= 0 && i < (int)CFG_ROWS) ? cfg_defaults[i].key : ""; }
@@ -849,6 +878,9 @@ double emu_cfg_peek(const char* n){
   P("freq_hold", freq_hold)
 #endif
   P("loop_diag", loop_diag)
+#if EMU_HAS_ZONE_GATE
+  P("zone_gate", zone_gate) P("ms_align", ms_align)
+#endif
   #undef P
   if (!strncmp(n, "MODE:", 5)) { int m = emu_mode_id(n + 5); return (m >= 0 && m < NUM_DISPLAY_MODES) ? (double)config.modes_enabled[m] : -1.0; }
   return -12345.0;   /* unknown name: a check must notice */
